@@ -1,0 +1,135 @@
+# ════════════════════════════════════════════════════════════════════════════
+#  HomeCare OS — Docker Compose (Production / VPS)
+#
+#  Prerequisites (run once on VPS before first `docker compose up`):
+#    1. cp .env.example .env && nano .env   # fill in all secrets
+#    2. chmod 600 .env
+#    3. chmod +x ssl/generate-certs.sh && ./ssl/generate-certs.sh
+#    4. mkdir -p /var/backups/homecareos
+#
+#  Start:   docker compose up -d
+#  Stop:    docker compose down
+#  Logs:    docker compose logs -f web
+# ════════════════════════════════════════════════════════════════════════════
+
+services:
+
+  # ── PostgreSQL (SSL enforced, port NOT exposed to host) ─────────────────
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       homecare
+      POSTGRES_USER:     homecare
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      # Persistent data volume
+      - postgres_data:/var/lib/postgresql/data
+      # SSL certificate (public) — readable by postgres user
+      - ./ssl/server.crt:/etc/ssl/certs/pg/server.crt:ro
+      # SSL private key — must be owner-readable only (600)
+      - ./ssl/server.key:/etc/ssl/private/pg/server.key:ro
+      # Custom postgresql.conf (enables ssl=on, logging, tuning)
+      - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      # Custom pg_hba.conf (rejects plain TCP, requires hostssl)
+      - ./postgres/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+    command: >
+      postgres
+        -c config_file=/etc/postgresql/postgresql.conf
+        -c hba_file=/etc/postgresql/pg_hba.conf
+    # ⚠ NO 'ports:' section — Postgres is ONLY reachable inside the
+    #   'homecare_net' bridge network. Never exposed to the host OS or internet.
+    networks:
+      - homecare_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U homecare -d homecare"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis (Celery broker + Django Channels) ──────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # No ports exposed — internal only
+    networks:
+      - homecare_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Django / Gunicorn ────────────────────────────────────────────────────
+  web:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Overridden here to make container-to-container hostname ('db') explicit
+      DATABASE_URL: ${DATABASE_URL}
+    volumes:
+      - static_files:/app/staticfiles
+      - media_files:/app/media
+    ports:
+      # Only web (80/443) is exposed — typically fronted by Nginx/Caddy on VPS
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - homecare_net
+    command: >
+      gunicorn homecareOS.wsgi:application
+        --bind 0.0.0.0:8000
+        --workers 3
+        --timeout 120
+        --access-logfile -
+        --error-logfile -
+
+  # ── Celery Worker ────────────────────────────────────────────────────────
+  celery:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - homecare_net
+    command: celery -A homecareOS worker --loglevel=info --concurrency=2
+
+  # ── Celery Beat (periodic tasks scheduler) ───────────────────────────────
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - homecare_net
+    command: celery -A homecareOS beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+
+# ── Named volumes ────────────────────────────────────────────────────────────
+volumes:
+  postgres_data:
+  static_files:
+  media_files:
+
+# ── Internal network (Postgres port never leaves this network) ───────────────
+networks:
+  homecare_net:
+    driver: bridge

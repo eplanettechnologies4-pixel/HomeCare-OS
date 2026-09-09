@@ -1,0 +1,18 @@
+Django==4.2.16
+djangorestframework==3.15.2
+djangorestframework-simplejwt==5.3.1
+django-cors-headers==4.4.0
+channels==4.1.0
+channels-redis==4.2.0
+celery==5.4.0
+redis==5.0.8
+psycopg2-binary==2.9.9
+Pillow==10.4.0
+python-decouple==3.8
+drf-spectacular==0.27.2
+django-filter==24.3
+# ── Added for DB encryption & secure deployment ───────────────────────────────
+django-cryptography==1.1          # field-level Fernet encryption on Patient model
+dj-database-url==2.2.0            # parse DATABASE_URL with sslmode=require support
+gunicorn==22.0.0                  # production WSGI server (used in Dockerfile CMD)
+cryptography==42.0.8              # Fernet key generation (django-cryptography dep)
