@@ -1,5 +1,5 @@
 from django.db import models
-from django_cryptography.fields import encrypt
+from patients.encryption import encrypt
 
 
 class Patient(models.Model):
@@ -149,7 +149,9 @@ class LabResult(models.Model):
 
 class ReportPhoto(models.Model):
     """Photo attachment uploaded from the nurse's phone during a daily visit."""
-    image = models.ImageField(upload_to='report_photos/%Y/%m/%d/')
+    # FileField used instead of ImageField — Pillow is not required for file storage.
+    # Swap back to ImageField once Pillow is installable (Python 3.14 prebuilt wheels).
+    image = models.FileField(upload_to='report_photos/%Y/%m/%d/')
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

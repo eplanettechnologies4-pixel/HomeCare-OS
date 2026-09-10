@@ -9,7 +9,7 @@ class Migration(migrations.Migration):
     initial = True
 
     dependencies = [
-        ("bookings", "__first__"),
+        ("bookings", "0001_initial"),
     ]
 
     operations = [
