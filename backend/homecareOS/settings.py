@@ -40,7 +40,8 @@ INSTALLED_APPS = [
     'channels',
     'django_filters',
     'drf_spectacular',
-    'django_cryptography',   # field-level Fernet encryption (Patient sensitive fields)
+    # Field-level encryption handled by patients.encryption (custom Fernet — django-cryptography
+    # is incompatible with Django 6+ due to removed django.utils.baseconv).
     # HomeCare OS apps
     'bookings',
     'staff',
@@ -86,16 +87,18 @@ WSGI_APPLICATION = 'homecareOS.wsgi.application'
 ASGI_APPLICATION = 'homecareOS.asgi.application'
 
 # ── Database ─────────────────────────────────────────────────────────────────
-# DATABASE_URL must include ?sslmode=require so Django/psycopg2 enforces SSL.
+# DATABASE_URL is read via decouple (supports .env file) then parsed by dj_database_url.
 # Example (from .env): postgresql://homecare:PASSWORD@db:5432/homecare?sslmode=require
+# For local dev without Docker/Postgres, use: sqlite:///./db.sqlite3
 #
 # NEVER hardcode credentials here.  Always load from .env via DATABASE_URL.
+_database_url = config('DATABASE_URL', default='sqlite:///./db.sqlite3')
 DATABASES = {
-    'default': dj_database_url.config(
-        env='DATABASE_URL',
+    'default': dj_database_url.parse(
+        _database_url,
         conn_max_age=600,
         conn_health_checks=True,
-        ssl_require=True,   # belt-and-suspenders: enforce SSL even if URL omits it
+        ssl_require=not DEBUG,   # SSL required in production; disabled for local SQLite dev
     )
 }
 
@@ -137,6 +140,7 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = '/static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'   # target dir for `manage.py collectstatic`
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
