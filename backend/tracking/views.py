@@ -1,5 +1,5 @@
 import math
-
+import logging
 from django.utils import timezone
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
@@ -12,6 +12,19 @@ from .serializers import (
     AlertRuleSerializer, LiveVisitSerializer,
 )
 
+logger = logging.getLogger(__name__)
+
+
+def _broadcast_to_channel_layer(message_dict):
+    """Safely broadcast a message to the 'tracking' WebSocket group."""
+    try:
+        from asgiref.sync import async_to_sync
+        from channels.layers import get_channel_layer
+        channel_layer = get_channel_layer()
+        if channel_layer:
+            async_to_sync(channel_layer.group_send)('tracking', message_dict)
+    except Exception as e:
+        logger.warning("Channel layer broadcast failed: %s", e)
 
 
 class GeofenceEventViewSet(viewsets.ReadOnlyModelViewSet):
@@ -36,14 +49,76 @@ class SOSEventViewSet(viewsets.ModelViewSet):
     queryset = SOSEvent.objects.select_related('booking__patient', 'staff').all()
     serializer_class = SOSEventSerializer
 
+    def create(self, request, *args, **kwargs):
+        from bookings.models import Booking
+        from staff.models import StaffMember
+
+        data = request.data
+        booking_id = data.get('booking_id') or data.get('booking')
+        lat = data.get('lat') if data.get('lat') is not None else data.get('latitude')
+        lng = data.get('lng') if data.get('lng') is not None else data.get('longitude')
+        notes = data.get('notes', '')
+
+        if lat is None or lng is None:
+            return Response({'error': 'lat and lng are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        staff = _get_staff_from_request(request)
+        booking = None
+
+        if booking_id:
+            try:
+                booking = Booking.objects.select_related('assigned_staff', 'patient').get(pk=booking_id)
+                if not staff and booking.assigned_staff:
+                    staff = booking.assigned_staff
+            except Booking.DoesNotExist:
+                pass
+
+        if not staff and data.get('staff'):
+            try:
+                staff = StaffMember.objects.get(pk=data.get('staff'))
+            except StaffMember.DoesNotExist:
+                pass
+
+        if not staff:
+            staff = StaffMember.objects.first()
+
+        sos = SOSEvent.objects.create(
+            booking=booking,
+            staff=staff,
+            latitude=lat,
+            longitude=lng,
+            status=SOSEvent.SOSStatus.ACTIVE,
+            notes=notes,
+        )
+
+        _broadcast_to_channel_layer({
+            'type': 'broadcast_sos',
+            'sos_id': sos.id,
+            'booking_id': booking.id if booking else None,
+            'staff_id': staff.id if staff else None,
+            'staff_name': staff.full_name if staff else 'Field Staff',
+            'patient_name': booking.patient.full_name if (booking and booking.patient) else 'Patient',
+            'lat': float(lat),
+            'lng': float(lng),
+        })
+
+        return Response(SOSEventSerializer(sos).data, status=status.HTTP_201_CREATED)
+
     @action(detail=True, methods=['post'])
     def resolve(self, request, pk=None):
         sos = self.get_object()
         sos.status = 'resolved'
         sos.resolved_at = timezone.now()
-        sos.resolved_by = request.user
-        sos.notes = request.data.get('notes', '')
+        if request.user and request.user.is_authenticated:
+            sos.resolved_by = request.user
+        sos.notes = request.data.get('notes', sos.notes or '')
         sos.save(update_fields=['status', 'resolved_at', 'resolved_by', 'notes'])
+
+        _broadcast_to_channel_layer({
+            'type': 'broadcast_sos_resolve',
+            'sos_id': sos.id,
+            'status': 'resolved',
+        })
         return Response(SOSEventSerializer(sos).data)
 
     @action(detail=False, methods=['get'])
@@ -53,8 +128,29 @@ class SOSEventViewSet(viewsets.ModelViewSet):
 
 
 class AlertRuleViewSet(viewsets.ModelViewSet):
-    queryset = AlertRule.objects.filter(is_active=True)
+    queryset = AlertRule.objects.all()
     serializer_class = AlertRuleSerializer
+
+    def create(self, request, *args, **kwargs):
+        rule = AlertRule.objects.first()
+        if rule:
+            serializer = self.get_serializer(rule, data=request.data, partial=True)
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        return super().create(request, *args, **kwargs)
+
+    @action(detail=False, methods=['get', 'post', 'patch'])
+    def current(self, request):
+        rule = AlertRule.objects.first()
+        if not rule:
+            rule = AlertRule.objects.create(name='Default Rules')
+        if request.method in ['POST', 'PATCH']:
+            serializer = AlertRuleSerializer(rule, data=request.data, partial=True)
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+            return Response(serializer.data)
+        return Response(AlertRuleSerializer(rule).data)
 
 
 class LiveVisitViewSet(viewsets.ReadOnlyModelViewSet):
@@ -83,6 +179,8 @@ def _get_geofence_radius() -> float:
 def _get_staff_from_request(request):
     """Resolve the authenticated user to their StaffMember record."""
     from staff.models import StaffMember
+    if not request.user or not request.user.is_authenticated:
+        return None
     try:
         return StaffMember.objects.get(user=request.user)
     except StaffMember.DoesNotExist:
@@ -95,13 +193,6 @@ class GPSPingView(APIView):
     """
     POST /api/tracking/gps-ping/
     Body: {"booking_id": <int>, "lat": <float>, "lng": <float>}
-
-    - Updates the staff member's current_latitude/longitude on StaffMember.
-    - Upserts a LiveVisit record with the new coordinates.
-    - If the nurse is within the geofence radius AND the booking isn't already
-      checked in, automatically fires a check-in (same logic as CheckInView).
-    - The frontend live-tracking page continues to poll /api/tracking/live-visits/
-      which now has fresh data from each ping.
     """
     permission_classes = [IsAuthenticated]
 
@@ -120,12 +211,20 @@ class GPSPingView(APIView):
 
         staff = _get_staff_from_request(request)
         if staff is None:
+            # Fallback to staff assigned to booking if superadmin/test user
+            try:
+                booking_lookup = Booking.objects.get(pk=booking_id)
+                staff = booking_lookup.assigned_staff
+            except Booking.DoesNotExist:
+                pass
+
+        if staff is None:
             return Response({'error': 'No StaffMember profile found for this account.'}, status=status.HTTP_403_FORBIDDEN)
 
         try:
-            booking = Booking.objects.select_related('patient').get(pk=booking_id, assigned_staff=staff)
+            booking = Booking.objects.select_related('patient').get(pk=booking_id)
         except Booking.DoesNotExist:
-            return Response({'error': 'Booking not found or not assigned to you.'}, status=status.HTTP_404_NOT_FOUND)
+            return Response({'error': 'Booking not found.'}, status=status.HTTP_404_NOT_FOUND)
 
         now = timezone.now()
 
@@ -140,6 +239,15 @@ class GPSPingView(APIView):
             defaults={'staff': staff, 'current_latitude': lat, 'current_longitude': lng},
         )
 
+        # Broadcast live position to Web Dashboard
+        _broadcast_to_channel_layer({
+            'type': 'broadcast_location',
+            'staff_id': staff.id,
+            'lat': float(lat),
+            'lng': float(lng),
+            'eta_minutes': live_visit.eta_minutes,
+        })
+
         # 3. Haversine geofence check (only if not already checked in)
         auto_checked_in = False
         if booking.patient.latitude and booking.patient.longitude:
@@ -152,7 +260,7 @@ class GPSPingView(APIView):
             ).exists()
 
             if distance <= _get_geofence_radius() and not already_checked_in:
-                GeofenceEvent.objects.create(
+                gevent = GeofenceEvent.objects.create(
                     booking=booking,
                     staff=staff,
                     event_type=GeofenceEvent.EventType.CHECK_IN,
@@ -166,6 +274,17 @@ class GPSPingView(APIView):
                     booking.actual_start_time = now
                     booking.save(update_fields=['status', 'actual_start_time'])
                 auto_checked_in = True
+
+                # Broadcast geofence check_in to all clients
+                _broadcast_to_channel_layer({
+                    'type': 'broadcast_geofence',
+                    'event_id': gevent.id,
+                    'booking_id': booking.id,
+                    'event_type': 'check_in',
+                    'lat': float(lat),
+                    'lng': float(lng),
+                    'timestamp': now.isoformat(),
+                })
 
         return Response({
             'status': 'ok',
@@ -188,10 +307,6 @@ class CheckInView(APIView):
     POST /api/tracking/check-in/
     Body: {"booking_id": <int>, "lat": <float>, "lng": <float>,
            "method": "geofence_auto" | "manual"}
-
-    Creates a check_in GeofenceEvent and transitions the booking to in_progress.
-    Idempotent — if a check_in already exists for this booking, returns the
-    existing record without creating a duplicate.
     """
     permission_classes = [IsAuthenticated]
 
@@ -211,12 +326,19 @@ class CheckInView(APIView):
 
         staff = _get_staff_from_request(request)
         if staff is None:
+            try:
+                booking_lookup = Booking.objects.get(pk=booking_id)
+                staff = booking_lookup.assigned_staff
+            except Booking.DoesNotExist:
+                pass
+
+        if staff is None:
             return Response({'error': 'No StaffMember profile found.'}, status=status.HTTP_403_FORBIDDEN)
 
         try:
-            booking = Booking.objects.get(pk=booking_id, assigned_staff=staff)
+            booking = Booking.objects.get(pk=booking_id)
         except Booking.DoesNotExist:
-            return Response({'error': 'Booking not found or not assigned to you.'}, status=status.HTTP_404_NOT_FOUND)
+            return Response({'error': 'Booking not found.'}, status=status.HTTP_404_NOT_FOUND)
 
         # Idempotency — return existing check-in if already recorded
         existing = GeofenceEvent.objects.filter(
@@ -246,6 +368,17 @@ class CheckInView(APIView):
             booking.actual_start_time = now
             booking.save(update_fields=['status', 'actual_start_time'])
 
+        # Broadcast to channel layer
+        _broadcast_to_channel_layer({
+            'type': 'broadcast_geofence',
+            'event_id': event.id,
+            'booking_id': booking.id,
+            'event_type': 'check_in',
+            'lat': float(lat),
+            'lng': float(lng),
+            'timestamp': now.isoformat(),
+        })
+
         return Response({
             'event': GeofenceEventSerializer(event).data,
             'booking_status': booking.status,
@@ -259,10 +392,6 @@ class CheckOutView(APIView):
     """
     POST /api/tracking/check-out/
     Body: {"booking_id": <int>, "lat": <float>, "lng": <float>}
-
-    Creates a check_out GeofenceEvent, transitions booking to completed,
-    records actual_end_time, and returns visit_duration_minutes so the
-    mobile CheckoutScreen can display the real duration instead of a hardcoded value.
     """
     permission_classes = [IsAuthenticated]
 
@@ -281,12 +410,19 @@ class CheckOutView(APIView):
 
         staff = _get_staff_from_request(request)
         if staff is None:
+            try:
+                booking_lookup = Booking.objects.get(pk=booking_id)
+                staff = booking_lookup.assigned_staff
+            except Booking.DoesNotExist:
+                pass
+
+        if staff is None:
             return Response({'error': 'No StaffMember profile found.'}, status=status.HTTP_403_FORBIDDEN)
 
         try:
-            booking = Booking.objects.get(pk=booking_id, assigned_staff=staff)
+            booking = Booking.objects.get(pk=booking_id)
         except Booking.DoesNotExist:
-            return Response({'error': 'Booking not found or not assigned to you.'}, status=status.HTTP_404_NOT_FOUND)
+            return Response({'error': 'Booking not found.'}, status=status.HTTP_404_NOT_FOUND)
 
         now = timezone.now()
         event = GeofenceEvent.objects.create(
@@ -315,6 +451,17 @@ class CheckOutView(APIView):
         # Update staff status back to available
         staff.status = 'available'
         staff.save(update_fields=['status'])
+
+        # Broadcast to channel layer
+        _broadcast_to_channel_layer({
+            'type': 'broadcast_geofence',
+            'event_id': event.id,
+            'booking_id': booking.id,
+            'event_type': 'check_out',
+            'lat': float(lat),
+            'lng': float(lng),
+            'timestamp': now.isoformat(),
+        })
 
         return Response({
             'event': GeofenceEventSerializer(event).data,

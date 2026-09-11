@@ -94,19 +94,105 @@ const useStore = create((set, get) => ({
     eta_minutes: b.status === 'en_route' ? 8 : null,
   })),
 
+  fetchLiveVisits: async () => {
+    try {
+      const res = await fetch('http://localhost:8000/api/tracking/live-visits/');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) {
+          set({
+            liveVisits: data.map((lv) => ({
+              id: lv.booking || lv.id,
+              staff_name: lv.staff_name || 'Staff',
+              staff_role: lv.staff_role || 'Nurse',
+              staff_lat: parseFloat(lv.current_latitude) || null,
+              staff_lng: parseFloat(lv.current_longitude) || null,
+              current_latitude: parseFloat(lv.current_latitude) || null,
+              current_longitude: parseFloat(lv.current_longitude) || null,
+              patient_name: lv.patient_name || 'Patient',
+              patient_lat: lv.patient_lat ? parseFloat(lv.patient_lat) : null,
+              patient_lng: lv.patient_lng ? parseFloat(lv.patient_lng) : null,
+              service_type_display: 'Home Care',
+              status: lv.booking_status || 'in_progress',
+              status_display: lv.booking_status === 'in_progress' ? 'In Progress' : lv.booking_status === 'en_route' ? 'En Route' : 'Assigned',
+              scheduled_time: lv.scheduled_time || new Date().toISOString(),
+              eta_minutes: lv.eta_minutes,
+              assigned_staff: { id: lv.staff, full_name: lv.staff_name, role_display: lv.staff_role },
+            })),
+          });
+        }
+      }
+    } catch (err) {
+      console.warn('[Store] fetchLiveVisits error:', err);
+    }
+  },
+
   updateStaffLocation: (staffId, lat, lng) =>
     set((s) => ({
       liveVisits: s.liveVisits.map((v) =>
         v.assigned_staff?.id === staffId
-          ? { ...v, staff_lat: lat, staff_lng: lng }
+          ? { ...v, staff_lat: lat, staff_lng: lng, current_latitude: lat, current_longitude: lng }
           : v
       ),
     })),
 
   // ── SOS Events ───────────────────────────────────────────────────────────
   sosEvents: SOS_EVENTS,
+  activeSosAlerts: [],
+
+  fetchActiveSOS: async () => {
+    try {
+      const res = await fetch('http://localhost:8000/api/tracking/sos/active/');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          set((s) => ({
+            activeSosAlerts: data,
+            sosEvents: data.length > 0 ? [...data, ...s.sosEvents.filter((se) => !data.some((d) => d.id === se.id))] : s.sosEvents,
+          }));
+        }
+      }
+    } catch (err) {
+      console.warn('[Store] fetchActiveSOS error:', err);
+    }
+  },
+
+  resolveSOSAlert: async (id, notes = '') => {
+    try {
+      const token = get().userToken;
+      const res = await fetch(`http://localhost:8000/api/tracking/sos/${id}/resolve/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ notes }),
+      });
+      if (res.ok) {
+        const resolved = await res.json();
+        set((s) => ({
+          activeSosAlerts: (s.activeSosAlerts || []).filter((a) => a.id !== id),
+          sosEvents: s.sosEvents.map((e) =>
+            e.id === id ? { ...e, status: 'resolved', resolved_at: new Date().toISOString(), notes } : e
+          ),
+        }));
+        return { success: true, data: resolved };
+      }
+    } catch (err) {
+      console.warn('[Store] resolveSOSAlert error:', err);
+    }
+    set((s) => ({
+      activeSosAlerts: (s.activeSosAlerts || []).filter((a) => a.id !== id),
+      sosEvents: s.sosEvents.map((e) =>
+        e.id === id ? { ...e, status: 'resolved', resolved_at: new Date().toISOString(), notes } : e
+      ),
+    }));
+    return { success: true };
+  },
+
   resolveSOS: (id) =>
     set((s) => ({
+      activeSosAlerts: (s.activeSosAlerts || []).filter((a) => a.id !== id),
       sosEvents: s.sosEvents.map((e) =>
         e.id === id ? { ...e, status: 'resolved', resolved_at: new Date().toISOString() } : e
       ),
@@ -117,6 +203,52 @@ const useStore = create((set, get) => ({
 
   // ── Alert Rules ──────────────────────────────────────────────────────────
   alertRules: ALERT_RULES,
+
+  fetchAlertRules: async () => {
+    try {
+      const res = await fetch('http://localhost:8000/api/tracking/alert-rules/');
+      if (res.ok) {
+        const data = await res.json();
+        const rule = Array.isArray(data) ? data[0] : data;
+        if (rule) {
+          set({
+            alertRules: {
+              late_arrival_minutes: rule.late_arrival_minutes,
+              no_show_minutes: rule.no_show_minutes,
+              overstay_minutes: rule.overstay_minutes,
+              ...rule,
+            },
+          });
+        }
+      }
+    } catch (err) {
+      console.warn('[Store] fetchAlertRules error:', err);
+    }
+  },
+
+  saveAlertRules: async (rules) => {
+    set({ alertRules: rules });
+    try {
+      const token = get().userToken;
+      const res = await fetch('http://localhost:8000/api/tracking/alert-rules/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(rules),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        set({ alertRules: data });
+        return { success: true, data };
+      }
+    } catch (err) {
+      console.warn('[Store] saveAlertRules error:', err);
+    }
+    return { success: true };
+  },
+
   updateAlertRules: (rules) => set({ alertRules: rules }),
 
   // ── Bookings ─────────────────────────────────────────────────────────────

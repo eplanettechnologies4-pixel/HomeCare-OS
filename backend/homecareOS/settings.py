@@ -18,7 +18,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # ── Core secrets (never hardcoded) ────────────────────────────────────────────
 SECRET_KEY = config('SECRET_KEY')          # No default — must be set in .env
 DEBUG = config('DEBUG', default=False, cast=bool)
-ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='').split(',')
+ALLOWED_HOSTS = [h.strip() for h in config('ALLOWED_HOSTS', default='*').split(',') if h.strip()]
+if 'testserver' not in ALLOWED_HOSTS and '*' not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append('testserver')
 
 # ── Field-level encryption key (Fernet) ───────────────────────────────────────
 # Generate once: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"

@@ -722,3 +722,72 @@ h1, h2, h3, h4 { font-family: var(--font-heading); font-weight: 600; }
     display: none !important;
   }
 }
+
+/* ── Live Tracking & SOS Emergency Animations ── */
+@keyframes sosPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+    border-color: #ef4444;
+  }
+  50% {
+    box-shadow: 0 0 0 12px rgba(239, 68, 68, 0);
+    border-color: #b91c1c;
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+    border-color: #ef4444;
+  }
+}
+
+@keyframes sosGlow {
+  0%, 100% { background-color: #fee2e2; }
+  50% { background-color: #fecaca; }
+}
+
+.sos-banner-pulsating {
+  background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%);
+  border: 2px solid #ef4444;
+  border-radius: var(--radius-md, 12px);
+  padding: 14px 18px;
+  animation: sosPulse 2s infinite, sosGlow 2s infinite ease-in-out;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.sos-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background-color: #fee2e2;
+  color: #dc2626;
+  border: 1px solid #f87171;
+  border-radius: 9999px;
+  padding: 4px 10px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  animation: sosPulse 1.5s infinite;
+}
+
+.simulation-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--sage-50, #f8fafc);
+  border: 1px solid var(--sage-200, #e2e8f0);
+  border-radius: 20px;
+  padding: 4px 12px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--teal-800, #1e293b);
+  cursor: pointer;
+  user-select: none;
+}
+.simulation-toggle.active {
+  background: #fef3c7;
+  border-color: #f59e0b;
+  color: #92400e;
+}

@@ -27,6 +27,11 @@ class BookingViewSet(viewsets.ModelViewSet):
         """Return all bookings scheduled for today."""
         today = timezone.now().date()
         qs = self.get_queryset().filter(scheduled_time__date=today)
+        staff_id = request.query_params.get('staff_id') or request.query_params.get('staff')
+        if staff_id:
+            qs = qs.filter(assigned_staff_id=staff_id)
+        elif hasattr(request.user, 'staffmember'):
+            qs = qs.filter(assigned_staff=request.user.staffmember)
         serializer = BookingListSerializer(qs, many=True)
         return Response(serializer.data)
 

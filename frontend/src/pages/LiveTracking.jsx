@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Map, List, Settings, AlertTriangle, CheckCircle, Truck, Activity, Clock, X, Shield, Phone } from 'lucide-react';
+import { Map, List, Settings, AlertTriangle, CheckCircle, Truck, Activity, Clock, X, Shield, Phone, Radio, Play, Square } from 'lucide-react';
 import useStore from '../store/useStore';
 import { useMockGPS } from '../hooks/useMockGPS';
+import { useWebSocketTracking } from '../hooks/useWebSocketTracking';
 import { GEOFENCE_EVENTS } from '../data/mockData';
 import { format, formatDistanceToNow } from 'date-fns';
 import MiniMap from '../components/MiniMap';
@@ -81,6 +82,14 @@ function useCountdown(targetISO) {
 // ── Alert Rules Panel ─────────────────────────────────────────────────────────
 function AlertRulesPanel({ rules, onSave, onClose }) {
   const [local, setLocal] = useState({ ...rules });
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    setSaving(true);
+    await onSave(local);
+    setSaving(false);
+  };
+
   return (
     <div style={{ padding: 20 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16, alignItems: 'center' }}>
@@ -97,15 +106,15 @@ function AlertRulesPanel({ rules, onSave, onClose }) {
           <input
             type="number"
             className="form-input"
-            value={local[key]}
+            value={local[key] ?? 15}
             onChange={(e) => setLocal({ ...local, [key]: Number(e.target.value) })}
             min={1} max={240}
           />
           <p style={{ fontSize: '0.75rem', color: 'var(--status-grey)', marginTop: 4 }}>{desc}</p>
         </div>
       ))}
-      <button className="btn btn-primary" style={{ width: '100%' }} onClick={() => onSave(local)}>
-        Save Alert Rules
+      <button className="btn btn-primary" style={{ width: '100%' }} onClick={handleSave} disabled={saving}>
+        {saving ? 'Saving to Server...' : 'Save Alert Rules'}
       </button>
     </div>
   );
@@ -123,7 +132,7 @@ function VisitCard({ visit, onClose }) {
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--teal-800)' }}>{visit.staff_name || '—'}</div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--status-grey)' }}>{visit.assigned_staff?.role_display || '—'}</div>
+          <div style={{ fontSize: '0.75rem', color: 'var(--status-grey)' }}>{visit.assigned_staff?.role_display || visit.staff_role || 'Staff'}</div>
         </div>
         <button className="btn btn-ghost btn-icon btn-sm" onClick={onClose}><X size={14} /></button>
       </div>
@@ -146,12 +155,18 @@ function VisitCard({ visit, onClose }) {
         <div style={{ fontSize: '0.75rem', color: 'var(--status-grey)', marginTop: 4 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
             <span>Scheduled</span>
-            <span className="ts">{format(new Date(visit.scheduled_time), 'HH:mm')}</span>
+            <span className="ts">{visit.scheduled_time ? format(new Date(visit.scheduled_time), 'HH:mm') : '—'}</span>
           </div>
           {visit.actual_start_time && (
             <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2 }}>
               <span>Started</span>
               <span className="ts">{format(new Date(visit.actual_start_time), 'HH:mm')}</span>
+            </div>
+          )}
+          {visit.current_latitude && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2 }}>
+              <span>GPS Lat/Lng</span>
+              <span className="ts">{Number(visit.current_latitude).toFixed(4)}, {Number(visit.current_longitude).toFixed(4)}</span>
             </div>
           )}
         </div>
@@ -200,24 +215,76 @@ function LiveVisitRow({ visit, isSelected, onClick }) {
 
 // ── Main Component ────────────────────────────────────────────────────────────
 export default function LiveTracking() {
-  useMockGPS();
+  // B1: Disable useMockGPS by default; only run behind explicit Simulation Mode toggle
+  const [simulationMode, setSimulationMode] = useState(false);
+  useMockGPS(simulationMode);
 
-  const liveVisits     = useStore((s) => s.liveVisits);
-  const sosEvents      = useStore((s) => s.sosEvents);
-  const resolveSOS     = useStore((s) => s.resolveSOS);
-  const alertRules     = useStore((s) => s.alertRules);
-  const updateAlertRules = useStore((s) => s.updateAlertRules);
-  const geofenceEvents = useStore((s) => s.geofenceEvents);
+  // B1: Wire real-time WebSocket channel for instant deltas
+  const userToken       = useStore((s) => s.userToken);
+  useWebSocketTracking(userToken);
+
+  const liveVisits      = useStore((s) => s.liveVisits);
+  const fetchLiveVisits = useStore((s) => s.fetchLiveVisits);
+  const sosEvents       = useStore((s) => s.sosEvents);
+  const activeSosAlerts = useStore((s) => s.activeSosAlerts);
+  const fetchActiveSOS  = useStore((s) => s.fetchActiveSOS);
+  const resolveSOSAlert = useStore((s) => s.resolveSOSAlert);
+  const alertRules      = useStore((s) => s.alertRules);
+  const fetchAlertRules = useStore((s) => s.fetchAlertRules);
+  const saveAlertRules  = useStore((s) => s.saveAlertRules);
+  const geofenceEvents  = useStore((s) => s.geofenceEvents);
 
   const [view, setView]               = useState('map'); // 'map' | 'list'
   const [selectedVisit, setSelectedVisit] = useState(null);
   const [showRules, setShowRules]     = useState(false);
   const [activeTab, setActiveTab]     = useState('visits'); // 'visits' | 'geofence' | 'sos'
 
-  const activeSOS = sosEvents.filter((s) => s.status === 'active');
+  // B2: Initial page load — REST for snapshot, WebSocket for deltas
+  useEffect(() => {
+    fetchLiveVisits();
+    fetchAlertRules();
+    fetchActiveSOS();
+  }, [fetchLiveVisits, fetchAlertRules, fetchActiveSOS]);
+
+  // Combine active alerts from store
+  const activeSOS = (activeSosAlerts && activeSosAlerts.length > 0)
+    ? activeSosAlerts
+    : sosEvents.filter((s) => s.status === 'active');
+
+  const handleResolveSOS = (sosId) => {
+    const notes = window.prompt('Enter resolution notes for this emergency alert:', 'Care coordinator contacted field staff and resolved incident.');
+    if (notes !== null) {
+      resolveSOSAlert(sosId, notes);
+    }
+  };
 
   return (
     <div style={{ height: 'calc(100vh - var(--topbar-h) - 28px)', display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+      {/* ── B1 & B4: Pulsating Emergency Red SOS Banner ──────────────────── */}
+      {activeSOS.length > 0 && (
+        <div className="sos-banner-pulsating">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div className="sos-badge" style={{ fontSize: '0.85rem', padding: '6px 14px' }}>
+              <AlertTriangle size={16} /> CRITICAL SOS ALERT ({activeSOS.length})
+            </div>
+            <div style={{ color: '#991b1b', fontSize: '0.875rem' }}>
+              <strong>{activeSOS[0].staff_name || 'Field Staff'}</strong> triggered an emergency panic alert for patient <strong>{activeSOS[0].patient_name || 'Patient'}</strong>.
+              {(activeSOS[0].latitude || activeSOS[0].lat) && (
+                <span style={{ marginLeft: 8, opacity: 0.85 }}>
+                  (GPS: {Number(activeSOS[0].latitude || activeSOS[0].lat).toFixed(4)}, {Number(activeSOS[0].longitude || activeSOS[0].lng).toFixed(4)})
+                </span>
+              )}
+            </div>
+          </div>
+          <button
+            className="btn btn-danger btn-sm"
+            onClick={() => handleResolveSOS(activeSOS[0].id || activeSOS[0].sos_id)}
+          >
+            Resolve Emergency
+          </button>
+        </div>
+      )}
 
       {/* ── Top controls ──────────────────────────────────────────────────── */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
@@ -225,10 +292,20 @@ export default function LiveTracking() {
           <h1 className="page-title" style={{ margin: 0 }}>Live Tracking</h1>
           <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--status-grey)' }}>
             <span className="live-dot" style={{ display: 'inline-block', marginRight: 6 }} />
-            {liveVisits.length} active visits · GPS updating every 4s
+            {liveVisits.length} active visits · {simulationMode ? 'Simulated GPS feed active' : 'Real-time WebSocket & REST sync active'}
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {/* B1: Simulation Mode Toggle (Default: OFF) */}
+          <button
+            className={`simulation-toggle ${simulationMode ? 'active' : ''}`}
+            onClick={() => setSimulationMode(!simulationMode)}
+            title="Toggle mock GPS drift for demonstrations"
+          >
+            <Radio size={14} color={simulationMode ? '#b45309' : '#64748b'} />
+            Simulation Mode: {simulationMode ? 'ON' : 'OFF'}
+          </button>
+
           {activeSOS.length > 0 && (
             <div className="sos-badge"><AlertTriangle size={12} /> SOS ACTIVE ({activeSOS.length})</div>
           )}
@@ -285,7 +362,10 @@ export default function LiveTracking() {
             <div className="card">
               <AlertRulesPanel
                 rules={alertRules}
-                onSave={(r) => { updateAlertRules(r); setShowRules(false); }}
+                onSave={async (r) => {
+                  await saveAlertRules(r);
+                  setShowRules(false);
+                }}
                 onClose={() => setShowRules(false)}
               />
             </div>
@@ -295,7 +375,7 @@ export default function LiveTracking() {
           <div className="card" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
             <div className="tabs-bar" style={{ padding: '0 12px', marginBottom: 0 }}>
               {[
-                { key: 'visits',    label: `Visits (${liveVisits.length})` },
+                { key: 'visits',   label: `Visits (${liveVisits.length})` },
                 { key: 'geofence', label: 'Geofence Log' },
                 { key: 'sos',      label: `SOS (${activeSOS.length})` },
               ].map(({ key, label }) => (
@@ -358,10 +438,10 @@ export default function LiveTracking() {
                         </td>
                         <td>
                           <span className={`badge badge-${e.event_type==='check_in'?'green':e.event_type==='check_out'?'grey':'amber'}`} style={{ fontSize: '0.67rem' }}>
-                            {e.event_type_display}
+                            {e.event_type_display || e.event_type}
                           </span>
                         </td>
-                        <td className="ts">{format(new Date(e.timestamp), 'HH:mm:ss')}</td>
+                        <td className="ts">{e.timestamp ? format(new Date(e.timestamp), 'HH:mm:ss') : '—'}</td>
                         <td className="ts">{e.visit_duration_minutes != null ? `${e.visit_duration_minutes} min` : '—'}</td>
                       </tr>
                     ))}
@@ -378,31 +458,43 @@ export default function LiveTracking() {
                       No SOS events
                     </div>
                   )}
-                  {sosEvents.map((sos) => (
-                    <div key={sos.id} style={{
-                      borderRadius: 'var(--radius-sm)',
-                      border: `1px solid ${sos.status === 'active' ? 'var(--status-red)' : 'var(--sage-200)'}`,
-                      padding: 12, marginBottom: 8,
-                      background: sos.status === 'active' ? '#fff5f5' : 'white',
-                    }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                        <span style={{ fontWeight: 700, color: sos.status === 'active' ? 'var(--status-red)' : 'var(--status-grey)', fontSize: '0.85rem' }}>
-                          {sos.status === 'active' ? '🚨 SOS ACTIVE' : '✓ Resolved'}
-                        </span>
-                        {sos.status === 'active' && (
-                          <button className="btn btn-danger btn-sm" onClick={() => resolveSOS(sos.id)}>Resolve</button>
-                        )}
-                      </div>
-                      <div style={{ fontSize: '0.8rem' }}>
-                        <div><strong>Staff:</strong> {sos.staff_name}</div>
-                        <div><strong>Patient:</strong> {sos.patient_name}</div>
-                        <div className="ts" style={{ marginTop: 4 }}>
-                          GPS: {Number(sos.latitude).toFixed(4)}, {Number(sos.longitude).toFixed(4)}
+                  {sosEvents.map((sos) => {
+                    const isActive = sos.status === 'active';
+                    return (
+                      <div key={sos.id} style={{
+                        borderRadius: 'var(--radius-sm)',
+                        border: `1px solid ${isActive ? 'var(--status-red)' : 'var(--sage-200)'}`,
+                        padding: 12, marginBottom: 8,
+                        background: isActive ? '#fff5f5' : 'white',
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                          <span style={{ fontWeight: 700, color: isActive ? 'var(--status-red)' : 'var(--status-grey)', fontSize: '0.85rem' }}>
+                            {isActive ? '🚨 SOS ACTIVE' : '✓ Resolved'}
+                          </span>
+                          {isActive && (
+                            <button className="btn btn-danger btn-sm" onClick={() => handleResolveSOS(sos.id)}>
+                              Resolve
+                            </button>
+                          )}
                         </div>
-                        <div className="ts">{format(new Date(sos.triggered_at), 'HH:mm:ss dd MMM')}</div>
+                        <div style={{ fontSize: '0.8rem' }}>
+                          <div><strong>Staff:</strong> {sos.staff_name || 'Staff'}</div>
+                          <div><strong>Patient:</strong> {sos.patient_name || 'Patient'}</div>
+                          {(sos.latitude || sos.lat) && (
+                            <div className="ts" style={{ marginTop: 4 }}>
+                              GPS: {Number(sos.latitude || sos.lat).toFixed(4)}, {Number(sos.longitude || sos.lng).toFixed(4)}
+                            </div>
+                          )}
+                          <div className="ts">{sos.triggered_at || sos.timestamp ? format(new Date(sos.triggered_at || sos.timestamp), 'HH:mm:ss dd MMM') : '—'}</div>
+                          {sos.notes && (
+                            <div style={{ marginTop: 4, fontStyle: 'italic', color: 'var(--status-grey)' }}>
+                              Notes: {sos.notes}
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>

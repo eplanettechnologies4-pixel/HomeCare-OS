@@ -97,6 +97,9 @@ class TrackingConsumer(AsyncWebsocketConsumer):
     async def broadcast_sos(self, event):
         await self.send(text_data=json.dumps({'type': 'sos', **event}))
 
+    async def broadcast_sos_resolve(self, event):
+        await self.send(text_data=json.dumps({'type': 'sos_resolved', **event}))
+
     # ── DB helpers ──────────────────────────────────────────────────────────
 
     @database_sync_to_async

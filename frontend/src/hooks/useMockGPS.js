@@ -8,10 +8,12 @@ import useStore from '../store/useStore';
  *   const ws = new WebSocket('ws://host/ws/tracking/');
  *   ws.onmessage = (e) => { const data = JSON.parse(e.data); ... }
  */
-export function useMockGPS() {
+export function useMockGPS(enabled = false) {
   const intervalRef = useRef(null);
 
   useEffect(() => {
+    if (!enabled) return;
+
     // Simulate GPS updates every 4 seconds
     intervalRef.current = setInterval(() => {
       const ACTIVE_STAFF_IDS = [1, 2, 5]; // staff currently on visit / en-route

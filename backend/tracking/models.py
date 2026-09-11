@@ -81,5 +81,8 @@ class LiveVisit(models.Model):
     eta_minutes = models.IntegerField(null=True, blank=True)
     last_update = models.DateTimeField(auto_now=True)
 
+    class Meta:
+        ordering = ['-last_update']
+
     def __str__(self):
         return f"Live: {self.staff} → {self.booking.patient}"
