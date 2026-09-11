@@ -1,8 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Search, X, AlertCircle, CheckCircle, TrendingUp, Pill, Activity, FileText, FlaskConical, DollarSign, Clock, Plus, Eye, Edit3, Trash2 } from 'lucide-react';
 import useStore from '../store/useStore';
 import AddPatientModal from '../components/AddPatientModal';
-import { VITALS, NURSE_NOTES, PRESCRIPTIONS, LAB_RESULTS } from '../data/mockData';
 import { format, formatDistanceToNow } from 'date-fns';
 
 function EditPatientModal({ patient, onClose }) {
@@ -76,7 +75,9 @@ function EditPatientModal({ patient, onClose }) {
 
 export default function Patients() {
   const patients           = useStore((s) => s.patients);
+  const fetchPatients      = useStore((s) => s.fetchPatients);
   const bookings           = useStore((s) => s.bookings);
+  const fetchBookings      = useStore((s) => s.fetchBookings);
   const setSelectedPatient = useStore((s) => s.setSelectedPatient);
   const deletePatient      = useStore((s) => s.deletePatient);
   const setActivePage     = useStore((s) => s.setActivePage);
@@ -86,6 +87,11 @@ export default function Patients() {
   const [editingPatient, setEditingPatient] = useState(null);
   const [search, setSearch]                 = useState('');
   const [showAddModal, setShowAddModal]     = useState(false);
+
+  useEffect(() => {
+    fetchPatients();
+    fetchBookings();
+  }, [fetchPatients, fetchBookings]);
 
   const canAddPatient    = ['super_admin', 'admin', 'branch_manager', 'care_manager'].includes(currentRole);
   const canEditPatient   = ['super_admin', 'admin', 'branch_manager', 'care_manager'].includes(currentRole);
@@ -106,7 +112,9 @@ export default function Patients() {
   const filtered = patients.filter(p => {
     if (!search) return true;
     const q = search.toLowerCase();
-    return p.full_name.toLowerCase().includes(q) || p.mr_number.toLowerCase().includes(q) || p.primary_diagnosis.toLowerCase().includes(q);
+    return (p.full_name || '').toLowerCase().includes(q) ||
+           (p.mr_number || '').toLowerCase().includes(q) ||
+           (p.primary_diagnosis || '').toLowerCase().includes(q);
   });
 
   return (
@@ -146,63 +154,78 @@ export default function Patients() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map(p => {
-                const pBookings = bookings.filter(b => b.patient_name === p.full_name);
-                return (
-                  <tr key={p.id}>
-                    <td className="ts">{p.mr_number}</td>
-                    <td>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <div className="avatar">{p.full_name.split(' ').map(n=>n[0]).join('')}</div>
-                        <div>
-                          <div style={{ fontWeight: 600 }}>{p.full_name}</div>
-                          <div style={{ fontSize: '0.75rem', color: 'var(--status-grey)' }}>{p.phone}</div>
+              {filtered.length === 0 ? (
+                <tr>
+                  <td colSpan="8" style={{ textAlign: 'center', padding: '48px 20px', color: 'var(--status-grey)' }}>
+                    <div style={{ fontWeight: 600, fontSize: '1rem', color: 'var(--teal-800)', marginBottom: 6 }}>
+                      No Patients Found
+                    </div>
+                    <p style={{ fontSize: '0.85rem', margin: 0 }}>
+                      {search
+                        ? 'No patients match your search criteria.'
+                        : 'No patients have been registered in the system yet. Click "Add Patient" above to create an EMR profile.'}
+                    </p>
+                  </td>
+                </tr>
+              ) : (
+                filtered.map(p => {
+                  const pBookings = bookings.filter(b => b.patient_name === p.full_name);
+                  return (
+                    <tr key={p.id}>
+                      <td className="ts">{p.mr_number}</td>
+                      <td>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <div className="avatar">{(p.full_name || 'Patient').split(' ').map(n=>n[0]).join('')}</div>
+                          <div>
+                            <div style={{ fontWeight: 600 }}>{p.full_name}</div>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--status-grey)' }}>{p.phone}</div>
+                          </div>
                         </div>
-                      </div>
-                    </td>
-                    <td><span className="ts">{p.age}y</span> · {p.gender_display}</td>
-                    <td style={{ maxWidth: 220 }}><div style={{ fontSize: '0.82rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.primary_diagnosis}</div></td>
-                    <td style={{ fontSize: '0.85rem' }}>{p.care_manager_name}</td>
-                    <td><span className="badge badge-teal" style={{fontSize:'0.7rem'}}>{pBookings.length}</span></td>
-                    <td><span className={`badge ${p.is_active?'badge-green':'badge-grey'}`}>{p.is_active?'Active':'Inactive'}</span></td>
-                    <td style={{ textAlign: 'center' }}>
-                      <div style={{ display: 'flex', justifyContent: 'center', gap: 6 }}>
-                        {/* View Button (V) */}
-                        <button
-                          className="btn btn-ghost btn-sm"
-                          title="View Patient 360 Profile (V)"
-                          onClick={() => handlePatientClick(p)}
-                          style={{ padding: '4px 8px', fontSize: '0.75rem', gap: 4, color: '#611F8C', borderColor: '#e9d5ff' }}
-                        >
-                          <Eye size={13} /> View (V)
-                        </button>
-                        {/* Edit Button (E) */}
-                        {canEditPatient && (
+                      </td>
+                      <td><span className="ts">{p.age}y</span> · {p.gender_display || (p.gender === 'M' ? 'Male' : 'Female')}</td>
+                      <td style={{ maxWidth: 220 }}><div style={{ fontSize: '0.82rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.primary_diagnosis || '—'}</div></td>
+                      <td style={{ fontSize: '0.85rem' }}>{p.care_manager_name || 'Unassigned'}</td>
+                      <td><span className="badge badge-teal" style={{fontSize:'0.7rem'}}>{pBookings.length}</span></td>
+                      <td><span className={`badge ${p.is_active?'badge-green':'badge-grey'}`}>{p.is_active?'Active':'Inactive'}</span></td>
+                      <td style={{ textAlign: 'center' }}>
+                        <div style={{ display: 'flex', justifyContent: 'center', gap: 6 }}>
+                          {/* View Button (V) */}
                           <button
                             className="btn btn-ghost btn-sm"
-                            title="Edit Patient Record (E)"
-                            onClick={() => setEditingPatient(p)}
-                            style={{ padding: '4px 8px', fontSize: '0.75rem', gap: 4, color: '#b87320', borderColor: '#fef3c7' }}
+                            title="View Patient 360 Profile (V)"
+                            onClick={() => handlePatientClick(p)}
+                            style={{ padding: '4px 8px', fontSize: '0.75rem', gap: 4, color: '#611F8C', borderColor: '#e9d5ff' }}
                           >
-                            <Edit3 size={13} /> Edit (E)
+                            <Eye size={13} /> View (V)
                           </button>
-                        )}
-                        {/* Delete Button (D) */}
-                        {canDeletePatient && (
-                          <button
-                            className="btn btn-danger btn-sm"
-                            title="Delete Patient Record (D)"
-                            onClick={(e) => handleDeletePatient(p, e)}
-                            style={{ padding: '4px 8px', fontSize: '0.75rem', gap: 4 }}
-                          >
-                            <Trash2 size={13} /> Delete (D)
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
+                          {/* Edit Button (E) */}
+                          {canEditPatient && (
+                            <button
+                              className="btn btn-ghost btn-sm"
+                              title="Edit Patient Record (E)"
+                              onClick={() => setEditingPatient(p)}
+                              style={{ padding: '4px 8px', fontSize: '0.75rem', gap: 4, color: '#b87320', borderColor: '#fef3c7' }}
+                            >
+                              <Edit3 size={13} /> Edit (E)
+                            </button>
+                          )}
+                          {/* Delete Button (D) */}
+                          {canDeletePatient && (
+                            <button
+                              className="btn btn-danger btn-sm"
+                              title="Delete Patient Record (D)"
+                              onClick={(e) => handleDeletePatient(p, e)}
+                              style={{ padding: '4px 8px', fontSize: '0.75rem', gap: 4 }}
+                            >
+                              <Trash2 size={13} /> Delete (D)
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>
@@ -239,10 +262,15 @@ function PatientDetail({ patient, bookings, onClose }) {
     { id: 'accounts',      label: 'Accounts',       icon: DollarSign },
   ];
 
-  const patientVitals       = VITALS.filter(v => v.patient_id === patient.id);
-  const patientNotes        = NURSE_NOTES.filter(n => n.patient_id === patient.id);
-  const patientPrescriptions = PRESCRIPTIONS.filter(p => p.patient === patient.id);
-  const patientLabs         = LAB_RESULTS.filter(l => l.patient === patient.id);
+  const storeVitals         = useStore((s) => s.vitals || []);
+  const storeNurseNotes     = useStore((s) => s.nurseNotes || []);
+  const storePrescriptions  = useStore((s) => s.prescriptions || []);
+  const storeLabResults     = useStore((s) => s.labResults || []);
+
+  const patientVitals       = storeVitals.filter(v => v.patient_id === patient.id);
+  const patientNotes        = storeNurseNotes.filter(n => n.patient_id === patient.id);
+  const patientPrescriptions = storePrescriptions.filter(p => p.patient === patient.id);
+  const patientLabs         = storeLabResults.filter(l => l.patient === patient.id);
   const patientBookings     = bookings.filter(b => b.patient?.id === patient.id || b.patient_name === patient.full_name);
 
   return (

@@ -1,5 +1,8 @@
+from django.contrib.auth.models import User
+from django.db import transaction
+from django.utils import timezone
 from rest_framework import serializers
-from .models import StaffMember, LeaveRequest, AttendanceRecord, Certification, FeedbackRating
+from .models import StaffMember, StaffRole, LeaveRequest, AttendanceRecord, Certification, FeedbackRating
 
 
 class StaffSummarySerializer(serializers.ModelSerializer):
@@ -49,6 +52,101 @@ class StaffDetailSerializer(serializers.ModelSerializer):
     def get_attendance_summary(self, obj):
         records = obj.attendance_records.all()[:30]
         return AttendanceRecordSerializer(records, many=True).data
+
+
+class StaffCreateSerializer(serializers.ModelSerializer):
+    """
+    Serializer for admin creating a new staff member with explicit username and password.
+    Creates both the Django User and the linked StaffMember in a single transaction.
+    """
+    username = serializers.CharField(write_only=True, required=True, min_length=3)
+    password = serializers.CharField(write_only=True, required=True, min_length=8)
+    password_confirm = serializers.CharField(write_only=True, required=True, min_length=8)
+    first_name = serializers.CharField(required=True)
+    last_name = serializers.CharField(required=True)
+    role = serializers.ChoiceField(choices=StaffRole.choices, required=True)
+    specialization = serializers.CharField(required=False, allow_blank=True, default='')
+    phone = serializers.CharField(required=False, allow_blank=True, default='')
+    email = serializers.EmailField(required=False, allow_blank=True, default='')
+    employee_id = serializers.CharField(required=False, allow_blank=True)
+    hire_date = serializers.DateField(required=False)
+    hourly_rate = serializers.DecimalField(max_digits=8, decimal_places=2, required=False, default=0)
+    platform_allowed = serializers.ChoiceField(
+        choices=StaffMember.PlatformAllowed.choices,
+        required=False,
+        default=StaffMember.PlatformAllowed.MOBILE
+    )
+
+    class Meta:
+        model = StaffMember
+        fields = [
+            'id', 'username', 'password', 'password_confirm',
+            'first_name', 'last_name', 'role', 'specialization',
+            'phone', 'email', 'employee_id', 'hire_date', 'hourly_rate',
+            'platform_allowed'
+        ]
+
+    def validate_username(self, value):
+        cleaned_username = value.strip()
+        if User.objects.filter(username__iexact=cleaned_username).exists():
+            raise serializers.ValidationError(f'Username "{cleaned_username}" is already taken. Please choose another username.')
+        return cleaned_username
+
+    def validate(self, data):
+        password = data.get('password')
+        password_confirm = data.get('password_confirm')
+
+        if len(password) < 8:
+            raise serializers.ValidationError({'password': 'Password must be at least 8 characters long.'})
+
+        if password != password_confirm:
+            raise serializers.ValidationError({'password_confirm': 'Passwords do not match.'})
+
+        return data
+
+    def create(self, validated_data):
+        username = validated_data.pop('username')
+        password = validated_data.pop('password')
+        validated_data.pop('password_confirm')
+
+        email = validated_data.get('email') or f'{username}@homecare.local'
+        first_name = validated_data.get('first_name', '')
+        last_name = validated_data.get('last_name', '')
+        role = validated_data.get('role', 'nurse')
+
+        # Auto-generate employee_id if not provided
+        if not validated_data.get('employee_id'):
+            role_prefix = 'N' if role == 'nurse' else 'D' if role == 'doctor' else 'PT' if role == 'physio' else 'ST'
+            count = StaffMember.objects.count() + 1
+            validated_data['employee_id'] = f'EMP-{role_prefix}-{count:03d}'
+
+        # Set default hire_date if not provided
+        if not validated_data.get('hire_date'):
+            validated_data['hire_date'] = timezone.now().date()
+
+        # Set platform_allowed default if not provided
+        if 'platform_allowed' not in validated_data:
+            if role in ['care_manager']:
+                validated_data['platform_allowed'] = StaffMember.PlatformAllowed.BOTH
+            else:
+                validated_data['platform_allowed'] = StaffMember.PlatformAllowed.MOBILE
+
+        with transaction.atomic():
+            user = User.objects.create_user(
+                username=username,
+                password=password,
+                email=email,
+                first_name=first_name,
+                last_name=last_name
+            )
+            staff_member = StaffMember.objects.create(user=user, **validated_data)
+
+        return staff_member
+
+    def to_representation(self, instance):
+        rep = StaffListSerializer(instance, context=self.context).data
+        rep['username'] = instance.user.username if instance.user else None
+        return rep
 
 
 class AttendanceRecordSerializer(serializers.ModelSerializer):

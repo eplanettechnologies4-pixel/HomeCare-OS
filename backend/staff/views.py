@@ -3,7 +3,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from .models import StaffMember, LeaveRequest, AttendanceRecord
 from .serializers import (
-    StaffListSerializer, StaffDetailSerializer,
+    StaffListSerializer, StaffDetailSerializer, StaffCreateSerializer,
     LeaveRequestSerializer, AttendanceRecordSerializer,
 )
 
@@ -14,6 +14,8 @@ class StaffViewSet(viewsets.ModelViewSet):
     def get_serializer_class(self):
         if self.action in ['list']:
             return StaffListSerializer
+        if self.action in ['create']:
+            return StaffCreateSerializer
         return StaffDetailSerializer
 
     @action(detail=False, methods=['get'])

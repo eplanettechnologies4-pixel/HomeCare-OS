@@ -6,10 +6,9 @@ export default function Login() {
   const login         = useStore((s) => s.login);
   const setCurrentRole= useStore((s) => s.setCurrentRole);
   const setActivePage = useStore((s) => s.setActivePage);
-  const systemUsers   = useStore((s) => s.systemUsers);
 
-  const [emailOrPhone, setEmailOrPhone] = useState('admin@ehealth.com');
-  const [password, setPassword]         = useState('admin123');
+  const [emailOrPhone, setEmailOrPhone] = useState('');
+  const [password, setPassword]         = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe]     = useState(true);
   const [loading, setLoading]           = useState(false);
@@ -24,21 +23,20 @@ export default function Login() {
   const [newPassword, setNewPassword]         = useState('');
   const [resetSuccess, setResetSuccess]       = useState(false);
 
-  const handleLoginSubmit = (e) => {
+  const handleLoginSubmit = async (e) => {
     if (e) e.preventDefault();
     setErrorMsg('');
     setIsSuspended(false);
     setLoading(true);
 
-    setTimeout(() => {
-      const res = login({ emailOrPhone, password });
+    try {
+      const res = await login({ emailOrPhone, password });
       setLoading(false);
 
       if (!res.success) {
-        setErrorMsg(res.error);
+        setErrorMsg(res.error || 'Authentication failed');
         if (res.isSuspended) setIsSuspended(true);
       } else {
-        // Redirection based on role (Requirement 12)
         const role = res.role;
         if (role === 'patient_family') {
           setActivePage('family-portal');
@@ -46,29 +44,9 @@ export default function Login() {
           setActivePage('overview');
         }
       }
-    }, 400);
-  };
-
-  const handleDemoQuickLogin = (demoRoleKey) => {
-    setErrorMsg('');
-    setIsSuspended(false);
-
-    if (demoRoleKey === 'patient_family') {
-      useStore.setState({
-        isAuthenticated: true,
-        currentRole: 'patient_family',
-        currentUser: { full_name: 'Ahmed Hassan (Family)', role: 'patient_family' }
-      });
-      setActivePage('family-portal');
-      return;
-    }
-
-    const matchedUser = systemUsers.find(u => u.role === demoRoleKey);
-    if (matchedUser) {
-      setEmailOrPhone(matchedUser.email);
-      setPassword('password');
-      login({ emailOrPhone: matchedUser.email, password: 'password' });
-      setActivePage(matchedUser.role === 'nurse' ? 'bookings' : 'overview');
+    } catch (err) {
+      setLoading(false);
+      setErrorMsg('Login failed. Please check network connection.');
     }
   };
 
@@ -263,34 +241,6 @@ export default function Login() {
               {loading ? 'Authenticating...' : 'Sign In to Dashboard →'}
             </button>
           </form>
-
-          {/* ── Quick Demo Login Switcher ──────────────────────────────── */}
-          <div style={{ marginTop: 28, paddingTop: 20, borderTop: '1px solid var(--sage-200)' }}>
-            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--status-grey)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10, textAlign: 'center' }}>
-              ⚡ Quick Demo Account Login Switcher
-            </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center' }}>
-              {[
-                { role: 'super_admin', label: 'Super Admin' },
-                { role: 'admin',       label: 'Admin' },
-                { role: 'care_manager',label: 'Care Manager' },
-                { role: 'nurse',       label: 'Nurse' },
-                { role: 'accountant',  label: 'Accountant' },
-                { role: 'crm_executive',label: 'CRM Exec' },
-                { role: 'patient_family',label: 'Family Portal' },
-              ].map(btn => (
-                <button
-                  key={btn.role}
-                  type="button"
-                  className="btn btn-ghost btn-sm"
-                  style={{ fontSize: '0.72rem', padding: '4px 10px', borderRadius: 12, background: 'var(--sage-50)', border: '1px solid var(--sage-200)' }}
-                  onClick={() => handleDemoQuickLogin(btn.role)}
-                >
-                  {btn.label}
-                </button>
-              ))}
-            </div>
-          </div>
 
           <div style={{ marginTop: 30, textAlign: 'center', fontSize: '0.75rem', color: 'var(--status-grey)' }}>
             © 2026 HomeCare OS. All rights reserved.

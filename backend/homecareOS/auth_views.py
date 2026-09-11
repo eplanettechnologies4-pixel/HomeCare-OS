@@ -17,12 +17,57 @@ import logging
 from django.contrib.auth.models import User
 from django.utils import timezone
 
-from rest_framework import status
+from rest_framework import status, serializers
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from rest_framework_simplejwt.views import TokenObtainPairView
 
 logger = logging.getLogger(__name__)
+
+
+# ── 0. LOGIN WITH USERNAME OR EMAIL ───────────────────────────────────────────
+
+class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
+    """
+    Allows login via either username OR email.
+    Attaches user profile and platform permissions directly to the JWT response.
+    """
+    def validate(self, attrs):
+        login_input = attrs.get('username', '').strip()
+
+        # If login_input looks like an email or wasn't found as a username, check email
+        if login_input:
+            user_by_email = User.objects.filter(email__iexact=login_input).first()
+            if user_by_email:
+                attrs['username'] = user_by_email.username
+
+        data = super().validate(attrs)
+
+        user = self.user
+        staff_member = getattr(user, 'staffmember', None)
+        role = staff_member.role if staff_member else ('super_admin' if user.is_superuser else 'admin')
+        platform_allowed = staff_member.platform_allowed if staff_member else 'web'
+
+        data['user'] = {
+            'id': user.id,
+            'username': user.username,
+            'email': user.email,
+            'name': f'{user.first_name} {user.last_name}'.strip() or user.username,
+            'full_name': f'{user.first_name} {user.last_name}'.strip() or user.username,
+            'role': role,
+            'role_display': staff_member.get_role_display() if staff_member else role.replace('_', ' ').title(),
+            'platform_allowed': platform_allowed,
+            'staff_id': staff_member.id if staff_member else None,
+            'employee_id': staff_member.employee_id if staff_member else None,
+        }
+
+        return data
+
+
+class CustomTokenObtainPairView(TokenObtainPairView):
+    serializer_class = CustomTokenObtainPairSerializer
 
 
 # ── 1. WHO AM I ───────────────────────────────────────────────────────────────

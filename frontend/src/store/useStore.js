@@ -1,67 +1,53 @@
 import { create } from 'zustand';
 import {
-  ALERTS, BOOKINGS, STAFF, PATIENTS, GEOFENCE_EVENTS, SOS_EVENTS, ALERT_RULES,
-  LEADS, INVOICES_V2, DAILY_REPORTS, SYSTEM_USERS, INITIAL_PERMISSION_MATRIX, AUDIT_LOGS,
-  LEAVE_REQUESTS, ATTENDANCE_THRESHOLDS, BLOG_POSTS, NURSE_NOTES, VITALS, MAR_MEDICATIONS
+  ALERT_RULES, INITIAL_PERMISSION_MATRIX, ATTENDANCE_THRESHOLDS
 } from '../data/mockData';
+
+const API_BASE = 'http://localhost:8000/api';
 
 const useStore = create((set, get) => ({
   // ── Authentication State ──────────────────────────────────────────────────
   isAuthenticated: false,
   currentUser: null,
   userToken: null,
+  refreshToken: null,
   failedLoginAttempts: 0,
   isLockedOut: false,
 
-  login: ({ emailOrPhone, password }) => {
-    const { systemUsers, failedLoginAttempts } = get();
-
-    if (get().isLockedOut) {
-      return { success: false, error: 'Account locked due to 5 failed attempts. Please try again in 15 minutes.' };
+  login: async ({ emailOrPhone, password }) => {
+    try {
+      const res = await fetch(`${API_BASE}/auth/login/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: emailOrPhone.trim(), password }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        const user = data.user || {
+          id: 1,
+          username: emailOrPhone,
+          role: 'super_admin',
+          full_name: emailOrPhone,
+        };
+        set({
+          isAuthenticated: true,
+          currentUser: user,
+          userToken: data.access,
+          refreshToken: data.refresh,
+          currentRole: user.role || 'super_admin',
+          failedLoginAttempts: 0,
+          isLockedOut: false,
+        });
+        // Refresh all store data from backend
+        get().fetchAllData();
+        return { success: true, user, role: user.role };
+      } else {
+        const err = data.detail || (data.non_field_errors && data.non_field_errors[0]) || 'Incorrect username or password.';
+        return { success: false, error: err };
+      }
+    } catch (err) {
+      return { success: false, error: 'Cannot connect to server. Please check backend is running on port 8000.' };
     }
-
-    const user = systemUsers.find(
-      (u) => u.email.toLowerCase() === emailOrPhone.toLowerCase() || u.phone === emailOrPhone
-    );
-
-    if (!user) {
-      const nextFail = failedLoginAttempts + 1;
-      set({ failedLoginAttempts: nextFail, isLockedOut: nextFail >= 5 });
-      return {
-        success: false,
-        error: nextFail >= 5 ? 'Account locked due to 5 failed attempts.' : 'Incorrect email or password.',
-      };
-    }
-
-    if (user.status === 'suspended') {
-      return {
-        success: false,
-        isSuspended: true,
-        error: 'Your account has been suspended by system administrator. Please contact HR.',
-      };
-    }
-
-    const validPasses = ['password', 'admin123', 'pass123', user.temp_password];
-    if (!validPasses.includes(password) && password !== '123456') {
-      const nextFail = failedLoginAttempts + 1;
-      set({ failedLoginAttempts: nextFail, isLockedOut: nextFail >= 5 });
-      return {
-        success: false,
-        error: nextFail >= 5 ? 'Account locked due to 5 failed attempts.' : 'Incorrect email or password.',
-      };
-    }
-
-    const dummyJwt = `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.${btoa(JSON.stringify({ sub: user.id, role: user.role }))}.signature`;
-    set({
-      isAuthenticated: true,
-      currentUser: user,
-      userToken: dummyJwt,
-      currentRole: user.role,
-      failedLoginAttempts: 0,
-      isLockedOut: false,
-    });
-
-    return { success: true, user, role: user.role };
   },
 
   logout: () =>
@@ -69,8 +55,14 @@ const useStore = create((set, get) => ({
       isAuthenticated: false,
       currentUser: null,
       userToken: null,
+      refreshToken: null,
       currentRole: 'super_admin',
       activePage: 'overview',
+      staff: [],
+      patients: [],
+      bookings: [],
+      liveVisits: [],
+      alerts: [],
     }),
 
   // ── Role RBAC ────────────────────────────────────────────────────────────
@@ -82,48 +74,45 @@ const useStore = create((set, get) => ({
   setActivePage: (page) => set({ activePage: page }),
 
   // ── Alerts Feed ──────────────────────────────────────────────────────────
-  alerts: ALERTS,
+  alerts: [],
   dismissAlert: (id) => set((s) => ({ alerts: s.alerts.filter((a) => a.id !== id) })),
   addAlert: (alert) => set((s) => ({ alerts: [alert, ...s.alerts] })),
 
   // ── Live Visits (GPS state) ──────────────────────────────────────────────
-  liveVisits: BOOKINGS.filter((b) => ['in_progress', 'en_route', 'assigned'].includes(b.status)).map((b) => ({
-    ...b,
-    staff_lat: b.assigned_staff?.current_latitude || null,
-    staff_lng: b.assigned_staff?.current_longitude || null,
-    eta_minutes: b.status === 'en_route' ? 8 : null,
-  })),
+  liveVisits: [],
 
   fetchLiveVisits: async () => {
     try {
-      const res = await fetch('http://localhost:8000/api/tracking/live-visits/');
+      const res = await fetch(`${API_BASE}/tracking/live-visits/`);
       if (res.ok) {
         const data = await res.json();
-        if (Array.isArray(data) && data.length > 0) {
-          set({
-            liveVisits: data.map((lv) => ({
-              id: lv.booking || lv.id,
-              staff_name: lv.staff_name || 'Staff',
-              staff_role: lv.staff_role || 'Nurse',
-              staff_lat: parseFloat(lv.current_latitude) || null,
-              staff_lng: parseFloat(lv.current_longitude) || null,
-              current_latitude: parseFloat(lv.current_latitude) || null,
-              current_longitude: parseFloat(lv.current_longitude) || null,
-              patient_name: lv.patient_name || 'Patient',
-              patient_lat: lv.patient_lat ? parseFloat(lv.patient_lat) : null,
-              patient_lng: lv.patient_lng ? parseFloat(lv.patient_lng) : null,
-              service_type_display: 'Home Care',
-              status: lv.booking_status || 'in_progress',
-              status_display: lv.booking_status === 'in_progress' ? 'In Progress' : lv.booking_status === 'en_route' ? 'En Route' : 'Assigned',
-              scheduled_time: lv.scheduled_time || new Date().toISOString(),
-              eta_minutes: lv.eta_minutes,
-              assigned_staff: { id: lv.staff, full_name: lv.staff_name, role_display: lv.staff_role },
-            })),
-          });
-        }
+        const items = Array.isArray(data) ? data : (data.results || []);
+        set({
+          liveVisits: items.map((lv) => ({
+            id: lv.booking || lv.id,
+            staff_name: lv.staff_name || 'Staff',
+            staff_role: lv.staff_role || 'Nurse',
+            staff_lat: parseFloat(lv.current_latitude) || null,
+            staff_lng: parseFloat(lv.current_longitude) || null,
+            current_latitude: parseFloat(lv.current_latitude) || null,
+            current_longitude: parseFloat(lv.current_longitude) || null,
+            patient_name: lv.patient_name || 'Patient',
+            patient_lat: lv.patient_lat ? parseFloat(lv.patient_lat) : null,
+            patient_lng: lv.patient_lng ? parseFloat(lv.patient_lng) : null,
+            service_type_display: 'Home Care',
+            status: lv.booking_status || 'in_progress',
+            status_display: lv.booking_status === 'in_progress' ? 'In Progress' : lv.booking_status === 'en_route' ? 'En Route' : 'Assigned',
+            scheduled_time: lv.scheduled_time || new Date().toISOString(),
+            eta_minutes: lv.eta_minutes,
+            assigned_staff: { id: lv.staff, full_name: lv.staff_name, role_display: lv.staff_role },
+          })),
+        });
+      } else {
+        set({ liveVisits: [] });
       }
     } catch (err) {
       console.warn('[Store] fetchLiveVisits error:', err);
+      set({ liveVisits: [] });
     }
   },
 
@@ -137,30 +126,32 @@ const useStore = create((set, get) => ({
     })),
 
   // ── SOS Events ───────────────────────────────────────────────────────────
-  sosEvents: SOS_EVENTS,
+  sosEvents: [],
   activeSosAlerts: [],
 
   fetchActiveSOS: async () => {
     try {
-      const res = await fetch('http://localhost:8000/api/tracking/sos/active/');
+      const res = await fetch(`${API_BASE}/tracking/sos/active/`);
       if (res.ok) {
         const data = await res.json();
-        if (Array.isArray(data)) {
-          set((s) => ({
-            activeSosAlerts: data,
-            sosEvents: data.length > 0 ? [...data, ...s.sosEvents.filter((se) => !data.some((d) => d.id === se.id))] : s.sosEvents,
-          }));
-        }
+        const items = Array.isArray(data) ? data : (data.results || []);
+        set({
+          activeSosAlerts: items,
+          sosEvents: items,
+        });
+      } else {
+        set({ activeSosAlerts: [], sosEvents: [] });
       }
     } catch (err) {
       console.warn('[Store] fetchActiveSOS error:', err);
+      set({ activeSosAlerts: [], sosEvents: [] });
     }
   },
 
   resolveSOSAlert: async (id, notes = '') => {
     try {
       const token = get().userToken;
-      const res = await fetch(`http://localhost:8000/api/tracking/sos/${id}/resolve/`, {
+      const res = await fetch(`${API_BASE}/tracking/sos/${id}/resolve/`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -199,17 +190,17 @@ const useStore = create((set, get) => ({
     })),
 
   // ── Geofence Events ──────────────────────────────────────────────────────
-  geofenceEvents: GEOFENCE_EVENTS,
+  geofenceEvents: [],
 
   // ── Alert Rules ──────────────────────────────────────────────────────────
   alertRules: ALERT_RULES,
 
   fetchAlertRules: async () => {
     try {
-      const res = await fetch('http://localhost:8000/api/tracking/alert-rules/');
+      const res = await fetch(`${API_BASE}/tracking/alert-rules/`);
       if (res.ok) {
         const data = await res.json();
-        const rule = Array.isArray(data) ? data[0] : data;
+        const rule = Array.isArray(data) ? data[0] : (data.results ? data.results[0] : data);
         if (rule) {
           set({
             alertRules: {
@@ -230,7 +221,7 @@ const useStore = create((set, get) => ({
     set({ alertRules: rules });
     try {
       const token = get().userToken;
-      const res = await fetch('http://localhost:8000/api/tracking/alert-rules/', {
+      const res = await fetch(`${API_BASE}/tracking/alert-rules/`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -252,9 +243,33 @@ const useStore = create((set, get) => ({
   updateAlertRules: (rules) => set({ alertRules: rules }),
 
   // ── Bookings ─────────────────────────────────────────────────────────────
-  bookings: BOOKINGS,
+  bookings: [],
   selectedBooking: null,
   setSelectedBooking: (b) => set({ selectedBooking: b }),
+  fetchBookings: async () => {
+    try {
+      const token = get().userToken;
+      const res = await fetch(`${API_BASE}/bookings/`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const items = Array.isArray(data) ? data : (data.results || []);
+        const formatted = items.map((b) => ({
+          ...b,
+          patient_name: b.patient_name || (b.patient ? `${b.patient.first_name || ''} ${b.patient.last_name || ''}`.trim() : 'Unknown Patient'),
+          patient_mr: b.patient_mr || b.patient?.mr_number || 'MR-N/A',
+          staff_name: b.assigned_staff_name || (b.assigned_staff ? `${b.assigned_staff.first_name || ''} ${b.assigned_staff.last_name || ''}`.trim() : null),
+        }));
+        set({ bookings: formatted });
+        return formatted;
+      }
+    } catch (err) {
+      console.warn('[Store] fetchBookings error:', err);
+    }
+    set({ bookings: [] });
+    return [];
+  },
   addBooking: (booking) => set((s) => ({ bookings: [booking, ...s.bookings] })),
   assignNurseToBooking: (bookingId, assignmentData) => set((s) => ({
     bookings: s.bookings.map(b => b.id === bookingId ? {
@@ -270,14 +285,73 @@ const useStore = create((set, get) => ({
   })),
 
   // ── Staff ─────────────────────────────────────────────────────────────────
-  staff: STAFF,
+  staff: [],
   selectedStaff: null,
   setSelectedStaff: (s_) => set({ selectedStaff: s_ }),
+  fetchStaff: async () => {
+    try {
+      const token = get().userToken;
+      const res = await fetch(`${API_BASE}/staff/members/`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const items = Array.isArray(data) ? data : (data.results || []);
+        set({ staff: items });
+        return items;
+      }
+    } catch (err) {
+      console.warn('[Store] fetchStaff error:', err);
+    }
+    set({ staff: [] });
+    return [];
+  },
+  createStaffMember: async (staffData) => {
+    try {
+      const token = get().userToken;
+      const res = await fetch(`${API_BASE}/staff/members/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(staffData),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        set((s) => ({ staff: [data, ...s.staff] }));
+        return { success: true, data };
+      } else {
+        const errorMsg = data.username?.[0] || data.password?.[0] || data.password_confirm?.[0] || data.non_field_errors?.[0] || data.detail || 'Failed to create staff member';
+        return { success: false, error: errorMsg };
+      }
+    } catch (err) {
+      return { success: false, error: err.message || 'Network error creating staff member' };
+    }
+  },
 
   // ── Patients ──────────────────────────────────────────────────────────────
-  patients: PATIENTS,
+  patients: [],
   selectedPatient: null,
   setSelectedPatient: (p) => set({ selectedPatient: p }),
+  fetchPatients: async () => {
+    try {
+      const token = get().userToken;
+      const res = await fetch(`${API_BASE}/patients/`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const items = Array.isArray(data) ? data : (data.results || []);
+        set({ patients: items });
+        return items;
+      }
+    } catch (err) {
+      console.warn('[Store] fetchPatients error:', err);
+    }
+    set({ patients: [] });
+    return [];
+  },
   addPatient: (patient) => set((s) => ({ patients: [patient, ...s.patients] })),
   updatePatient: (id, updatedFields) => set((s) => ({
     patients: s.patients.map((p) => (p.id === id ? { ...p, ...updatedFields } : p)),
@@ -286,15 +360,27 @@ const useStore = create((set, get) => ({
     patients: s.patients.filter((p) => p.id !== id),
   })),
 
+  // ── Load All Active Data ──────────────────────────────────────────────────
+  fetchAllData: async () => {
+    await Promise.allSettled([
+      get().fetchStaff(),
+      get().fetchPatients(),
+      get().fetchBookings(),
+      get().fetchLiveVisits(),
+      get().fetchActiveSOS(),
+      get().fetchAlertRules(),
+    ]);
+  },
+
   // ── CRM Leads ─────────────────────────────────────────────────────────────
-  leads: LEADS,
+  leads: [],
   addLead: (lead) => set((s) => ({ leads: [lead, ...s.leads] })),
   updateLeadStage: (id, newStage) => set((s) => ({
     leads: s.leads.map(l => l.id === id ? { ...l, stage: newStage } : l)
   })),
 
   // ── Billing Invoices ──────────────────────────────────────────────────────
-  invoices: INVOICES_V2,
+  invoices: [],
   addInvoice: (inv) => set((s) => ({ invoices: [inv, ...s.invoices] })),
   recordInvoicePayment: (invoiceId, payment) => set((s) => ({
     invoices: s.invoices.map(inv => {
@@ -316,21 +402,21 @@ const useStore = create((set, get) => ({
   })),
 
   // ── Daily Patient Visit Reports ────────────────────────────────────────────
-  dailyReports: DAILY_REPORTS,
+  dailyReports: [],
   addDailyReport: (report) => set((s) => ({ dailyReports: [report, ...s.dailyReports] })),
 
   // ── Patient EMR Clinical Forms (Form A, Form B, Form C) ───────────────────
-  nurseNotes: NURSE_NOTES,
+  nurseNotes: [],
   addNurseNote: (newNote) => set((s) => {
     const user = s.currentUser;
-    const authorName = user?.full_name || (s.currentRole === 'doctor' ? 'Dr. Raza Khan' : 'Sarah Mitchell (RN)');
+    const authorName = user?.full_name || (s.currentRole === 'doctor' ? 'Doctor' : 'Staff Nurse');
     const authorRole = user?.role_display || (s.currentRole === 'doctor' ? 'Consultant Physician' : 'Registered Nurse');
     
     const entry = {
       id: Date.now(),
-      patient_id: newNote.patient_id || 1,
-      doctor_name: newNote.doctor_name || 'Dr. Raza Khan',
-      ward_room: newNote.ward_room || 'Home Care Bed #1',
+      patient_id: newNote.patient_id,
+      doctor_name: newNote.doctor_name || 'Attending Physician',
+      ward_room: newNote.ward_room || 'Home Care Bed',
       recorded_by_name: `${authorName}`,
       recorded_by_role: authorRole,
       recorded_at: newNote.recorded_at || new Date().toISOString(),
@@ -343,7 +429,7 @@ const useStore = create((set, get) => ({
 
   addNurseAddendum: (noteId, addendumText) => set((s) => {
     const user = s.currentUser;
-    const authorName = user?.full_name || (s.currentRole === 'doctor' ? 'Dr. Raza Khan' : 'Sarah Mitchell (RN)');
+    const authorName = user?.full_name || (s.currentRole === 'doctor' ? 'Doctor' : 'Staff Nurse');
     const newAddendum = {
       id: `add-${Date.now()}`,
       text: addendumText,
@@ -355,12 +441,12 @@ const useStore = create((set, get) => ({
     };
   }),
 
-  vitals: VITALS,
+  vitals: [],
   addVitalReading: (reading) => set((s) => {
     const user = s.currentUser;
-    const authorName = user?.full_name ? `${user.full_name} (${user.role_display || 'Staff'})` : 'Sarah Mitchell (RN)';
+    const authorName = user?.full_name ? `${user.full_name} (${user.role_display || 'Staff'})` : 'Staff Nurse';
     
-    // AI Anomaly Detection Logic (Item 14-A)
+    // AI Anomaly Detection Logic
     const anomalies = [];
     const sys = Number(reading.blood_pressure_systolic);
     const dia = Number(reading.blood_pressure_diastolic);
@@ -382,9 +468,9 @@ const useStore = create((set, get) => ({
 
     const newReading = {
       id: Date.now(),
-      patient_id: reading.patient_id || 1,
-      consultant_name: reading.consultant_name || 'Dr. Raza Khan',
-      ward_room: reading.ward_room || 'Home Care Bed #1',
+      patient_id: reading.patient_id,
+      consultant_name: reading.consultant_name || 'Attending Physician',
+      ward_room: reading.ward_room || 'Home Care Bed',
       recorded_by_name: authorName,
       recorded_at: reading.recorded_at || new Date().toISOString(),
       blood_pressure_systolic: sys || null,
@@ -404,7 +490,6 @@ const useStore = create((set, get) => ({
       anomalies: anomalies
     };
 
-    // Auto-generate system alert if out-of-range anomalies detected
     let updatedAlerts = s.alerts;
     if (anomalies.length > 0) {
       const alertItem = {
@@ -412,7 +497,7 @@ const useStore = create((set, get) => ({
         type: 'sos',
         severity: 'critical',
         title: `AI Vitals Anomaly Flagged — ${anomalies[0]}`,
-        message: `Patient ID #${reading.patient_id || 1}: ${anomalies.join(', ')}. Recorded by ${authorName}.`,
+        message: `Patient ID #${reading.patient_id || 'N/A'}: ${anomalies.join(', ')}. Recorded by ${authorName}.`,
         time: new Date().toISOString(),
         dismissible: true
       };
@@ -425,14 +510,14 @@ const useStore = create((set, get) => ({
     };
   }),
 
-  marMedications: MAR_MEDICATIONS,
+  marMedications: [],
   addMarMedication: (med) => set((s) => {
     const todayStr = new Date().toISOString().substring(0, 10);
     const newMed = {
       id: Date.now(),
-      patient_id: med.patient_id || 1,
-      consultant_name: med.consultant_name || 'Dr. Raza Khan',
-      ward_room: med.ward_room || 'Home Care Bed #1',
+      patient_id: med.patient_id,
+      consultant_name: med.consultant_name || 'Attending Physician',
+      ward_room: med.ward_room || 'Home Care Bed',
       brand_name: med.brand_name,
       generic_name: med.generic_name,
       dose: med.dose,
@@ -457,7 +542,7 @@ const useStore = create((set, get) => ({
 
   administerMarDose: (medId, dayKey = 7) => set((s) => {
     const user = s.currentUser;
-    const nurseName = user?.full_name ? `${user.full_name} (${user.role_display || 'Nurse'})` : 'Sarah Mitchell (RN)';
+    const nurseName = user?.full_name ? `${user.full_name} (${user.role_display || 'Nurse'})` : 'Staff Nurse';
     const currentTimeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
     return {
@@ -482,7 +567,7 @@ const useStore = create((set, get) => ({
   })),
 
   // ── User Management & RBAC Matrix ─────────────────────────────────────────
-  systemUsers: SYSTEM_USERS,
+  systemUsers: [],
   addSystemUser: (user) => set((s) => ({ systemUsers: [user, ...s.systemUsers] })),
   toggleUserStatus: (id) => set((s) => ({
     systemUsers: s.systemUsers.map(u => u.id === id ? { ...u, status: u.status === 'active' ? 'suspended' : 'active' } : u)
@@ -505,11 +590,11 @@ const useStore = create((set, get) => ({
     }
   })),
 
-  auditLogs: AUDIT_LOGS,
+  auditLogs: [],
   addAuditLog: (log) => set((s) => ({ auditLogs: [log, ...s.auditLogs] })),
 
   // ── Attendance & Leave Management ─────────────────────────────────────────
-  leaveRequests: LEAVE_REQUESTS,
+  leaveRequests: [],
   updateLeaveStatus: (id, newStatus) => set((s) => ({
     leaveRequests: s.leaveRequests.map(l => l.id === id ? { ...l, status: newStatus } : l)
   })),
@@ -519,7 +604,7 @@ const useStore = create((set, get) => ({
   updateAttendanceThresholds: (t) => set({ attendanceThresholds: t }),
 
   // ── CMS Content & Blog ────────────────────────────────────────────────────
-  blogPosts: BLOG_POSTS,
+  blogPosts: [],
   addBlogPost: (post) => set((s) => ({ blogPosts: [post, ...s.blogPosts] })),
 
   // ── Public Self-Service 6-Step Booking Integration (Requirement 13) ────────

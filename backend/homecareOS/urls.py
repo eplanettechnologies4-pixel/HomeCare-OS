@@ -8,8 +8,9 @@ from django.conf.urls.static import static
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
-# Extended auth views (me, forgot-password, verify-otp, reset-password)
+# Extended auth views (me, forgot-password, verify-otp, reset-password, custom login)
 from homecareOS.auth_views import (
+    CustomTokenObtainPairView,
     MeView,
     ForgotPasswordView,
     VerifyOTPView,
@@ -20,9 +21,9 @@ urlpatterns = [
     path('django-admin/', admin.site.urls),
 
     # ── Auth ──────────────────────────────────────────────────────────────────
-    # simplejwt standard endpoints
-    path('api/auth/login/',   TokenObtainPairView.as_view(), name='token_obtain_pair'),
-    path('api/auth/refresh/', TokenRefreshView.as_view(),   name='token_refresh'),
+    # simplejwt login with username/email & rich user payload
+    path('api/auth/login/',   CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),
+    path('api/auth/refresh/', TokenRefreshView.as_view(),          name='token_refresh'),
     # Mobile: who-am-I + platform_allowed gate
     path('api/auth/me/',      MeView.as_view(),              name='auth-me'),
     # Forgot-password OTP flow (3 steps)

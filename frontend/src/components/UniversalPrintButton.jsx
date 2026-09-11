@@ -222,9 +222,9 @@ export default function UniversalPrintButton({
                             SOUTH EAST HOSPITAL / HOMECARE OS — NURSES NOTES SHEET (FORM A)
                           </div>
                           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, fontSize: '0.8rem' }}>
-                            <div><strong>MR #:</strong> {rec.patient?.mr_number || rec.mr_number || 'MR-2024-001'}</div>
-                            <div><strong>Patient:</strong> {rec.patient?.full_name || rec.full_name || 'Ahmed Hassan'}</div>
-                            <div><strong>Doctor:</strong> {rec.patient?.care_manager_name || 'Dr. Raza Khan'}</div>
+                            <div><strong>MR #:</strong> {rec.patient?.mr_number || rec.mr_number || '—'}</div>
+                            <div><strong>Patient:</strong> {rec.patient?.full_name || rec.full_name || 'Patient'}</div>
+                            <div><strong>Doctor:</strong> {rec.patient?.care_manager_name || 'Attending Physician'}</div>
                           </div>
                         </div>
                         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
@@ -250,7 +250,7 @@ export default function UniversalPrintButton({
                                   ))}
                                 </td>
                                 <td style={{ border: '1px solid #cbd5e1', padding: 6, verticalAlign: 'top', fontSize: '0.76rem', fontWeight: 'bold' }}>
-                                  {note.recorded_by_name || 'Sarah Mitchell (RN)'}
+                                  {note.recorded_by_name || 'Attending Nurse'}
                                 </td>
                               </tr>
                             ))}
@@ -266,9 +266,9 @@ export default function UniversalPrintButton({
                             SOUTH EAST HOSPITAL — FREQUENT VITAL SIGNS RECORD (FORM B)
                           </div>
                           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
-                            <div><strong>Patient:</strong> {rec.patient?.full_name || 'Ahmed Hassan'}</div>
-                            <div><strong>MR #:</strong> {rec.patient?.mr_number || 'MR-2024-001'}</div>
-                            <div><strong>Consultant:</strong> {rec.patient?.care_manager_name || 'Dr. Raza Khan'}</div>
+                            <div><strong>Patient:</strong> {rec.patient?.full_name || rec.full_name || 'Patient'}</div>
+                            <div><strong>MR #:</strong> {rec.patient?.mr_number || rec.mr_number || '—'}</div>
+                            <div><strong>Consultant:</strong> {rec.patient?.care_manager_name || 'Attending Physician'}</div>
                           </div>
                         </div>
                         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.74rem', textAlign: 'center' }}>
@@ -302,7 +302,7 @@ export default function UniversalPrintButton({
                                 <td style={{ border: '1px solid #cbd5e1', padding: 5 }}>{v.intake_ng || 0} / {v.intake_iv || 0}</td>
                                 <td style={{ border: '1px solid #cbd5e1', padding: 5 }}>{v.output_urine || 0} / {v.output_drain || 0}</td>
                                 <td style={{ border: '1px solid #cbd5e1', padding: 5 }}>{v.bsr ? `${v.bsr} mg/dL` : '—'}</td>
-                                <td style={{ border: '1px solid #cbd5e1', padding: 5 }}>{v.recorded_by_name || 'Sarah Mitchell'}</td>
+                                <td style={{ border: '1px solid #cbd5e1', padding: 5 }}>{v.recorded_by_name || 'Attending Staff'}</td>
                               </tr>
                             ))}
                           </tbody>
@@ -317,9 +317,9 @@ export default function UniversalPrintButton({
                             SOUTH EAST HOSPITAL — DRUG ADMINISTRATION RECORD (MAR SHEET - FORM C)
                           </div>
                           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
-                            <div><strong>Patient:</strong> {rec.patient?.full_name || 'Ahmed Hassan'}</div>
-                            <div><strong>MR #:</strong> {rec.patient?.mr_number || 'MR-2024-001'}</div>
-                            <div><strong>Consultant:</strong> {rec.patient?.care_manager_name || 'Dr. Raza Khan'}</div>
+                            <div><strong>Patient:</strong> {rec.patient?.full_name || rec.full_name || 'Patient'}</div>
+                            <div><strong>MR #:</strong> {rec.patient?.mr_number || rec.mr_number || '—'}</div>
+                            <div><strong>Consultant:</strong> {rec.patient?.care_manager_name || 'Attending Physician'}</div>
                           </div>
                         </div>
 

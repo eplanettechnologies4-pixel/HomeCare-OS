@@ -8,12 +8,20 @@ export default function StaffIdCard({ staffMember }) {
   const currentRole = useStore((s) => s.currentRole);
   const targetStaff = staffMember || staff[0];
 
+  if (!targetStaff) {
+    return (
+      <div style={{ padding: '30px 20px', textAlign: 'center', color: 'var(--status-grey)', fontSize: '0.85rem' }}>
+        No staff member profile found.
+      </div>
+    );
+  }
+
   const [side, setSide] = useState('front'); // 'front' | 'back'
   const [token, setToken] = useState(`TOK-${Math.random().toString(36).substring(2, 8).toUpperCase()}`);
   const [rotatedMsg, setRotatedMsg] = useState(false);
 
   const isAdmin = ['super_admin', 'admin'].includes(currentRole);
-  const verifyUrl = `http://localhost:5173/verify/${targetStaff.employee_id}`;
+  const verifyUrl = `http://localhost:5173/verify/${targetStaff.employee_id || targetStaff.id}`;
 
   const handleRegenerateToken = () => {
     if (!isAdmin) {

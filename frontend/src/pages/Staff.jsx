@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Search, Star, Phone, Mail, Calendar, Clock, X, Award, TrendingUp,
   UserCheck, AlertCircle, CheckCircle, Sliders, Download, Check, FileText, Plus
@@ -35,8 +35,231 @@ function Stars({ rating }) {
   );
 }
 
+function AddStaffModal({ onClose, onSuccess }) {
+  const createStaffMember = useStore((s) => s.createStaffMember);
+  const [form, setForm] = useState({
+    first_name: '',
+    last_name: '',
+    username: '',
+    password: '',
+    password_confirm: '',
+    role: 'nurse',
+    specialization: '',
+    phone: '',
+    email: '',
+    platform_allowed: 'mobile',
+  });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const setF = (k, v) => setForm((prev) => ({ ...prev, [k]: v }));
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+
+    if (!form.username.trim()) {
+      setError('Username is required.');
+      return;
+    }
+    if (form.password.length < 8) {
+      setError('Password must be at least 8 characters long.');
+      return;
+    }
+    if (form.password !== form.password_confirm) {
+      setError('Passwords do not match.');
+      return;
+    }
+
+    setLoading(true);
+    const res = await createStaffMember({
+      first_name: form.first_name.trim(),
+      last_name: form.last_name.trim(),
+      username: form.username.trim(),
+      password: form.password,
+      password_confirm: form.password_confirm,
+      role: form.role,
+      specialization: form.specialization.trim(),
+      phone: form.phone.trim(),
+      email: form.email.trim(),
+      platform_allowed: form.platform_allowed,
+    });
+    setLoading(false);
+
+    if (res.success) {
+      onSuccess(res.data);
+    } else {
+      setError(res.error || 'Failed to create staff member.');
+    }
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="modal" style={{ width: 540, maxHeight: '90vh', overflowY: 'auto' }}>
+        <div className="modal-header">
+          <h2 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.15rem', margin: 0, color: 'var(--teal-800)' }}>
+            Add New Staff Member
+          </h2>
+          <button className="btn btn-ghost btn-icon" onClick={onClose}><X size={16} /></button>
+        </div>
+        <form onSubmit={handleSubmit}>
+          <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {error && (
+              <div style={{ padding: '10px 14px', background: '#fee2e2', border: '1px solid #ef4444', color: '#b91c1c', borderRadius: 6, fontSize: '0.85rem' }}>
+                {error}
+              </div>
+            )}
+
+            <div className="grid-2">
+              <div className="form-group">
+                <label className="form-label">First Name *</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  required
+                  value={form.first_name}
+                  onChange={e => setF('first_name', e.target.value)}
+                  placeholder="e.g. Ayesha"
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Last Name *</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  required
+                  value={form.last_name}
+                  onChange={e => setF('last_name', e.target.value)}
+                  placeholder="e.g. Khan"
+                />
+              </div>
+            </div>
+
+            <div className="grid-2">
+              <div className="form-group">
+                <label className="form-label">Role *</label>
+                <select className="form-select" value={form.role} onChange={e => {
+                  const r = e.target.value;
+                  setForm(prev => ({
+                    ...prev,
+                    role: r,
+                    platform_allowed: r === 'care_manager' ? 'both' : 'mobile'
+                  }));
+                }}>
+                  <option value="nurse">Nurse</option>
+                  <option value="doctor">Doctor</option>
+                  <option value="physio">Physiotherapist</option>
+                  <option value="speech">Speech & Language Therapist</option>
+                  <option value="psychologist">Psychologist</option>
+                  <option value="dietician">Dietician</option>
+                  <option value="care_manager">Client Care Manager</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Platform Access</label>
+                <select className="form-select" value={form.platform_allowed} onChange={e => setF('platform_allowed', e.target.value)}>
+                  <option value="mobile">Mobile App Only</option>
+                  <option value="web">Web Dashboard Only</option>
+                  <option value="both">Both Mobile & Web</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Specialization / Skills</label>
+              <input
+                type="text"
+                className="form-input"
+                value={form.specialization}
+                onChange={e => setF('specialization', e.target.value)}
+                placeholder="e.g. Wound Care, ICU, Pediatrics"
+              />
+            </div>
+
+            <div className="grid-2">
+              <div className="form-group">
+                <label className="form-label">Phone Number</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  value={form.phone}
+                  onChange={e => setF('phone', e.target.value)}
+                  placeholder="e.g. 0301-2345678"
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Email Address</label>
+                <input
+                  type="email"
+                  className="form-input"
+                  value={form.email}
+                  onChange={e => setF('email', e.target.value)}
+                  placeholder="staff@ehealth.com"
+                />
+              </div>
+            </div>
+
+            <div style={{ padding: '12px 14px', background: 'var(--sage-50)', borderRadius: 8, border: '1px solid var(--sage-200)' }}>
+              <div style={{ fontWeight: 700, fontSize: '0.85rem', color: 'var(--teal-800)', marginBottom: 10 }}>
+                🔐 Login Credentials (Set by Admin)
+              </div>
+
+              <div className="form-group" style={{ marginBottom: 10 }}>
+                <label className="form-label">Username *</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  required
+                  autoCapitalize="none"
+                  value={form.username}
+                  onChange={e => setF('username', e.target.value)}
+                  placeholder="e.g. nurse_ayesha"
+                />
+                <span style={{ fontSize: '0.72rem', color: 'var(--status-grey)' }}>Staff member will use this to sign into the mobile app. Must be unique.</span>
+              </div>
+
+              <div className="grid-2">
+                <div className="form-group">
+                  <label className="form-label">Password *</label>
+                  <input
+                    type="password"
+                    className="form-input"
+                    required
+                    value={form.password}
+                    onChange={e => setF('password', e.target.value)}
+                    placeholder="Min 8 characters"
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Confirm Password *</label>
+                  <input
+                    type="password"
+                    className="form-input"
+                    required
+                    value={form.password_confirm}
+                    onChange={e => setF('password_confirm', e.target.value)}
+                    placeholder="Re-enter password"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="modal-footer" style={{ borderTop: '1px solid var(--sage-200)', paddingTop: 14 }}>
+            <button type="button" className="btn btn-ghost" onClick={onClose} disabled={loading}>Cancel</button>
+            <button type="submit" className="btn btn-primary" disabled={loading}>
+              {loading ? 'Creating Account...' : 'Create Staff Member'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 export default function Staff() {
   const staff               = useStore((s) => s.staff);
+  const fetchStaff          = useStore((s) => s.fetchStaff);
   const bookings            = useStore((s) => s.bookings);
   const dailyReports        = useStore((s) => s.dailyReports);
   const leaveRequests       = useStore((s) => s.leaveRequests);
@@ -56,6 +279,12 @@ export default function Staff() {
   const [selectedDayDetails, setSelectedDayDetails] = useState(null);
   const [showConfigModal, setShowConfigModal]       = useState(false);
   const [configForm, setConfigForm]                 = useState(attendanceThresholds);
+  const [showAddModal, setShowAddModal]             = useState(false);
+  const [createdStaffConfirmation, setCreatedStaffConfirmation] = useState(null);
+
+  useEffect(() => {
+    fetchStaff();
+  }, [fetchStaff]);
 
   // Filter staff for directory
   const filteredStaff = staff.filter(s => {
@@ -276,31 +505,59 @@ export default function Staff() {
               <option value="dietician">Dietician</option>
               <option value="care_manager">Care Manager</option>
             </select>
+            {isAdminOrCareMgr && (
+              <button
+                className="btn btn-primary"
+                onClick={() => setShowAddModal(true)}
+                style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}
+              >
+                <Plus size={15} /> Add Staff Member
+              </button>
+            )}
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
-            {filteredStaff.map(s => (
-              <div key={s.id} className="card" style={{ padding: 18, cursor: 'pointer' }} onClick={() => setSelectedStaff(s)}>
-                <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', marginBottom: 12 }}>
-                  <div className="avatar avatar-lg" style={{ background: ROLE_COLORS[s.role] + '22', color: ROLE_COLORS[s.role] }}>
-                    {s.full_name.split(' ').map(n=>n[0]).join('')}
-                  </div>
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--teal-800)' }}>{s.full_name}</div>
-                    <div style={{ fontSize: '0.78rem', color: 'var(--status-grey)' }}>{s.role_display}</div>
-                    <Stars rating={s.rating} />
-                  </div>
-                </div>
-                <div style={{ fontSize: '0.8rem', color: '#4b5563', marginBottom: 10 }}>
-                  <span style={{ fontWeight: 600 }}>Spec:</span> {s.specialization}
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--sage-100)', paddingTop: 10 }}>
-                  <span className={`badge ${STATUS_BADGE[s.status]}`}>{s.status_display}</span>
-                  <span className="ts" style={{ fontSize: '0.75rem', color: 'var(--status-grey)' }}>ID: {s.employee_id}</span>
-                </div>
+          {filteredStaff.length === 0 ? (
+            <div className="card" style={{ padding: 48, textAlign: 'center', color: 'var(--status-grey)' }}>
+              <AlertCircle size={36} style={{ margin: '0 auto 12px', opacity: 0.5, color: 'var(--teal-600)' }} />
+              <div style={{ fontWeight: 600, fontSize: '1.05rem', color: 'var(--teal-800)', marginBottom: 6 }}>
+                No Staff Members Found
               </div>
-            ))}
-          </div>
+              <p style={{ fontSize: '0.85rem', margin: '0 auto 16px', maxWidth: 400 }}>
+                {search || selectedRole
+                  ? 'No staff members match your current search or filter criteria.'
+                  : 'No staff members have been registered yet. Click "Add Staff Member" above to create an account.'}
+              </p>
+              {isAdminOrCareMgr && !search && !selectedRole && (
+                <button className="btn btn-primary" onClick={() => setShowAddModal(true)} style={{ margin: '0 auto' }}>
+                  <Plus size={15} /> Add First Staff Member
+                </button>
+              )}
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
+              {filteredStaff.map(s => (
+                <div key={s.id} className="card" style={{ padding: 18, cursor: 'pointer' }} onClick={() => setSelectedStaff(s)}>
+                  <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', marginBottom: 12 }}>
+                    <div className="avatar avatar-lg" style={{ background: ROLE_COLORS[s.role] + '22', color: ROLE_COLORS[s.role] }}>
+                      {(s.full_name || s.username || 'Staff').split(' ').map(n=>n[0]).join('')}
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--teal-800)' }}>{s.full_name}</div>
+                      <div style={{ fontSize: '0.78rem', color: 'var(--status-grey)' }}>{s.role_display}</div>
+                      <Stars rating={s.rating || 5.0} />
+                    </div>
+                  </div>
+                  <div style={{ fontSize: '0.8rem', color: '#4b5563', marginBottom: 10 }}>
+                    <span style={{ fontWeight: 600 }}>Spec:</span> {s.specialization || 'General Care'}
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--sage-100)', paddingTop: 10 }}>
+                    <span className={`badge ${STATUS_BADGE[s.status] || 'badge-green'}`}>{s.status_display || 'Available'}</span>
+                    <span className="ts" style={{ fontSize: '0.75rem', color: 'var(--status-grey)' }}>ID: {s.employee_id}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -591,9 +848,19 @@ export default function Staff() {
                 Status: <span className="badge badge-green">{selectedDayDetails.status}</span>
               </div>
               <div style={{ background: 'var(--sage-50)', padding: 12, borderRadius: 8, fontSize: '0.82rem' }}>
-                <div style={{ fontWeight: 600, color: 'var(--teal-800)', marginBottom: 6 }}>Visit 1: Ahmed Hassan (MR-2024-001)</div>
-                <div>Check-in: <span className="ts">09:05 AM</span> · Check-out: <span className="ts">10:30 AM</span></div>
-                <div style={{ color: 'var(--status-grey)', fontSize: '0.75rem', marginTop: 4 }}>Wound care & insulin administration</div>
+                {selectedDayDetails.status === 'Off' || selectedDayDetails.status === 'Leave' ? (
+                  <div style={{ color: 'var(--status-grey)' }}>No field visits scheduled on scheduled off / leave day.</div>
+                ) : (
+                  <div>
+                    <div style={{ fontWeight: 600, color: 'var(--teal-800)', marginBottom: 6 }}>
+                      Field Duty — {selectedDayDetails.nurse?.full_name || 'Staff'}
+                    </div>
+                    <div>Shift Window: <span className="ts">08:00 AM – 04:00 PM</span></div>
+                    <div style={{ color: 'var(--status-grey)', fontSize: '0.75rem', marginTop: 4 }}>
+                      Visits and check-in records are automatically recorded via the mobile app.
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
             <div className="modal-footer">
@@ -617,6 +884,56 @@ export default function Staff() {
             </div>
             <div className="modal-footer">
               <button className="btn btn-ghost" onClick={() => setSelectedStaff(null)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Staff Member Modal */}
+      {showAddModal && (
+        <AddStaffModal
+          onClose={() => setShowAddModal(false)}
+          onSuccess={(newStaff) => {
+            setShowAddModal(false);
+            setCreatedStaffConfirmation(newStaff);
+          }}
+        />
+      )}
+
+      {/* Staff Account Created Confirmation Modal */}
+      {createdStaffConfirmation && (
+        <div className="modal-backdrop" onClick={(e) => e.target === e.currentTarget && setCreatedStaffConfirmation(null)}>
+          <div className="modal" style={{ width: 460 }}>
+            <div className="modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <CheckCircle size={20} color="var(--status-green)" />
+                <h3 style={{ margin: 0, fontFamily: 'var(--font-heading)', color: 'var(--teal-800)' }}>
+                  Staff Member Created Successfully
+                </h3>
+              </div>
+              <button className="btn btn-ghost btn-icon" onClick={() => setCreatedStaffConfirmation(null)}><X size={14} /></button>
+            </div>
+            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <p style={{ margin: 0, fontSize: '0.9rem', color: '#374151' }}>
+                Account created for <strong>{createdStaffConfirmation.full_name}</strong> ({createdStaffConfirmation.role_display}).
+              </p>
+              <div style={{ padding: '14px 16px', background: 'var(--sage-50)', borderRadius: 8, border: '1px solid var(--sage-200)' }}>
+                <div style={{ fontSize: '0.8rem', color: 'var(--status-grey)', marginBottom: 4 }}>Staff ID</div>
+                <div style={{ fontWeight: 700, fontFamily: 'var(--font-mono)', fontSize: '0.95rem', color: 'var(--teal-900)', marginBottom: 12 }}>
+                  {createdStaffConfirmation.employee_id}
+                </div>
+                <div style={{ fontSize: '0.8rem', color: 'var(--status-grey)', marginBottom: 4 }}>Login Username (for Mobile App)</div>
+                <div style={{ fontWeight: 700, fontFamily: 'var(--font-mono)', fontSize: '1.05rem', color: 'var(--teal-800)', background: '#fff', padding: '6px 10px', borderRadius: 4, border: '1px solid var(--sage-200)' }}>
+                  {createdStaffConfirmation.username}
+                </div>
+              </div>
+              <div style={{ fontSize: '0.8rem', color: 'var(--status-grey)', display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+                <Check size={14} color="var(--status-green)" style={{ flexShrink: 0, marginTop: 2 }} />
+                <span>The staff member can now log into the mobile app using this username and the password you set. For security, passwords are never redisplayed.</span>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-primary" onClick={() => setCreatedStaffConfirmation(null)}>Done</button>
             </div>
           </div>
         </div>

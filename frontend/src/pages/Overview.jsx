@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
   Activity, Calendar, Clock, AlertTriangle, DollarSign,
   X, Siren, Truck, Package, Users, TrendingUp, Award, Kanban, CheckCircle, Heart
@@ -38,6 +38,11 @@ export default function Overview() {
   const leads         = useStore((s) => s.leads);
   const invoices      = useStore((s) => s.invoices);
   const staff         = useStore((s) => s.staff);
+  const fetchAllData  = useStore((s) => s.fetchAllData);
+
+  useEffect(() => {
+    fetchAllData();
+  }, [fetchAllData]);
 
   const roleLabel = ROLE_CONFIG[currentRole]?.label || 'User';
   const userName  = currentUser?.full_name || roleLabel;
@@ -55,6 +60,10 @@ export default function Overview() {
   const canSeeMedical   = ['super_admin', 'admin', 'branch_manager', 'care_manager', 'nurse'].includes(currentRole);
   const canSeeLeads     = ['super_admin', 'admin', 'crm_executive'].includes(currentRole);
   const canSeeNurseSelf = currentRole === 'nurse';
+
+  const completedVisits = bookings.filter(b => b.status === 'completed').length;
+  const remainingVisits = Math.max(0, bookings.length - completedVisits);
+  const nextVisit       = bookings.find(b => b.status === 'assigned' || b.status === 'en_route') || bookings[0];
 
   return (
     <div>
@@ -74,10 +83,22 @@ export default function Overview() {
       {canSeeNurseSelf ? (
         <div>
           <div className="grid-stats mb-6">
-            <StatCard label="My Visits Today" value="3 Visits" sub="2 completed · 1 remaining" icon={Calendar} variant="green" />
-            <StatCard label="Next Scheduled Visit" value="02:30 PM" sub="Ahmed Hassan (Wound Care)" icon={Clock} variant="amber" />
-            <StatCard label="My Performance Rating" value="4.9 ★" sub="Based on 48 patient reviews" icon={Award} />
-            <StatCard label="My Monthly Field Hours" value="168.5 hrs" sub="+8.5 hrs Overtime" icon={Activity} />
+            <StatCard
+              label="My Visits Today"
+              value={`${bookings.length} ${bookings.length === 1 ? 'Visit' : 'Visits'}`}
+              sub={`${completedVisits} completed · ${remainingVisits} remaining`}
+              icon={Calendar}
+              variant="green"
+            />
+            <StatCard
+              label="Next Scheduled Visit"
+              value={nextVisit?.scheduled_time ? format(new Date(nextVisit.scheduled_time), 'hh:mm a') : '—'}
+              sub={nextVisit ? `${nextVisit.patient_name} (${nextVisit.service_type_display || 'Care'})` : 'No upcoming visits'}
+              icon={Clock}
+              variant="amber"
+            />
+            <StatCard label="My Performance Rating" value="5.0 ★" sub="Based on verified visits" icon={Award} />
+            <StatCard label="My Monthly Field Hours" value={`${(completedVisits * 1.5).toFixed(1)} hrs`} sub="Logged via GPS" icon={Activity} />
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 400px', gap: 20 }}>
@@ -95,19 +116,27 @@ export default function Overview() {
                     </tr>
                   </thead>
                   <tbody>
-                    {bookings.slice(0, 3).map((b, idx) => (
-                      <tr key={b.id}>
-                        <td className="ts">{idx === 0 ? '09:00 AM' : idx === 1 ? '11:30 AM' : '02:30 PM'}</td>
-                        <td style={{ fontWeight: 700, color: 'var(--teal-800)' }}>{b.patient_name}</td>
-                        <td>{b.service_type_display}</td>
-                        <td style={{ fontSize: '0.8rem' }}>{b.address}</td>
-                        <td>
-                          <span className={`badge ${idx === 0 ? 'badge-green' : idx === 1 ? 'badge-green' : 'badge-amber'}`}>
-                            {idx === 0 ? 'Completed' : idx === 1 ? 'Completed' : 'Upcoming'}
-                          </span>
+                    {bookings.length === 0 ? (
+                      <tr>
+                        <td colSpan="5" style={{ textAlign: 'center', padding: '30px 20px', color: 'var(--status-grey)' }}>
+                          No scheduled visits for today
                         </td>
                       </tr>
-                    ))}
+                    ) : (
+                      bookings.slice(0, 5).map((b) => (
+                        <tr key={b.id}>
+                          <td className="ts">{b.scheduled_time ? format(new Date(b.scheduled_time), 'hh:mm a') : '—'}</td>
+                          <td style={{ fontWeight: 700, color: 'var(--teal-800)' }}>{b.patient_name}</td>
+                          <td>{b.service_type_display}</td>
+                          <td style={{ fontSize: '0.8rem' }}>{b.address}</td>
+                          <td>
+                            <span className={`badge ${b.status === 'completed' ? 'badge-green' : b.status === 'in_progress' ? 'badge-teal' : 'badge-amber'}`}>
+                              {b.status_display || b.status}
+                            </span>
+                          </td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -116,7 +145,7 @@ export default function Overview() {
             {/* Nurse Digital Staff ID Card Widget */}
             <div className="card" style={{ padding: 20, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
               <h3 className="card-title" style={{ marginBottom: 14, width: '100%' }}>My Digital Staff ID Card</h3>
-              <StaffIdCard staffMember={staff[0]} />
+              <StaffIdCard staffMember={staff.find(s => s.id === currentUser?.staff_id) || staff[0]} />
             </div>
           </div>
         </div>

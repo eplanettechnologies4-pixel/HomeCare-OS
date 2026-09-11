@@ -1,8 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Plus, Filter, X, MapPin, FileText, User, CreditCard, ChevronDown } from 'lucide-react';
 import useStore from '../store/useStore';
 import NurseAssignPanel from '../components/NurseAssignPanel';
-import { STAFF } from '../data/mockData';
 import { format } from 'date-fns';
 
 const STATUS_BADGE = {
@@ -20,6 +19,7 @@ const PAYMENT_BADGE = { advance: 'badge-green', pending: 'badge-red', partial: '
 // ── New Booking Modal ─────────────────────────────────────────────────────────
 function NewBookingModal({ onClose, onSubmit }) {
   const patients = useStore((s) => s.patients);
+  const staff    = useStore((s) => s.staff);
   const [form, setForm] = useState({
     patient_id: '', service_type: 'short_service', scheduled_time: '', assigned_staff_id: '', notes: '', amount: '', payment_status: 'pending',
   });
@@ -57,7 +57,7 @@ function NewBookingModal({ onClose, onSubmit }) {
               <label className="form-label">Assign Staff (optional)</label>
               <select className="form-select" value={form.assigned_staff_id} onChange={e => set('assigned_staff_id', e.target.value)}>
                 <option value="">Assign later…</option>
-                {STAFF.filter(s => s.status === 'available').map(s => <option key={s.id} value={s.id}>{s.full_name} ({s.role_display})</option>)}
+                {staff.map(s => <option key={s.id} value={s.id}>{s.full_name} ({s.role_display})</option>)}
               </select>
             </div>
             <div className="form-group">
@@ -90,6 +90,7 @@ function NewBookingModal({ onClose, onSubmit }) {
 // ── Booking Drawer ─────────────────────────────────────────────────────────────
 function BookingDrawer({ booking, onClose }) {
   if (!booking) return null;
+  const staff = useStore((s) => s.staff);
   const assignNurseToBooking = useStore((s) => s.assignNurseToBooking);
   return (
     <div>
@@ -169,7 +170,7 @@ function BookingDrawer({ booking, onClose }) {
           <div style={{ marginBottom: 20 }}>
             <NurseAssignPanel
               booking={booking}
-              staffList={STAFF}
+              staffList={staff}
               onConfirmAssignment={(data) => assignNurseToBooking(booking.id, data)}
             />
           </div>
@@ -181,11 +182,20 @@ function BookingDrawer({ booking, onClose }) {
 
 // ── Main Component ────────────────────────────────────────────────────────────
 export default function Bookings() {
-  const bookings    = useStore((s) => s.bookings);
-  const addBooking  = useStore((s) => s.addBooking);
+  const bookings      = useStore((s) => s.bookings);
+  const fetchBookings = useStore((s) => s.fetchBookings);
+  const fetchPatients = useStore((s) => s.fetchPatients);
+  const fetchStaff    = useStore((s) => s.fetchStaff);
+  const addBooking    = useStore((s) => s.addBooking);
   const [selected, setSelected]     = useState(null);
   const [showNew, setShowNew]       = useState(false);
   const [filters, setFilters]       = useState({ status: '', service_type: '', search: '' });
+
+  useEffect(() => {
+    fetchBookings();
+    fetchPatients();
+    fetchStaff();
+  }, [fetchBookings, fetchPatients, fetchStaff]);
 
   const filtered = useMemo(() => bookings.filter((b) => {
     if (filters.status && b.status !== filters.status) return false;
@@ -262,48 +272,63 @@ export default function Bookings() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((b) => (
-                <tr key={b.id} onClick={() => setSelected(b)}>
-                  <td className="ts">{b.id}</td>
-                  <td>
-                    <div style={{ fontWeight: 600 }}>{b.patient_name}</div>
-                    <div className="ts">{b.patient_mr || b.patient?.mr_number}</div>
-                  </td>
-                  <td>
-                    <span className="badge badge-teal" style={{ fontSize: '0.7rem' }}>{b.service_type_display}</span>
-                  </td>
-                  <td>
-                    <span className={`badge ${STATUS_BADGE[b.status] || 'badge-grey'}`}>{b.status_display}</span>
-                  </td>
-                  <td>
-                    {b.staff_name ? (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <div className="avatar" style={{ width: 24, height: 24, fontSize: '0.7rem' }}>
-                          {b.staff_name.split(' ').map(n=>n[0]).join('')}
-                        </div>
-                        <span style={{ fontSize: '0.85rem' }}>{b.staff_name}</span>
-                      </div>
-                    ) : (
-                      <span style={{ color: 'var(--status-red)', fontSize: '0.8rem', fontStyle: 'italic' }}>Unassigned</span>
-                    )}
-                  </td>
-                  <td className="ts">
-                    {(() => {
-                      try {
-                        return b.scheduled_time ? format(new Date(b.scheduled_time), 'dd MMM HH:mm') : '—';
-                      } catch(e) {
-                        return '—';
-                      }
-                    })()}
-                  </td>
-                  <td className="ts">PKR {b.amount?.toLocaleString()}</td>
-                  <td>
-                    <span className={`badge ${PAYMENT_BADGE[b.payment_status] || 'badge-grey'}`} style={{ fontSize: '0.7rem' }}>
-                      {b.payment_status_display}
-                    </span>
+              {filtered.length === 0 ? (
+                <tr>
+                  <td colSpan="8" style={{ textAlign: 'center', padding: '48px 20px', color: 'var(--status-grey)' }}>
+                    <div style={{ fontWeight: 600, fontSize: '1rem', color: 'var(--teal-800)', marginBottom: 6 }}>
+                      No Bookings Found
+                    </div>
+                    <p style={{ fontSize: '0.85rem', margin: 0 }}>
+                      {filters.search || filters.status || filters.service_type
+                        ? 'No bookings match the selected filters.'
+                        : 'No patient bookings or visits have been created yet. Click "New Booking" above to schedule one.'}
+                    </p>
                   </td>
                 </tr>
-              ))}
+              ) : (
+                filtered.map((b) => (
+                  <tr key={b.id} onClick={() => setSelected(b)}>
+                    <td className="ts">{b.id}</td>
+                    <td>
+                      <div style={{ fontWeight: 600 }}>{b.patient_name}</div>
+                      <div className="ts">{b.patient_mr || b.patient?.mr_number}</div>
+                    </td>
+                    <td>
+                      <span className="badge badge-teal" style={{ fontSize: '0.7rem' }}>{b.service_type_display}</span>
+                    </td>
+                    <td>
+                      <span className={`badge ${STATUS_BADGE[b.status] || 'badge-grey'}`}>{b.status_display}</span>
+                    </td>
+                    <td>
+                      {b.staff_name ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <div className="avatar" style={{ width: 24, height: 24, fontSize: '0.7rem' }}>
+                            {b.staff_name.split(' ').map(n=>n[0]).join('')}
+                          </div>
+                          <span style={{ fontSize: '0.85rem' }}>{b.staff_name}</span>
+                        </div>
+                      ) : (
+                        <span style={{ color: 'var(--status-red)', fontSize: '0.8rem', fontStyle: 'italic' }}>Unassigned</span>
+                      )}
+                    </td>
+                    <td className="ts">
+                      {(() => {
+                        try {
+                          return b.scheduled_time ? format(new Date(b.scheduled_time), 'dd MMM HH:mm') : '—';
+                        } catch(e) {
+                          return '—';
+                        }
+                      })()}
+                    </td>
+                    <td className="ts">PKR {b.amount?.toLocaleString()}</td>
+                    <td>
+                      <span className={`badge ${PAYMENT_BADGE[b.payment_status] || 'badge-grey'}`} style={{ fontSize: '0.7rem' }}>
+                        {b.payment_status_display}
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
@@ -318,7 +343,7 @@ export default function Bookings() {
           onClose={() => setShowNew(false)}
           onSubmit={(form) => {
             const pObj = useStore.getState().patients.find(p => String(p.id) === String(form.patient_id));
-            const sObj = STAFF.find(s => String(s.id) === String(form.assigned_staff_id));
+            const sObj = useStore.getState().staff.find(s => String(s.id) === String(form.assigned_staff_id));
             const amt = Number(form.amount) || 2500;
             const paid = form.payment_status === 'advance' ? amt : 0;
             addBooking({
