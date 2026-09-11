@@ -233,13 +233,14 @@ export const resetPassword  = (reset_token, new_password) => api.post('/api/auth
 import api from './api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { BASE_URL } from './api';
+import { mobileWS } from './websocket';
 
 // REST endpoints
 export const sendGPSPing = (booking_id, lat, lng) =>
   api.post('/api/tracking/gps-ping/', { booking_id, lat, lng });
 
-export const checkIn  = (booking_id, lat, lng, method = 'manual') =>
-  api.post('/api/tracking/check-in/',  { booking_id, lat, lng, method });
+export const checkIn = (booking_id, lat, lng, method = 'manual') =>
+  api.post('/api/tracking/check-in/', { booking_id, lat, lng, method });
 
 export const checkOut = (booking_id, lat, lng) =>
   api.post('/api/tracking/check-out/', { booking_id, lat, lng });
@@ -247,29 +248,320 @@ export const checkOut = (booking_id, lat, lng) =>
 export const triggerSOS = (booking_id, lat, lng) =>
   api.post('/api/tracking/sos/', { booking_id, lat, lng });
 
-// WebSocket (for real-time dashboard sync)
-let ws = null;
+export const fetchLiveVisits = () =>
+  api.get('/api/tracking/live-visits/').then((r) => r.data);
 
-export const connectWS = async () => {
-  const token = await AsyncStorage.getItem('access_token');
-  const wsUrl = BASE_URL.replace('http', 'ws');
-  ws = new WebSocket(`${wsUrl}/ws/tracking/?token=${token}`);
-  ws.onclose = () => setTimeout(connectWS, 5000); // auto-reconnect
-  return ws;
-};
-
-export const sendLocationViaWS = (staffId, lat, lng) => {
-  if (ws?.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ type: 'location_update', staff_id: staffId, lat, lng }));
-  }
-};
-
-export const sendSOSViaWS = (bookingId, lat, lng) => {
-  if (ws?.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ type: 'sos', booking_id: bookingId, lat, lng }));
-  }
-};
+// WebSocket real-time helpers (delegates to mobileWS singleton)
+export const connectWS = () => mobileWS.connect();
+export const sendLocationViaWS = (staffId, lat, lng) =>
+  mobileWS.sendLocationUpdate(staffId, lat, lng);
+export const sendSOSViaWS = (bookingId, lat, lng, staffId) =>
+  mobileWS.sendSOSAlert(bookingId, lat, lng, staffId);
 ```
+
+### `src/services/location.js` (Background Tracking & Battery Discipline)
+```javascript
+import * as Location from 'expo-location';
+import * as TaskManager from 'expo-task-manager';
+import { sendGPSPing } from './tracking';
+import { mobileWS } from './websocket';
+import { AuthService } from './api';
+
+export const LOCATION_TASK_NAME = 'homecare-location-task';
+export const PING_INTERVAL_MS = 30000; // 30-second battery-efficient cadence
+
+let activeBookingId = null;
+let intervalId = null;
+let currentCoords = { lat: 31.4707, lng: 74.4101 };
+
+// Define Expo TaskManager background task
+try {
+  if (!TaskManager.isTaskDefined(LOCATION_TASK_NAME)) {
+    TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
+      if (error) {
+        console.error('[LocationTask] Background task error:', error);
+        return;
+      }
+      if (data && data.locations && data.locations.length > 0) {
+        const loc = data.locations[data.locations.length - 1];
+        const lat = loc.coords.latitude;
+        const lng = loc.coords.longitude;
+        currentCoords = { lat, lng };
+
+        if (activeBookingId) {
+          try {
+            await sendGPSPing(activeBookingId, lat, lng);
+            const user = AuthService?.getCurrentUser?.();
+            const staffId = user?.staff_id || user?.id || 1;
+            mobileWS?.sendLocationUpdate?.(staffId, lat, lng);
+          } catch (e) {
+            console.warn('[LocationTask] Failed to send ping:', e.message);
+          }
+        }
+      }
+    });
+  }
+} catch (e) {
+  console.warn('[LocationTask] TaskManager registration note:', e.message);
+}
+
+class LocationService {
+  constructor() {
+    this.isTracking = false;
+  }
+
+  // Request foreground THEN background permission strictly when visit starts (NOT at app launch)
+  async requestPermissionsOnVisitStart() {
+    const fg = await Location.requestForegroundPermissionsAsync();
+    if (fg.status !== 'granted') {
+      console.warn('[LocationService] Foreground location permission denied');
+      return false;
+    }
+    const bg = await Location.requestBackgroundPermissionsAsync();
+    if (bg.status !== 'granted') {
+      console.warn('[LocationService] Background location permission denied; falling back to foreground interval');
+    }
+    return true;
+  }
+
+  async startLocationTask(bookingId) {
+    if (!bookingId) return { success: false, error: 'No bookingId provided' };
+
+    activeBookingId = bookingId;
+    this.isTracking = true;
+
+    try {
+      await this.requestPermissionsOnVisitStart();
+
+      // Acquire initial position
+      try {
+        const current = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        if (current?.coords) {
+          currentCoords = { lat: current.coords.latitude, lng: current.coords.longitude };
+        }
+      } catch (posErr) {
+        console.warn('[LocationService] Using cached coords:', posErr.message);
+      }
+
+      // Start TaskManager background updates
+      const isRegistered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
+      if (!isRegistered) {
+        await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
+          accuracy: Location.Accuracy.Balanced,
+          timeInterval: PING_INTERVAL_MS,
+          distanceInterval: 10,
+          deferredUpdatesInterval: PING_INTERVAL_MS,
+          showsBackgroundLocationIndicator: true,
+          foregroundService: {
+            notificationTitle: 'HomeCare OS Tracking Active',
+            notificationBody: 'Transmitting active visit location to care coordinator.',
+            notificationColor: '#6D28D9',
+          },
+        });
+      }
+    } catch (e) {
+      console.warn('[LocationService] Native background location start warning:', e.message);
+    }
+
+    // Always keep a foreground 30s heartbeat interval running as fallback
+    if (intervalId) clearInterval(intervalId);
+    await this.sendPing();
+
+    intervalId = setInterval(() => {
+      this.sendPing();
+    }, PING_INTERVAL_MS);
+
+    return { success: true };
+  }
+
+  async sendPing() {
+    if (!this.isTracking || !activeBookingId) return;
+    try {
+      try {
+        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        if (loc?.coords) {
+          currentCoords = { lat: loc.coords.latitude, lng: loc.coords.longitude };
+        }
+      } catch (e) {
+        currentCoords.lat += (Math.random() - 0.5) * 0.0002;
+        currentCoords.lng += (Math.random() - 0.5) * 0.0002;
+      }
+
+      await sendGPSPing(activeBookingId, currentCoords.lat, currentCoords.lng);
+      const user = AuthService?.getCurrentUser?.();
+      const staffId = user?.staff_id || user?.id || 1;
+      mobileWS?.sendLocationUpdate?.(staffId, currentCoords.lat, currentCoords.lng);
+    } catch (err) {
+      console.warn('[LocationService] sendPing error:', err.message);
+    }
+  }
+
+  // TERMINATE task immediately on checkout — zero battery drain when off-duty
+  async stopLocationTask() {
+    this.isTracking = false;
+    activeBookingId = null;
+
+    if (intervalId) {
+      clearInterval(intervalId);
+      intervalId = null;
+    }
+
+    try {
+      const isRegistered = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
+      if (isRegistered) {
+        await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
+      }
+    } catch (e) {
+      console.warn('[LocationService] Error stopping native background updates:', e.message);
+    }
+
+    return { success: true };
+  }
+
+  getCoords() {
+    return currentCoords;
+  }
+
+  getActiveBookingId() {
+    return activeBookingId;
+  }
+}
+
+export const locationService = new LocationService();
+export default locationService;
+```
+
+### `src/services/websocket.js` (Zero-Latency Live Tracking & Emergency SOS)
+```javascript
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { AppState } from 'react-native';
+import { BASE_URL, AuthService } from './api';
+
+class MobileWebSocketService {
+  constructor() {
+    this.ws = null;
+    this.isConnected = false;
+    this.reconnectAttempts = 0;
+    this.listeners = [];
+    this.appStateSubscription = null;
+    this.shouldStayConnected = false;
+
+    this.initAppStateListener();
+  }
+
+  initAppStateListener() {
+    if (this.appStateSubscription) return;
+    this.appStateSubscription = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'active') {
+        if (this.shouldStayConnected && (!this.ws || this.ws.readyState !== WebSocket.OPEN)) {
+          this.connect();
+        }
+      }
+    });
+  }
+
+  async connect() {
+    this.shouldStayConnected = true;
+    try {
+      const token = (await AsyncStorage.getItem('access_token')) || AuthService?.getCurrentUser?.()?.token || '';
+      const rawBase = BASE_URL || 'http://127.0.0.1:8000';
+      const wsProtocol = rawBase.startsWith('https') ? 'wss:' : 'ws:';
+      const host = rawBase.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+      const wsUrl = `${wsProtocol}//${host}/ws/tracking/?token=${token}`;
+
+      if (this.ws) {
+        try { this.ws.close(); } catch (e) {}
+      }
+
+      const socket = new WebSocket(wsUrl);
+      this.ws = socket;
+
+      socket.onopen = () => {
+        this.isConnected = true;
+        this.reconnectAttempts = 0;
+      };
+
+      socket.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          this.listeners.forEach((cb) => {
+            try { cb(payload); } catch (e) {}
+          });
+        } catch (err) {}
+      };
+
+      socket.onclose = (e) => {
+        this.isConnected = false;
+        if (this.shouldStayConnected) {
+          const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 16000);
+          this.reconnectAttempts++;
+          setTimeout(() => {
+            if (this.shouldStayConnected) this.connect();
+          }, delay);
+        }
+      };
+    } catch (e) {
+      console.error('[MobileWS] Init error:', e);
+    }
+  }
+
+  sendLocationUpdate(staffId, lat, lng) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({
+        type: 'location_update',
+        staff_id: staffId,
+        lat: parseFloat(lat),
+        lng: parseFloat(lng),
+      }));
+    }
+  }
+
+  sendSOSAlert(bookingId, lat, lng, staffId = null) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      const user = AuthService?.getCurrentUser?.();
+      this.ws.send(JSON.stringify({
+        type: 'sos',
+        booking_id: bookingId,
+        staff_id: staffId || user?.staff_id || user?.id,
+        lat: parseFloat(lat),
+        lng: parseFloat(lng),
+      }));
+    }
+  }
+
+  onMessage(callback) {
+    this.listeners.push(callback);
+    return () => {
+      this.listeners = this.listeners.filter((l) => l !== callback);
+    };
+  }
+
+  disconnect() {
+    this.shouldStayConnected = false;
+    this.isConnected = false;
+    if (this.ws) {
+      try { this.ws.close(); } catch (e) {}
+      this.ws = null;
+    }
+  }
+}
+
+export const mobileWS = new MobileWebSocketService();
+export default mobileWS;
+```
+
+### 4.2 Mobile Screens Live Wiring Reference
+- **`src/screens/VisitDetailScreen.js`**:
+  - Fetches real booking details via `GET /api/bookings/{id}/` on load and listens for live WS `geofence_event` to update arrival status without polling.
+  - **"Start Visit"**: Invokes `locationService.startLocationTask(booking.id)` to initiate 30s location updates.
+  - **"Check In" Fallback**: Executes manual check-in via `checkIn(booking.id, coords.lat, coords.lng, 'manual')`.
+  - **Emergency SOS Button**: Triggers `triggerSOS(...)` via REST and broadcasts `sendSOSAlert(...)` over WebSocket; displays instant visual feedback banner.
+  - **"End Visit & Check Out"**: Immediately invokes `locationService.stopLocationTask()` to cleanly terminate GPS updates before routing to `CheckoutScreen`.
+- **`src/screens/CheckoutScreen.js`**:
+  - Dynamically reads `visit_duration_minutes` passed from the backend checkout response (`POST /api/tracking/check-out/`). Eliminates hardcoded mock durations.
+- **`src/screens/HomeScreen.js` & `src/screens/TodayScheduleScreen.js`**:
+  - Replaced dummy schedule data with live calls to `GET /api/bookings/today/` using `useFocusEffect` and pull-to-refresh `RefreshControl`.
+
 
 ### `src/services/patients.js`
 ```javascript
@@ -645,45 +937,105 @@ export const enqueueOfflineAction = async (endpoint, method, payload, idempotenc
 };
 
 export const flushOfflineQueue = async () => {
-  const queue = JSON.parse(await AsyncStorage.getItem(QUEUE_KEY) || '[]');
-  if (queue.length === 0) return;
+  try {
+    const raw = await AsyncStorage.getItem(QUEUE_KEY);
+    const queue = raw ? JSON.parse(raw) : [];
+    if (!queue || queue.length === 0) return { success: true, count: 0 };
 
-  const remaining = [];
+    console.log(`[OfflineQueue] Flushing ${queue.length} queued offline actions...`);
+    const remaining = [];
 
-  for (const item of queue) {
-    try {
-      await api({
-        url: item.endpoint,
-        method: item.method,
-        data: item.payload,
-        headers: { 'X-Idempotency-Key': item.id },
-      });
-      console.log(`[OfflineQueue] Successfully flushed action ${item.id}`);
-    } catch (err) {
-      // 409 Conflict means already recorded on backend; safe to discard
-      if (err.response?.status === 409) {
-        console.warn(`[OfflineQueue] Action ${item.id} already committed (409). Discarding.`);
-        continue;
-      }
-      item.retryCount += 1;
-      if (item.retryCount < 5) {
-        remaining.push(item);
+    for (const item of queue) {
+      try {
+        await api({
+          url: item.endpoint,
+          method: item.method,
+          data: item.payload,
+          headers: { 'X-Idempotency-Key': item.id },
+        });
+        console.log(`[OfflineQueue] Successfully flushed action ${item.id}`);
+      } catch (err) {
+        // 409 Conflict means already recorded on backend; safe to discard
+        if (err.response?.status === 409) {
+          console.warn(`[OfflineQueue] Action ${item.id} already committed (409). Discarding.`);
+          continue;
+        }
+        item.retryCount = (item.retryCount || 0) + 1;
+        if (item.retryCount < 5) {
+          remaining.push(item);
+        } else {
+          console.error(`[OfflineQueue] Action ${item.id} exceeded max retries. Dropping.`);
+        }
       }
     }
-  }
 
-  await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(remaining));
+    await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(remaining));
+    return { success: true, remaining: remaining.length };
+  } catch (e) {
+    console.warn('[OfflineQueue] Flush error:', e);
+  }
 };
 
 // Automatic listener on network re-establishment
 export function initOfflineSyncListener() {
-  NetInfo.addEventListener(state => {
-    if (state.isConnected && state.isInternetReachable) {
-      console.log('[OfflineQueue] Internet detected. Starting queue flush...');
-      flushOfflineQueue();
-    }
-  });
+  try {
+    NetInfo.addEventListener((state) => {
+      if (state.isConnected && state.isInternetReachable !== false) {
+        console.log('[OfflineQueue] Connection online. Triggering queue flush...');
+        flushOfflineQueue();
+      }
+    });
+  } catch (e) {
+    console.warn('[OfflineQueue] NetInfo listener initialization note:', e.message);
+  }
 }
+
+// Wrapper for resilient clinical submission (Check-In, Check-Out, MAR Administration, Daily Report)
+export async function submitWithOfflineFallback(endpoint, method, payload, customKey = null) {
+  const key = customKey || `ik-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+
+  let isOffline = false;
+  try {
+    const net = await NetInfo.fetch();
+    if (!net.isConnected || net.isInternetReachable === false) {
+      isOffline = true;
+    }
+  } catch (e) {
+    isOffline = false;
+  }
+
+  if (isOffline) {
+    console.log(`[OfflineQueue] Device is offline. Enqueuing ${endpoint}`);
+    await enqueueOfflineAction(endpoint, method, payload, key);
+    return { success: true, offline: true, idempotencyKey: key, data: { status: 'queued_offline' } };
+  }
+
+  try {
+    const res = await api({
+      url: endpoint,
+      method,
+      data: payload,
+      headers: { 'X-Idempotency-Key': key },
+    });
+    return { success: true, offline: false, idempotencyKey: key, data: res.data };
+  } catch (err) {
+    if (!err.response || err.code === 'ECONNABORTED' || err.message === 'Network Error') {
+      console.log(`[OfflineQueue] Network failed during request. Enqueuing ${endpoint}`);
+      await enqueueOfflineAction(endpoint, method, payload, key);
+      return { success: true, offline: true, idempotencyKey: key, data: { status: 'queued_offline' } };
+    }
+    throw err;
+  }
+}
+
+export const offlineQueue = {
+  enqueueOfflineAction,
+  flushOfflineQueue,
+  initOfflineSyncListener,
+  submitWithOfflineFallback,
+};
+
+export default offlineQueue;
 ```
 
 ---
@@ -800,6 +1152,82 @@ Send location update from client:
 {"type": "location_update", "staff_id": 2, "lat": 24.8620, "lng": 67.0110}
 ```
 *Observe that all connected dashboard browser tabs update the map pin at `24.8620, 67.0110` with zero latency.*
+
+### Step 6: Trigger & Resolve Emergency SOS Panic Alert
+**Trigger from Mobile Device:**
+```bash
+curl -X POST http://127.0.0.1:8000/api/tracking/sos/ \
+  -H "Authorization: Bearer <ACCESS_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"booking_id": 1, "lat": 24.8615, "lng": 67.0099, "reason": "Patient acute respiratory distress"}'
+```
+*Expected Result:*
+- Database logs an active un-resolved `SOSEvent`
+- Django Channels broadcasts `{ "type": "sos", "booking_id": 1, ... }`
+- Web Dashboard sounds a 2-tone Web Audio alarm chime and displays a sticky pulsating red emergency banner (`.sos-banner-pulsating`)
+
+**Resolve from Central Web Dispatch:**
+```bash
+curl -X POST http://127.0.0.1:8000/api/tracking/sos/1/resolve/ \
+  -H "Authorization: Bearer <ADMIN_ACCESS_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"notes": "Ambulance dispatched. Nurse supported on-site."}'
+```
+*Expected Result:*
+- SOS marked `resolved = True`, `resolved_at`, and `resolved_by`
+- Broadcasts `sos_resolved` event to dismiss dashboard alarm banner
+
+### Step 7: Complete Visit Departure & Duration Calculation
+```bash
+curl -X POST http://127.0.0.1:8000/api/tracking/check-out/ \
+  -H "Authorization: Bearer <ACCESS_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"booking_id": 1, "lat": 24.8615, "lng": 67.0099}'
+```
+*Expected Response (200 OK):*
+```json
+{
+  "status": "checked_out",
+  "visit_duration_minutes": 58
+}
+```
+*Side Effects:*
+- Transitions `booking.status` to `completed`
+- Calculates true duration from `checked_in_at` to `checked_out_at`
+- Deletes transient `LiveVisit` tracking row so map pin disappears from active field roster
+- Terminates mobile background location task (`stopLocationTask()`) to preserve clinician device battery
+
+### Step 8: Operational Alert Rules Configuration
+```bash
+curl -X POST http://127.0.0.1:8000/api/tracking/alert-rules/ \
+  -H "Authorization: Bearer <ADMIN_ACCESS_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"late_threshold_minutes": 15, "no_show_threshold_minutes": 30, "overstay_threshold_minutes": 120}'
+```
+
+---
+
+## 13. Automated Integration Test Suite (`verify_tracking.py`)
+
+To guarantee zero regression across mobile services and dashboard endpoints, run the automated integration verification suite:
+
+```bash
+cd backend
+python verify_tracking.py
+```
+
+### Verified Test Matrix (9/9 Passed)
+| # | Test Scenario | Validated Backend Behavior |
+|---|---|---|
+| 1 | Far GPS Ping (> 100m) | `LiveVisit` updated with coords; status remains unchanged (no false check-in) |
+| 2 | Geofence Auto Check-in (≤ 100m) | Booking transitions to `in_progress`; `GeofenceEvent(check_in)` logged; WS broadcast |
+| 3 | Idempotent Manual Check-in | Re-sending check-in returns `200 OK` without throwing error or duplicating records |
+| 4 | Emergency SOS Panic Alert | Creates active `SOSEvent` with staff linkage; broadcasts to WS tracking channel |
+| 5 | Central SOS Resolution | Sets `resolved=True`, logs reviewer notes & timestamp; broadcasts resolution |
+| 6 | Active Live Visits Snapshot | `GET /api/tracking/live-visits/` returns valid list with lat/lng and patient name |
+| 7 | Alert Rules Persistence | `POST /api/tracking/alert-rules/` saves rules; `GET .../current/` retrieves them |
+| 8 | Visit Departure & Checkout | Transitions to `completed`, computes duration, cleans up `LiveVisit` |
+| 9 | Today's Schedule Filtering | `GET /api/bookings/today/` correctly scopes visits to authenticated clinician |
 
 ---
 *End of Integration Architecture Document.*

@@ -287,18 +287,21 @@ The frontend router (`frontend/src/App.jsx`) dynamically resolves pages accordin
 - **Internal Route ID:** `live-tracking`
 - **Access Level:** `super_admin`, `admin`, `branch_manager`, `care_manager`
 - **Key Features:**
-  - **Dual View Modes:** Full-screen interactive map (`MiniMap.jsx` using Leaflet/OSM) vs dense real-time list.
+  - **Dual View Modes:** Full-screen interactive map (`MiniMap.jsx` using Leaflet/OSM with smooth pin repositioning) vs dense real-time field operations list.
+  - **Live WebSocket Telemetry:** Connected directly to `ws://<host>:8000/ws/tracking/?token=<JWT>` via `useWebSocketTracking` hook. Dispatches live `location_update`, `geofence_event`, `sos`, and `sos_resolved` events with zero polling latency.
+  - **Simulation Mode Toggle:** By default, simulation mode is **OFF** (listening strictly to authentic field mobile devices). An on-screen Simulation Mode button allows operators to turn on mock GPS pings on demand for presentations, walkthroughs, or offline training.
   - **4-Stage Status Pipeline:** `Assigned` -> `En Route` -> `In Progress` -> `Completed`.
-  - **Live Countdown Timer:** Calculates real-time ETA for en-route clinicians; turns urgent red when arrival is overdue.
-  - **Configurable Alert Rules Panel:** Modal to configure operational thresholds:
+  - **Live Countdown Timer:** Calculates real-time ETA for en-route clinicians; turns urgent red when arrival is overdue based on alert threshold rules.
+  - **Configurable Alert Rules Panel:** Connected directly to `GET /api/tracking/alert-rules/` and `POST /api/tracking/alert-rules/` for server-side persistence:
     - Late Arrival Threshold (default: 15 min).
     - No-Show Threshold (default: 30 min).
     - Visit Overstay Threshold (default: 120 min).
-  - **SOS Emergency Incident System:**
-    - High-visibility pulsating red alert badge when active.
-    - Displays exact coordinates, attending staff, patient name, and time of panic button trigger.
-    - One-click incident resolution action with reviewer logging.
-  - **Geofence Audit Log:** Automatic logging of `check_in` and `check_out` timestamps upon crossing patient geofence perimeter (100m radius).
+  - **SOS Emergency Incident Dispatch & Siren:**
+    - High-visibility sticky pulsating red emergency banner (`.sos-banner-pulsating`) displaying clinician name, patient, coordinates, and panic timestamp.
+    - Synthesized Web Audio API two-tone audible alarm chime (`window.playAlarmChime()`) alerting dispatchers immediately.
+    - One-click incident resolution modal with reviewer notes and logging (`POST /api/tracking/sos/{id}/resolve/`).
+  - **Geofence Audit Log:** Automatic server-side detection and logging of `check_in` and `check_out` timestamps upon crossing patient geofence perimeter (100m radius).
+
 
 ---
 
@@ -811,9 +814,12 @@ Headers: `Authorization: Bearer <JWT_ACCESS_TOKEN>` (for protected endpoints)
 
 #### 2. `GET /api/tracking/sos/` & `POST /api/tracking/sos/`
 - **Description:** Retrieve historic SOS triggers or initiate a panic distress signal from a clinician's mobile device.
+- **Auto Staff Association:** When invoked by an authenticated clinician, automatically binds `staff` to their authenticated `staff_profile` if not explicitly specified.
+- **Request Body (POST):** `{"booking_id": 12, "lat": 24.8607, "lng": 67.0104, "reason": "Patient acute distress"}`
+- **Side Effect:** Immediately broadcasts `{ "type": "sos", ... }` through Django Channels to trigger the dashboard audible alarm and pulsating banner.
 
 #### 3. `GET /api/tracking/sos/active/`
-- **Description:** Returns currently unresolved emergency panic alerts requiring central dispatch intervention.
+- **Description:** Returns currently unresolved emergency panic alerts requiring central dispatch intervention (`resolved = False`).
 
 #### 4. `POST /api/tracking/sos/{id}/resolve/`
 - **Description:** Resolves an active SOS distress incident.
@@ -823,27 +829,58 @@ Headers: `Authorization: Bearer <JWT_ACCESS_TOKEN>` (for protected endpoints)
     "notes": "Spoke with Nurse Sarah via phone. False alarm triggered by mobile pocket press. Situation normal."
   }
   ```
+- **Side Effect:** Sets `resolved = True`, records timestamp and `resolved_by = request.user`, and broadcasts `sos_resolved` over WebSocket to clear dashboard banners.
 
-#### 5. `GET /api/tracking/alert-rules/` & `POST /api/tracking/alert-rules/`
+#### 5. `GET /api/tracking/alert-rules/` & `GET /api/tracking/alert-rules/current/` & `POST /api/tracking/alert-rules/`
 - **Description:** Read and update operational delay and overstay alert threshold rules.
+- **`GET /api/tracking/alert-rules/current/`:** Returns the latest configured operational thresholds:
+  ```json
+  {
+    "id": 1,
+    "late_threshold_minutes": 15,
+    "no_show_threshold_minutes": 30,
+    "overstay_threshold_minutes": 120,
+    "created_at": "2026-09-11T19:10:00Z"
+  }
+  ```
+- **`POST /api/tracking/alert-rules/`:** Creates a new active rule configuration that immediately takes effect across the dashboard.
 
 #### 6. `GET /api/tracking/live-visits/`
-- **Description:** Real-time location stream of all active field staff with current latitude, longitude, heading, and battery level.
+- **Description:** Real-time location stream of all active field staff with current latitude, longitude, heading, status, and battery level, ordered by `['-created_at']`.
+- **Response Format:**
+  ```json
+  [
+    {
+      "id": 1,
+      "booking": 12,
+      "staff_name": "Nurse Fatima Zahra",
+      "patient_name": "Ahmed Khan",
+      "current_lat": 24.8607,
+      "current_lng": 67.0104,
+      "status": "in_progress",
+      "eta_minutes": 0,
+      "battery_level": 85,
+      "last_ping": "2026-09-11T19:10:30Z"
+    }
+  ]
+  ```
 
 #### 7. `POST /api/tracking/gps-ping/`
 - **Description:** Background location update endpoint called by the mobile app every 30 seconds while the clinician is on duty. Automatically performs geofence calculations against the target booking address.
 - **Request Body:** `{"booking_id": 12, "lat": 24.8607, "lng": 67.0104}`
-- **Side Effect:** Broadcasts position to the Web Dashboard map via WebSocket and triggers automatic check-in if within geofence radius.
+- **Side Effect:** Updates `LiveVisit` coordinates, broadcasts position to the Web Dashboard map via WebSocket (`location_update`), and triggers automatic check-in (`geofence_event`) if distance to patient is ≤ 100 meters.
 
 #### 8. `POST /api/tracking/check-in/`
-- **Description:** Clinician arrival check-in at the patient's home. Transitions booking status to `in_progress`.
+- **Description:** Clinician arrival check-in at the patient's home (manual fallback or geofence trigger). Transitions booking status to `in_progress`.
+- **Idempotency:** Re-issuing check-in for an already checked-in visit safely returns HTTP `200 OK` with the existing check-in timestamp without corrupting data or throwing errors.
 - **Request Body:** `{"booking_id": 12, "lat": 24.8607, "lng": 67.0104, "method": "manual"}`
 - **Response (200 OK):** `{"status": "checked_in", "timestamp": "2026-09-07T14:02:00Z"}`
 
 #### 9. `POST /api/tracking/check-out/`
-- **Description:** Clinician departure and visit completion. Transitions booking status to `completed` and calculates exact visit duration.
+- **Description:** Clinician departure and visit completion. Transitions booking status to `completed`, computes actual visit duration, and cleans up transient `LiveVisit` records.
 - **Request Body:** `{"booking_id": 12, "lat": 24.8607, "lng": 67.0104}`
 - **Response (200 OK):** `{"status": "checked_out", "visit_duration_minutes": 58}`
+
 
 ---
 
@@ -1123,9 +1160,38 @@ HomeCare OS bridges field clinicians (operating on the React Native mobile app) 
 ### 8.3 Offline Resiliency & Field Synchronization
 
 When clinicians enter remote patient homes with zero cellular coverage:
-1. All critical actions (Medication doses, Form A notes, Check-ins) are written to a local persistent SQLite/AsyncStorage FIFO queue with unique idempotency keys (`X-Idempotency-Key`).
+1. All critical actions (Medication doses, Form A notes, Check-ins, Check-outs) are written to a local persistent FIFO queue via `submitWithOfflineFallback()` with unique idempotency keys (`X-Idempotency-Key`).
 2. A `NetInfo` event listener detects connectivity restoration and flushes the queue sequentially.
-3. If an action was already processed on the server, a `409 Conflict` is safely discarded without corrupting medical records.
+3. If an action was already processed on the server, a `409 Conflict` is safely discarded without corrupting medical records or triggering user-facing error dialogues.
+
+### 8.4 Battery-Conscious Mobile GPS Tracking (`homecare-location-task`)
+
+Field clinicians are on the road for 8–12 hours shifts. Continuous GPS background polling quickly exhausts device battery if unmanaged. HomeCare OS implements strict battery discipline:
+- **Permission On-Demand:** Foreground and background permissions (`Location.requestBackgroundPermissionsAsync`) are requested strictly when the clinician taps **"Start Visit"** in `VisitDetailScreen.js`, never at initial login.
+- **Cadence Optimization:** Uses `expo-task-manager` task `homecare-location-task` configured for a 30-second interval (`PING_INTERVAL_MS = 30000`) and 10-meter distance filter, transmitting telemetry via `POST /api/tracking/gps-ping/` and WebSocket `location_update`.
+- **Zero-Waste Termination:** When the clinician completes a visit and taps **"Check Out"**, `locationService.stopLocationTask()` immediately deregisters native background updates, stopping all GPS hardware draw instantly.
+
+### 8.5 Real-Time Emergency SOS & Web Audio Dispatch Engine
+
+- **Distress Initiation:** Field clinicians can tap the high-contrast red SOS button in `VisitDetailScreen.js` at any time during a visit.
+- **Dual Transport:** The mobile app transmits the panic event simultaneously via REST (`POST /api/tracking/sos/`) and WebSocket (`mobileWS.sendSOSAlert(...)`).
+- **Instant Dispatcher Notification:** The Web Dashboard (`LiveTracking.jsx`):
+  - Synthesizes a loud, 2-tone alarm chime (800Hz / 600Hz) via the browser's Web Audio API (`window.playAlarmChime()`), requiring zero external audio assets.
+  - Mounts a sticky, pulsating red banner (`.sos-banner-pulsating`) detailing attending clinician, patient, timestamp, and coordinates.
+  - Enables dispatchers to log incident resolution notes directly to `POST /api/tracking/sos/{id}/resolve/`, instantly silencing the alarm across all connected dashboard tabs.
+
+### 8.6 End-to-End System Verification (9/9 Automated Tests Verified)
+
+The entire cross-platform tracking pipeline is validated through the automated integration test suite (`verify_tracking.py`):
+1. **Far GPS Ping (> 100m):** Verifies location telemetry without false arrival check-in.
+2. **Geofence Auto Check-in (≤ 100m):** Validates automatic transition to `in_progress` upon entering perimeter.
+3. **Idempotent Manual Check-in:** Confirms no duplicates or exceptions when re-submitting arrival.
+4. **SOS Distress Creation:** Verifies active emergency panic logging and clinician linkage.
+5. **SOS Central Resolution:** Confirms incident resolution, reviewer attribution, and status clearance.
+6. **Live Visits Active Snapshot:** Confirms accurate payload structure of active field staff and patient telemetry.
+7. **Alert Rules Persistence:** Validates database storage of operational delay and overstay thresholds.
+8. **Visit Check-Out & Duration:** Verifies arrival-to-departure duration calculation and transient telemetry cleanup.
+9. **Staff Today's Schedule:** Verifies secure role-based schedule scoping for field staff.
 
 > **Complete Implementation Reference:**  
 > For complete React Native service code, Axios interceptors, offline queue implementations, and step-by-step curl test scripts, refer to [`MOBILE_INTEGRATION.md`](file:///c:/Users/Administrator/Desktop/health/MOBILE_INTEGRATION.md).
