@@ -2,7 +2,9 @@ import { create } from 'zustand';
 import {
   ALERT_RULES, INITIAL_PERMISSION_MATRIX, ATTENDANCE_THRESHOLDS
 } from '../data/mockData';
-import { apiFetch, setTokenGetter, API_BASE } from '../services/api';
+import { apiFetch, setTokenGetter } from '../services/api';
+
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
 
 const savedToken = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
 const savedRefresh = typeof window !== 'undefined' ? localStorage.getItem('refresh_token') : null;
