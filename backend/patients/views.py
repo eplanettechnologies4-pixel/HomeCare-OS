@@ -16,7 +16,7 @@ from .serializers import (
 
 
 class PatientViewSet(viewsets.ModelViewSet):
-    queryset = Patient.objects.select_related('assigned_care_manager').all()
+    queryset = Patient.objects.select_related('assigned_care_manager').all().order_by('-created_at')
 
     def get_serializer_class(self):
         if self.action in ['list']:

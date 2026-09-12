@@ -18,8 +18,16 @@ const PAYMENT_BADGE = { advance: 'badge-green', pending: 'badge-red', partial: '
 
 // ── New Booking Modal ─────────────────────────────────────────────────────────
 function NewBookingModal({ onClose, onSubmit }) {
-  const patients = useStore((s) => s.patients);
-  const staff    = useStore((s) => s.staff);
+  const patients      = useStore((s) => s.patients);
+  const staff         = useStore((s) => s.staff);
+  const fetchStaff    = useStore((s) => s.fetchStaff);
+  const fetchPatients = useStore((s) => s.fetchPatients);
+
+  useEffect(() => {
+    fetchStaff();
+    fetchPatients();
+  }, [fetchStaff, fetchPatients]);
+
   const [form, setForm] = useState({
     patient_id: '', service_type: 'short_service', scheduled_time: '', assigned_staff_id: '', notes: '', amount: '', payment_status: 'pending',
   });
@@ -35,7 +43,7 @@ function NewBookingModal({ onClose, onSubmit }) {
           <div className="grid-2">
             <div className="form-group">
               <label className="form-label">Patient</label>
-              <select className="form-select" value={form.patient_id} onChange={e => set('patient_id', e.target.value)}>
+              <select className="form-select" value={form.patient_id} onFocus={() => fetchPatients()} onChange={e => set('patient_id', e.target.value)}>
                 <option value="">Select patient…</option>
                 {patients.map(p => <option key={p.id} value={p.id}>{p.full_name} ({p.mr_number})</option>)}
               </select>
@@ -55,9 +63,9 @@ function NewBookingModal({ onClose, onSubmit }) {
             </div>
             <div className="form-group">
               <label className="form-label">Assign Staff (optional)</label>
-              <select className="form-select" value={form.assigned_staff_id} onChange={e => set('assigned_staff_id', e.target.value)}>
+              <select className="form-select" value={form.assigned_staff_id} onFocus={() => fetchStaff()} onChange={e => set('assigned_staff_id', e.target.value)}>
                 <option value="">Assign later…</option>
-                {staff.map(s => <option key={s.id} value={s.id}>{s.full_name} ({s.role_display})</option>)}
+                {staff.map(s => <option key={s.id} value={s.id}>{s.full_name} ({s.role_display || s.role})</option>)}
               </select>
             </div>
             <div className="form-group">
@@ -91,7 +99,12 @@ function NewBookingModal({ onClose, onSubmit }) {
 function BookingDrawer({ booking, onClose }) {
   if (!booking) return null;
   const staff = useStore((s) => s.staff);
+  const fetchStaff = useStore((s) => s.fetchStaff);
   const assignNurseToBooking = useStore((s) => s.assignNurseToBooking);
+
+  useEffect(() => {
+    fetchStaff();
+  }, [fetchStaff]);
   return (
     <div>
       <div className="drawer-backdrop" onClick={onClose} />
@@ -187,6 +200,7 @@ export default function Bookings() {
   const fetchPatients = useStore((s) => s.fetchPatients);
   const fetchStaff    = useStore((s) => s.fetchStaff);
   const addBooking    = useStore((s) => s.addBooking);
+  const createBooking = useStore((s) => s.createBooking);
   const [selected, setSelected]     = useState(null);
   const [showNew, setShowNew]       = useState(false);
   const [filters, setFilters]       = useState({ status: '', service_type: '', search: '' });
@@ -341,34 +355,54 @@ export default function Bookings() {
       {showNew && (
         <NewBookingModal
           onClose={() => setShowNew(false)}
-          onSubmit={(form) => {
+          onSubmit={async (form) => {
             const pObj = useStore.getState().patients.find(p => String(p.id) === String(form.patient_id));
             const sObj = useStore.getState().staff.find(s => String(s.id) === String(form.assigned_staff_id));
             const amt = Number(form.amount) || 2500;
             const paid = form.payment_status === 'advance' ? amt : 0;
-            addBooking({
-              id: Date.now(),
-              patient: pObj,
-              patient_name: pObj ? pObj.full_name : (form.patient_name || 'Patient'),
-              patient_mr: pObj ? pObj.mr_number : 'MR-NEW',
-              assigned_staff: sObj || null,
-              staff_name: sObj ? sObj.full_name : null,
+            
+            const bookingPayload = {
+              patient_id: Number(form.patient_id),
+              assigned_staff_id: form.assigned_staff_id ? Number(form.assigned_staff_id) : null,
               service_type: form.service_type || 'short_service',
-              service_type_display: form.service_type ? form.service_type.replace('_',' ').replace(/\b\w/g, c=>c.toUpperCase()) : 'Short Service',
-              status: sObj ? 'assigned' : 'pending',
-              status_display: sObj ? 'Assigned' : 'Pending',
+              status: form.assigned_staff_id ? 'assigned' : 'pending',
               payment_status: form.payment_status || 'pending',
-              payment_status_display: form.payment_status === 'advance' ? 'Advance Paid' : 'Payment Pending',
               scheduled_time: form.scheduled_time ? new Date(form.scheduled_time).toISOString() : new Date().toISOString(),
-              address: pObj ? pObj.address : 'PWD / Soan Garden, Islamabad',
-              latitude: pObj ? pObj.latitude : 33.57,
-              longitude: pObj ? pObj.longitude : 73.15,
+              address: pObj?.address || 'Islamabad',
+              latitude: pObj?.latitude || 33.57,
+              longitude: pObj?.longitude || 73.15,
               amount: amt,
               amount_paid: paid,
-              balance_due: amt - paid,
               notes: form.notes || '',
-              created_at: new Date().toISOString()
-            });
+            };
+
+            const res = await createBooking(bookingPayload);
+            if (!res.success) {
+              // Fallback to local store
+              addBooking({
+                id: Date.now(),
+                patient: pObj,
+                patient_name: pObj ? pObj.full_name : (form.patient_name || 'Patient'),
+                patient_mr: pObj ? pObj.mr_number : 'MR-NEW',
+                assigned_staff: sObj || null,
+                staff_name: sObj ? sObj.full_name : null,
+                service_type: form.service_type || 'short_service',
+                service_type_display: form.service_type ? form.service_type.replace('_',' ').replace(/\b\w/g, c=>c.toUpperCase()) : 'Short Service',
+                status: sObj ? 'assigned' : 'pending',
+                status_display: sObj ? 'Assigned' : 'Pending',
+                payment_status: form.payment_status || 'pending',
+                payment_status_display: form.payment_status === 'advance' ? 'Advance Paid' : 'Payment Pending',
+                scheduled_time: bookingPayload.scheduled_time,
+                address: bookingPayload.address,
+                latitude: bookingPayload.latitude,
+                longitude: bookingPayload.longitude,
+                amount: amt,
+                amount_paid: paid,
+                balance_due: amt - paid,
+                notes: form.notes || '',
+                created_at: new Date().toISOString()
+              });
+            }
             setShowNew(false);
           }}
         />

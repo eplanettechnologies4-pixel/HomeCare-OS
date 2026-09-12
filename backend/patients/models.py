@@ -64,7 +64,7 @@ class Patient(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ['last_name', 'first_name']
+        ordering = ['-created_at']
 
     def __str__(self):
         return f"{self.mr_number} — {self.full_name}"

@@ -264,10 +264,7 @@ const useStore = create((set, get) => ({
   setSelectedBooking: (b) => set({ selectedBooking: b }),
   fetchBookings: async () => {
     try {
-      const token = get().userToken;
-      const res = await fetch(`${API_BASE}/bookings/`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
+      const res = await apiFetch('/bookings/');
       if (res.ok) {
         const data = await res.json();
         const items = Array.isArray(data) ? data : (data.results || []);
@@ -283,22 +280,55 @@ const useStore = create((set, get) => ({
     } catch (err) {
       console.warn('[Store] fetchBookings error:', err);
     }
-    set({ bookings: [] });
-    return [];
+    return get().bookings;
   },
   addBooking: (booking) => set((s) => ({ bookings: [booking, ...s.bookings] })),
-  assignNurseToBooking: (bookingId, assignmentData) => set((s) => ({
-    bookings: s.bookings.map(b => b.id === bookingId ? {
-      ...b,
-      assigned_staff: assignmentData.staff,
-      staff_name: assignmentData.staff?.full_name,
-      backup_staff: assignmentData.backupStaff,
-      recurring_days: assignmentData.recurringDays,
-      nurse_instructions: assignmentData.instructions,
-      status: 'assigned',
-      status_display: 'Assigned'
-    } : b)
-  })),
+  createBooking: async (bookingData) => {
+    try {
+      const res = await apiFetch('/bookings/', {
+        method: 'POST',
+        body: JSON.stringify(bookingData),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        await get().fetchBookings();
+        return { success: true, data };
+      } else {
+        const errorMsg = data.detail || JSON.stringify(data);
+        return { success: false, error: errorMsg };
+      }
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  },
+  assignNurseToBooking: async (bookingId, assignmentData) => {
+    // 1. Optimistic update
+    set((s) => ({
+      bookings: s.bookings.map(b => b.id === bookingId ? {
+        ...b,
+        assigned_staff: assignmentData.staff,
+        staff_name: assignmentData.staff?.full_name,
+        backup_staff: assignmentData.backupStaff,
+        recurring_days: assignmentData.recurringDays,
+        nurse_instructions: assignmentData.instructions,
+        status: 'assigned',
+        status_display: 'Assigned'
+      } : b)
+    }));
+
+    // 2. Persist to backend API if staff id is available
+    if (assignmentData.staff?.id) {
+      try {
+        await apiFetch(`/bookings/${bookingId}/assign_staff/`, {
+          method: 'POST',
+          body: JSON.stringify({ staff_id: assignmentData.staff.id }),
+        });
+        await get().fetchBookings();
+      } catch (err) {
+        console.warn('[Store] assign_staff error:', err);
+      }
+    }
+  },
 
   // ── Staff ─────────────────────────────────────────────────────────────────
   staff: [],
@@ -306,10 +336,7 @@ const useStore = create((set, get) => ({
   setSelectedStaff: (s_) => set({ selectedStaff: s_ }),
   fetchStaff: async () => {
     try {
-      const token = get().userToken;
-      const res = await fetch(`${API_BASE}/staff/members/`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
+      const res = await apiFetch('/staff/members/');
       if (res.ok) {
         const data = await res.json();
         const items = Array.isArray(data) ? data : (data.results || []);
@@ -319,18 +346,12 @@ const useStore = create((set, get) => ({
     } catch (err) {
       console.warn('[Store] fetchStaff error:', err);
     }
-    set({ staff: [] });
-    return [];
+    return get().staff;
   },
   createStaffMember: async (staffData) => {
     try {
-      const token = get().userToken;
-      const res = await fetch(`${API_BASE}/staff/members/`, {
+      const res = await apiFetch('/staff/members/', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
         body: JSON.stringify(staffData),
       });
       const data = await res.json();
@@ -347,40 +368,29 @@ const useStore = create((set, get) => ({
   },
   toggleStaffStatus: async (staffId) => {
     try {
-      const token = get().userToken;
-      const res = await fetch(`${API_BASE}/staff/members/${staffId}/toggle-status/`, {
+      const res = await apiFetch(`/staff/members/${staffId}/toggle-status/`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
       });
       if (res.ok) {
         await get().fetchStaff();
         return { success: true };
       }
-      const data = await res.json();
-      return { success: false, error: data.detail || 'Failed to toggle status' };
+      return { success: false, error: 'Failed to update staff status' };
     } catch (err) {
       return { success: false, error: err.message };
     }
   },
-  setUserPassword: async (staffId, password, password_confirm) => {
+  setStaffPassword: async (staffId, password, passwordConfirm) => {
     try {
-      const token = get().userToken;
-      const res = await fetch(`${API_BASE}/staff/members/${staffId}/set-password/`, {
+      const res = await apiFetch(`/staff/members/${staffId}/set-password/`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({ password, password_confirm }),
+        body: JSON.stringify({ password, password_confirm: passwordConfirm }),
       });
       const data = await res.json();
       if (res.ok) {
         return { success: true, message: data.message };
       }
-      const errorMsg = data.password?.[0] || data.password_confirm?.[0] || data.error || data.detail || 'Failed to update password';
+      const errorMsg = data.password?.[0] || data.password_confirm?.[0] || data.error || 'Failed to update password';
       return { success: false, error: errorMsg };
     } catch (err) {
       return { success: false, error: err.message };
@@ -388,10 +398,8 @@ const useStore = create((set, get) => ({
   },
   deleteStaffMember: async (staffId) => {
     try {
-      const token = get().userToken;
-      const res = await fetch(`${API_BASE}/staff/members/${staffId}/`, {
+      const res = await apiFetch(`/staff/members/${staffId}/`, {
         method: 'DELETE',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
       if (res.ok || res.status === 204) {
         await get().fetchStaff();
@@ -405,14 +413,17 @@ const useStore = create((set, get) => ({
 
   // ── Patients ──────────────────────────────────────────────────────────────
   patients: [],
-  selectedPatient: null,
-  setSelectedPatient: (p) => set({ selectedPatient: p }),
+  selectedPatient: typeof window !== 'undefined' ? JSON.parse(localStorage.getItem('selectedPatient') || 'null') : null,
+  setSelectedPatient: (p) => {
+    try {
+      if (p) localStorage.setItem('selectedPatient', JSON.stringify(p));
+      else localStorage.removeItem('selectedPatient');
+    } catch (e) {}
+    set({ selectedPatient: p });
+  },
   fetchPatients: async () => {
     try {
-      const token = get().userToken;
-      const res = await fetch(`${API_BASE}/patients/`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
+      const res = await apiFetch('/patients/');
       if (res.ok) {
         const data = await res.json();
         const items = Array.isArray(data) ? data : (data.results || []);
@@ -425,13 +436,53 @@ const useStore = create((set, get) => ({
     set({ patients: [] });
     return [];
   },
+  createPatient: async (patientData) => {
+    try {
+      const res = await apiFetch('/patients/', {
+        method: 'POST',
+        body: JSON.stringify(patientData),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        await get().fetchPatients();
+        return { success: true, data };
+      }
+      const errorMsg = data.detail || (typeof data === 'object' ? Object.entries(data).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`).join(' | ') : String(data));
+      return { success: false, error: errorMsg };
+    } catch (err) {
+      return { success: false, error: err.message || 'Network error creating patient' };
+    }
+  },
   addPatient: (patient) => set((s) => ({ patients: [patient, ...s.patients] })),
-  updatePatient: (id, updatedFields) => set((s) => ({
-    patients: s.patients.map((p) => (p.id === id ? { ...p, ...updatedFields } : p)),
-  })),
-  deletePatient: (id) => set((s) => ({
-    patients: s.patients.filter((p) => p.id !== id),
-  })),
+  updatePatient: async (id, updatedFields) => {
+    try {
+      const res = await apiFetch(`/patients/${id}/`, {
+        method: 'PATCH',
+        body: JSON.stringify(updatedFields),
+      });
+      if (res.ok) {
+        await get().fetchPatients();
+        return { success: true };
+      }
+      return { success: false, error: 'Failed to update patient' };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  },
+  deletePatient: async (id) => {
+    try {
+      const res = await apiFetch(`/patients/${id}/`, {
+        method: 'DELETE',
+      });
+      if (res.ok || res.status === 204) {
+        await get().fetchPatients();
+        return { success: true };
+      }
+      return { success: false, error: 'Failed to delete patient' };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  },
 
   // ── Load All Active Data ──────────────────────────────────────────────────
   fetchAllData: async () => {

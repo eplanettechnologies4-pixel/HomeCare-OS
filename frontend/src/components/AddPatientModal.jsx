@@ -5,7 +5,7 @@ import useStore from '../store/useStore';
 export default function AddPatientModal({ onClose }) {
   const patients           = useStore((s) => s.patients);
   const staff              = useStore((s) => s.staff);
-  const addPatient         = useStore((s) => s.addPatient);
+  const createPatient      = useStore((s) => s.createPatient);
   const setSelectedPatient = useStore((s) => s.setSelectedPatient);
   const setActivePage     = useStore((s) => s.setActivePage);
 
@@ -33,6 +33,8 @@ export default function AddPatientModal({ onClose }) {
   const [documents, setDocuments] = useState([]);
   const [errors, setErrors]       = useState({});
   const [duplicateWarning, setDuplicateWarning] = useState('');
+  const [serverError, setServerError]           = useState('');
+  const [isSubmitting, setIsSubmitting]         = useState(false);
 
   const set = (key, val) => {
     setForm(prev => ({ ...prev, [key]: val }));
@@ -41,7 +43,7 @@ export default function AddPatientModal({ onClose }) {
       const nameMatch = key === 'full_name' ? val.toLowerCase() : form.full_name.toLowerCase();
       const phoneMatch = key === 'phone' ? val : form.phone;
       if (nameMatch.length > 3) {
-        const existing = patients.find(p => p.full_name.toLowerCase() === nameMatch || (phoneMatch.length > 8 && p.phone === phoneMatch));
+        const existing = patients.find(p => p.full_name?.toLowerCase() === nameMatch || (phoneMatch.length > 8 && p.phone === phoneMatch));
         if (existing) {
           setDuplicateWarning(`Warning: Patient "${existing.full_name}" (${existing.mr_number}) already exists with contact ${existing.phone}.`);
         } else {
@@ -71,55 +73,50 @@ export default function AddPatientModal({ onClose }) {
     return Object.keys(errs).length === 0;
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!validate()) return;
+    setServerError('');
+    setIsSubmitting(true);
 
-    const count = patients.length + 1;
-    const newId = count;
-    const mrNum = `MR-2024-${String(count).padStart(3, '0')}`;
-    const cmObj = staff.find(s => String(s.id) === String(form.care_manager_id)) || careManagers[0];
+    const nameParts = form.full_name.trim().split(/\s+/);
+    const first_name = nameParts[0] || 'Unknown';
+    const last_name = nameParts.slice(1).join(' ') || '.';
+    const birthYear = new Date().getFullYear() - (parseInt(form.age, 10) || 30);
+    const date_of_birth = `${birthYear}-01-01`;
 
-    const newPatient = {
-      id: newId,
-      mr_number: mrNum,
-      full_name: form.full_name,
-      first_name: form.full_name.split(' ')[0],
-      last_name: form.full_name.split(' ').slice(1).join(' ') || '',
-      age: Number(form.age),
-      date_of_birth: `${2026 - Number(form.age)}-01-01`,
+    const payload = {
+      first_name,
+      last_name,
+      date_of_birth,
       gender: form.gender,
-      gender_display: form.gender === 'M' ? 'Male' : 'Female',
-      blood_type: form.blood_type,
-      primary_diagnosis: form.primary_diagnosis,
-      phone: form.phone,
-      address: form.address,
+      phone: form.phone.trim(),
+      address: form.address.trim(),
+      primary_diagnosis: form.primary_diagnosis.trim(),
+      blood_type: form.blood_type || '',
+      allergies: form.allergies || 'NKDA',
+      emergency_contact_name: form.emergency_contact_name || '',
+      emergency_contact_phone: form.emergency_contact_phone || '',
+      emergency_contact_relation: 'Emergency Contact',
+      assigned_care_manager: form.care_manager_id ? Number(form.care_manager_id) : null,
       latitude: 33.57,
       longitude: 73.15,
-      assigned_care_manager: cmObj,
-      care_manager_name: cmObj ? cmObj.full_name : 'Hina Malik',
       is_active: true,
-      allergies: form.allergies || 'NKDA',
-      emergency_contact: `${form.emergency_contact_name} (${form.emergency_contact_phone})`,
-      referring_doctor: form.referring_doctor,
-      service_package: {
-        type: form.service_type,
-        plan: form.plan_type,
-        start_date: form.start_date,
-      },
-      documents: documents,
     };
 
-    // Save to store
-    addPatient(newPatient);
+    const res = await createPatient(payload);
+    setIsSubmitting(false);
 
-    // Close modal & Redirect straight into the new patient's 360° Profile page!
-    if (onClose) onClose();
-    setSelectedPatient(newPatient);
-    setActivePage('patient-360');
+    if (res.success) {
+      if (onClose) onClose();
+      setSelectedPatient(res.data);
+      setActivePage('patients');
+    } else {
+      setServerError(res.error || 'Failed to create patient on server. Please verify required fields.');
+    }
   };
 
   return (
-    <div className="modal-backdrop" onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="modal-backdrop" onClick={(e) => e.target === e.currentTarget && !isSubmitting && onClose()}>
       <div className="modal" style={{ width: 680 }}>
         <div className="modal-header" style={{ background: 'var(--teal-700)', color: 'white' }}>
           <div>
@@ -130,14 +127,22 @@ export default function AddPatientModal({ onClose }) {
               Add new patient to HomeCare OS EMR system
             </div>
           </div>
-          <button className="btn btn-ghost btn-icon" onClick={onClose} style={{ color: 'white' }}><X size={16} /></button>
+          <button className="btn btn-ghost btn-icon" onClick={onClose} disabled={isSubmitting} style={{ color: 'white' }}><X size={16} /></button>
         </div>
 
         <div className="modal-body" style={{ padding: 22 }}>
           
+          {/* Server Error Alert */}
+          {serverError && (
+            <div style={{ background: '#fff5f5', border: '1px solid var(--status-red)', borderRadius: 8, padding: '10px 14px', marginBottom: 16, display: 'flex', gap: 10, alignItems: 'center', fontSize: '0.85rem', color: 'var(--status-red)' }}>
+              <AlertTriangle size={18} style={{ flexShrink: 0 }} />
+              <div>{serverError}</div>
+            </div>
+          )}
+
           {/* Duplicate Warning Alert */}
           {duplicateWarning && (
-            <div style={{ background: '#fff5f5', border: '1px solid var(--status-red)', borderRadius: 8, padding: '10px 14px', marginBottom: 16, display: 'flex', gap: 10, alignItems: 'center', fontSize: '0.82rem', color: 'var(--status-red)' }}>
+            <div style={{ background: '#fffbeb', border: '1px solid var(--amber-500)', borderRadius: 8, padding: '10px 14px', marginBottom: 16, display: 'flex', gap: 10, alignItems: 'center', fontSize: '0.82rem', color: '#92400e' }}>
               <AlertTriangle size={18} style={{ flexShrink: 0 }} />
               <div>{duplicateWarning}</div>
             </div>
@@ -270,9 +275,9 @@ export default function AddPatientModal({ onClose }) {
         </div>
 
         <div className="modal-footer">
-          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" onClick={handleSubmit}>
-            Create Patient Record & View 360° Profile →
+          <button className="btn btn-ghost" onClick={onClose} disabled={isSubmitting}>Cancel</button>
+          <button className="btn btn-primary" onClick={handleSubmit} disabled={isSubmitting}>
+            {isSubmitting ? 'Creating Patient…' : 'Create Patient Record & View 360° Profile →'}
           </button>
         </div>
       </div>

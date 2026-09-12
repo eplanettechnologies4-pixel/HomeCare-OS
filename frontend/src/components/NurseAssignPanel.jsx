@@ -1,11 +1,36 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { UserCheck, Star, Phone, Check, Shield, AlertCircle } from 'lucide-react';
 import { SKILLS_LIST } from '../data/mockData';
+import useStore from '../store/useStore';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 export default function NurseAssignPanel({ booking, staffList, onConfirmAssignment }) {
-  const availableStaff = staffList.filter(s => ['nurse', 'doctor', 'physio'].includes(s.role));
+  const storeStaff = useStore((s) => s.staff);
+  const fetchStaff = useStore((s) => s.fetchStaff);
+
+  useEffect(() => {
+    fetchStaff();
+  }, [fetchStaff]);
+
+  // Use latest store staff if available, falling back to staffList prop
+  const allStaff = (storeStaff && storeStaff.length > 0) ? storeStaff : (staffList || []);
+
+  const isClinicalStaff = (s) => {
+    const role = (s.role || '').toLowerCase();
+    const roleDisplay = (s.role_display || '').toLowerCase();
+    return (
+      ['nurse', 'doctor', 'physio', 'speech', 'psychologist', 'dietician', 'care_manager'].includes(role) ||
+      roleDisplay.includes('nurse') ||
+      roleDisplay.includes('doctor') ||
+      roleDisplay.includes('physio') ||
+      roleDisplay.includes('therapist') ||
+      roleDisplay.includes('clinical')
+    );
+  };
+
+  const clinicalStaff = allStaff.filter(s => isClinicalStaff(s) && s.is_active !== false);
+  const availableStaff = clinicalStaff.length > 0 ? clinicalStaff : allStaff.filter(s => s.is_active !== false);
   
   const [selectedSkills, setSelectedSkills] = useState([]);
   const [primaryNurseId, setPrimaryNurseId] = useState(booking?.assigned_staff?.id || '');
@@ -14,15 +39,17 @@ export default function NurseAssignPanel({ booking, staffList, onConfirmAssignme
   const [instructions, setInstructions]     = useState(booking?.nurse_instructions || '');
   const [isAssigned, setIsAssigned]         = useState(!!booking?.assigned_staff);
 
-  // Filter nurses by skills if skills are selected
+  // Filter nurses by skills if skills are selected, fallback to availableStaff if no match
   const filteredNurses = availableStaff.filter(s => {
     if (selectedSkills.length === 0) return true;
     const spec = (s.specialization || '').toLowerCase();
     return selectedSkills.some(sk => spec.includes(sk.toLowerCase()));
   });
 
-  const primaryNurse = staffList.find(s => String(s.id) === String(primaryNurseId));
-  const backupNurse  = staffList.find(s => String(s.id) === String(backupNurseId));
+  const dropdownNurses = filteredNurses.length > 0 ? filteredNurses : availableStaff;
+
+  const primaryNurse = allStaff.find(s => String(s.id) === String(primaryNurseId));
+  const backupNurse  = allStaff.find(s => String(s.id) === String(backupNurseId));
 
   const toggleSkill = (skill) => {
     setSelectedSkills(prev =>
@@ -152,24 +179,39 @@ export default function NurseAssignPanel({ booking, staffList, onConfirmAssignme
           {/* Primary Nurse Selection */}
           <div className="form-group">
             <label className="form-label">Select Primary Nurse</label>
-            <select className="form-select" value={primaryNurseId} onChange={e => setPrimaryNurseId(e.target.value)}>
+            <select
+              className="form-select"
+              value={primaryNurseId}
+              onFocus={() => fetchStaff()}
+              onChange={e => setPrimaryNurseId(e.target.value)}
+            >
               <option value="">Choose nurse...</option>
-              {filteredNurses.map(s => (
-                <option key={s.id} value={s.id}>
-                  {s.full_name} ({s.role_display}) — ★{s.rating} — {s.status === 'available' ? 'Available' : s.status_display}
-                </option>
-              ))}
+              {dropdownNurses.map(s => {
+                const spec = (s.specialization || '').toLowerCase();
+                const matchesSkills = selectedSkills.length > 0 && selectedSkills.some(sk => spec.includes(sk.toLowerCase()));
+                return (
+                  <option key={s.id} value={s.id}>
+                    {s.full_name} ({s.role_display || s.role}) — ★{s.rating || 5.0} — {s.status === 'available' ? 'Available' : (s.status_display || s.status || 'Active')}
+                    {matchesSkills ? ' ★ Skill Match' : ''}
+                  </option>
+                );
+              })}
             </select>
           </div>
 
           {/* Backup Nurse Selection */}
           <div className="form-group">
             <label className="form-label">Backup Nurse (Optional)</label>
-            <select className="form-select" value={backupNurseId} onChange={e => setBackupNurseId(e.target.value)}>
+            <select
+              className="form-select"
+              value={backupNurseId}
+              onFocus={() => fetchStaff()}
+              onChange={e => setBackupNurseId(e.target.value)}
+            >
               <option value="">Choose backup nurse (optional)...</option>
               {availableStaff.filter(s => String(s.id) !== String(primaryNurseId)).map(s => (
                 <option key={s.id} value={s.id}>
-                  {s.full_name} ({s.role_display}) — ★{s.rating}
+                  {s.full_name} ({s.role_display || s.role}) — ★{s.rating || 5.0}
                 </option>
               ))}
             </select>

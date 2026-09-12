@@ -29,6 +29,7 @@ class PatientListSerializer(serializers.ModelSerializer):
 
 
 class PatientDetailSerializer(serializers.ModelSerializer):
+    mr_number = serializers.CharField(required=False, allow_blank=True)
     full_name = serializers.ReadOnlyField()
     age = serializers.ReadOnlyField()
     gender_display = serializers.CharField(source='get_gender_display', read_only=True)
@@ -39,6 +40,20 @@ class PatientDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = Patient
         fields = '__all__'
+
+    def create(self, validated_data):
+        from django.utils import timezone
+        mr = validated_data.get('mr_number')
+        if not mr or Patient.objects.filter(mr_number=mr).exists():
+            year = timezone.now().year
+            count = Patient.objects.count() + 1
+            candidate = f"MR-{year}-{count:04d}"
+            while Patient.objects.filter(mr_number=candidate).exists():
+                count += 1
+                candidate = f"MR-{year}-{count:04d}"
+            validated_data['mr_number'] = candidate
+
+        return super().create(validated_data)
 
     def get_active_prescriptions(self, obj):
         return PrescriptionSerializer(obj.prescriptions.all()[:5], many=True).data

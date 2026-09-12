@@ -14,8 +14,22 @@ import VitalsRecordFormB from '../components/VitalsRecordFormB';
 import MarSheetFormC from '../components/MarSheetFormC';
 
 export default function Patient360() {
-  const patient = useStore((s) => s.selectedPatient) || useStore((s) => s.patients[0]);
-  const setActivePage = useStore((s) => s.setActivePage);
+  const selectedPatient = useStore((s) => s.selectedPatient);
+  const patients        = useStore((s) => s.patients);
+  const patient         = selectedPatient || patients[0];
+  const setActivePage   = useStore((s) => s.setActivePage);
+
+  if (!patient) {
+    return (
+      <div style={{ padding: 48, textAlign: 'center' }}>
+        <p style={{ color: 'var(--status-grey)', fontSize: '0.95rem' }}>Loading patient profile...</p>
+        <button className="btn btn-primary" onClick={() => setActivePage('patients')} style={{ marginTop: 12 }}>
+          Back to Patients List
+        </button>
+      </div>
+    );
+  }
+
   const bookings = useStore((s) => s.bookings).filter(b => b.patient_name === patient.full_name || b.patient?.id === patient.id);
   const invoices = useStore((s) => s.invoices).filter(i => i.patient_id === patient.id || i.patient_name === patient.full_name);
   const dailyReports = useStore((s) => s.dailyReports).filter(r => r.patient_id === patient.id || r.patient_name === patient.full_name);

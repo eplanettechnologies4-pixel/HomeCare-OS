@@ -15,9 +15,22 @@ function EditPatientModal({ patient, onClose }) {
     is_active: patient.is_active,
   });
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    updatePatient(patient.id, form);
+    const nameParts = (form.full_name || '').trim().split(/\s+/);
+    const first_name = nameParts[0] || 'Unknown';
+    const last_name = nameParts.slice(1).join(' ') || '.';
+    const birthYear = new Date().getFullYear() - (parseInt(form.age, 10) || 30);
+    const payload = {
+      first_name,
+      last_name,
+      date_of_birth: `${birthYear}-01-01`,
+      phone: form.phone,
+      primary_diagnosis: form.primary_diagnosis,
+      address: form.address,
+      is_active: form.is_active,
+    };
+    await updatePatient(patient.id, payload);
     onClose();
   };
 
