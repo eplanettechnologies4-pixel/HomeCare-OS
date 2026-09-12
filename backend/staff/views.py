@@ -9,7 +9,7 @@ from .serializers import (
 
 
 class StaffViewSet(viewsets.ModelViewSet):
-    queryset = StaffMember.objects.filter(is_active=True)
+    queryset = StaffMember.objects.all().order_by('-created_at')
 
     def get_serializer_class(self):
         if self.action in ['list']:
@@ -21,13 +21,13 @@ class StaffViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def available(self, request):
         """Staff members currently available for assignment."""
-        qs = self.get_queryset().filter(status='available')
+        qs = self.get_queryset().filter(is_active=True, status='available')
         return Response(StaffListSerializer(qs, many=True).data)
 
     @action(detail=False, methods=['get'])
     def on_visit(self, request):
         """Staff currently on a visit (for live tracking)."""
-        qs = self.get_queryset().filter(status='on_visit')
+        qs = self.get_queryset().filter(is_active=True, status='on_visit')
         return Response(StaffListSerializer(qs, many=True).data)
 
     @action(detail=True, methods=['get'])
@@ -35,6 +35,31 @@ class StaffViewSet(viewsets.ModelViewSet):
         staff = self.get_object()
         records = staff.attendance_records.all()[:60]
         return Response(AttendanceRecordSerializer(records, many=True).data)
+
+    @action(detail=True, methods=['post'], url_path='set-password')
+    def set_password(self, request, pk=None):
+        staff = self.get_object()
+        if not staff.user:
+            return Response({'error': 'This staff member has no linked login account.'}, status=400)
+        password = request.data.get('password')
+        password_confirm = request.data.get('password_confirm')
+        if not password or len(password) < 8:
+            return Response({'password': ['Password must be at least 8 characters long.']}, status=400)
+        if password != password_confirm:
+            return Response({'password_confirm': ['Passwords do not match.']}, status=400)
+        staff.user.set_password(password)
+        staff.user.save()
+        return Response({'success': True, 'message': f'Password updated successfully for {staff.user.username}.'})
+
+    @action(detail=True, methods=['post'], url_path='toggle-status')
+    def toggle_status(self, request, pk=None):
+        staff = self.get_object()
+        staff.is_active = not staff.is_active
+        staff.save(update_fields=['is_active'])
+        if staff.user:
+            staff.user.is_active = staff.is_active
+            staff.user.save(update_fields=['is_active'])
+        return Response(StaffListSerializer(staff).data)
 
 
 class LeaveRequestViewSet(viewsets.ModelViewSet):

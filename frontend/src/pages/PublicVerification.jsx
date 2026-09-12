@@ -8,12 +8,10 @@ export default function PublicVerification({ staffMember, empId }) {
   const setActivePage = useStore((s) => s.setActivePage);
 
   // Find targeted staff by empId or fallback
-  const targetStaff = staffMember || staff.find(s => s.employee_id === empId) || staff[0];
-  const systemUser  = useStore((s) => s.systemUsers).find(u => u.full_name === targetStaff.full_name);
+  const targetStaff = staffMember || staff.find(s => s.employee_id === empId) || staff[0] || {};
 
-  // Live Database Status Check (Requirement 17)
-  const isSuspended = systemUser ? systemUser.status === 'suspended' : false;
-  const isLiveActive = targetStaff.is_active && !isSuspended;
+  // Live Database Status Check (from backend StaffMember.is_active)
+  const isLiveActive = Boolean(targetStaff.is_active);
 
   // Live Visit Assignment Check
   const activeVisit = bookings.find(b => (b.assigned_staff?.id === targetStaff.id || b.staff_name === targetStaff.full_name) && b.status === 'in_progress');

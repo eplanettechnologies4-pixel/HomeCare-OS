@@ -10,6 +10,10 @@ class StaffRole(models.TextChoices):
     PSYCHOLOGIST = 'psychologist', 'Psychologist'
     DIETICIAN = 'dietician', 'Dietician'
     CARE_MANAGER = 'care_manager', 'Client Care Manager'
+    BRANCH_MANAGER = 'branch_manager', 'Branch Manager'
+    ADMIN = 'admin', 'Admin'
+    ACCOUNTANT = 'accountant', 'Accountant'
+    CRM_EXECUTIVE = 'crm_executive', 'CRM Executive'
 
 
 class StaffStatus(models.TextChoices):

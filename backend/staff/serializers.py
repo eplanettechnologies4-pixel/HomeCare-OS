@@ -20,6 +20,9 @@ class StaffListSerializer(serializers.ModelSerializer):
     full_name = serializers.ReadOnlyField()
     role_display = serializers.CharField(source='get_role_display', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
+    username = serializers.CharField(source='user.username', read_only=True, default='')
+    last_login = serializers.DateTimeField(source='user.last_login', read_only=True, default=None)
+    platform_allowed_display = serializers.CharField(source='get_platform_allowed_display', read_only=True)
 
     class Meta:
         model = StaffMember
@@ -28,6 +31,7 @@ class StaffListSerializer(serializers.ModelSerializer):
             'role', 'role_display', 'specialization',
             'status', 'status_display', 'phone', 'email',
             'photo', 'rating', 'hire_date', 'is_active',
+            'username', 'last_login', 'platform_allowed', 'platform_allowed_display',
         ]
 
 
@@ -116,7 +120,20 @@ class StaffCreateSerializer(serializers.ModelSerializer):
 
         # Auto-generate employee_id if not provided
         if not validated_data.get('employee_id'):
-            role_prefix = 'N' if role == 'nurse' else 'D' if role == 'doctor' else 'PT' if role == 'physio' else 'ST'
+            prefix_map = {
+                'nurse': 'N',
+                'doctor': 'D',
+                'physio': 'PT',
+                'speech': 'ST',
+                'psychologist': 'PSY',
+                'dietician': 'DT',
+                'care_manager': 'CM',
+                'branch_manager': 'BM',
+                'admin': 'ADM',
+                'accountant': 'ACC',
+                'crm_executive': 'CRM',
+            }
+            role_prefix = prefix_map.get(role, 'EMP')
             count = StaffMember.objects.count() + 1
             validated_data['employee_id'] = f'EMP-{role_prefix}-{count:03d}'
 
@@ -124,12 +141,16 @@ class StaffCreateSerializer(serializers.ModelSerializer):
         if not validated_data.get('hire_date'):
             validated_data['hire_date'] = timezone.now().date()
 
-        # Set platform_allowed default if not provided
+        # Set platform_allowed default based on role if not provided
         if 'platform_allowed' not in validated_data:
-            if role in ['care_manager']:
+            if role in ['admin', 'accountant', 'crm_executive', 'branch_manager']:
+                validated_data['platform_allowed'] = StaffMember.PlatformAllowed.WEB
+            elif role in ['care_manager']:
                 validated_data['platform_allowed'] = StaffMember.PlatformAllowed.BOTH
             else:
                 validated_data['platform_allowed'] = StaffMember.PlatformAllowed.MOBILE
+
+        is_staff_user = role in ['admin', 'branch_manager']
 
         with transaction.atomic():
             user = User.objects.create_user(
@@ -137,7 +158,8 @@ class StaffCreateSerializer(serializers.ModelSerializer):
                 password=password,
                 email=email,
                 first_name=first_name,
-                last_name=last_name
+                last_name=last_name,
+                is_staff=is_staff_user,
             )
             staff_member = StaffMember.objects.create(user=user, **validated_data)
 

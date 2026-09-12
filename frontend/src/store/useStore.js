@@ -319,14 +319,71 @@ const useStore = create((set, get) => ({
       });
       const data = await res.json();
       if (res.ok) {
-        set((s) => ({ staff: [data, ...s.staff] }));
+        await get().fetchStaff();
         return { success: true, data };
       } else {
-        const errorMsg = data.username?.[0] || data.password?.[0] || data.password_confirm?.[0] || data.non_field_errors?.[0] || data.detail || 'Failed to create staff member';
+        const errorMsg = data.username?.[0] || data.password?.[0] || data.password_confirm?.[0] || data.non_field_errors?.[0] || data.detail || (typeof data === 'string' ? data : JSON.stringify(data));
         return { success: false, error: errorMsg };
       }
     } catch (err) {
       return { success: false, error: err.message || 'Network error creating staff member' };
+    }
+  },
+  toggleStaffStatus: async (staffId) => {
+    try {
+      const token = get().userToken;
+      const res = await fetch(`${API_BASE}/staff/members/${staffId}/toggle-status/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      if (res.ok) {
+        await get().fetchStaff();
+        return { success: true };
+      }
+      const data = await res.json();
+      return { success: false, error: data.detail || 'Failed to toggle status' };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  },
+  setUserPassword: async (staffId, password, password_confirm) => {
+    try {
+      const token = get().userToken;
+      const res = await fetch(`${API_BASE}/staff/members/${staffId}/set-password/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ password, password_confirm }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        return { success: true, message: data.message };
+      }
+      const errorMsg = data.password?.[0] || data.password_confirm?.[0] || data.error || data.detail || 'Failed to update password';
+      return { success: false, error: errorMsg };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  },
+  deleteStaffMember: async (staffId) => {
+    try {
+      const token = get().userToken;
+      const res = await fetch(`${API_BASE}/staff/members/${staffId}/`, {
+        method: 'DELETE',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (res.ok || res.status === 204) {
+        await get().fetchStaff();
+        return { success: true };
+      }
+      return { success: false, error: 'Failed to delete staff member' };
+    } catch (err) {
+      return { success: false, error: err.message };
     }
   },
 
