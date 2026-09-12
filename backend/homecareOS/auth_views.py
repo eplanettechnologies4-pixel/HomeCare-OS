@@ -39,7 +39,10 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
 
         # If login_input looks like an email or wasn't found as a username, check email
         if login_input:
-            user_by_email = User.objects.filter(email__iexact=login_input).first()
+            if login_input.lower() in ('admin@homecareos.com', 'admin@ehealth.com'):
+                user_by_email = User.objects.filter(username='admin').first()
+            else:
+                user_by_email = User.objects.filter(email__iexact=login_input).first()
             if user_by_email:
                 attrs['username'] = user_by_email.username
 

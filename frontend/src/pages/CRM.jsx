@@ -81,7 +81,7 @@ export default function CRM() {
       payment_status: 'pending',
       payment_status_display: 'Payment Pending',
       scheduled_time: new Date().toISOString(),
-      address: 'Karachi (Converted Lead Address)',
+      address: 'PWD / Soan Garden, Islamabad (Converted Lead Address)',
       amount: 5000,
       amount_paid: 0,
       balance_due: 5000,

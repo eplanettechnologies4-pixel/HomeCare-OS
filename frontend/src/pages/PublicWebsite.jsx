@@ -33,9 +33,9 @@ export default function PublicWebsite() {
     gender: 'M',
     phone: '+92-3',
     contact_person: '',
-    address: 'House #12, Block 4, Clifton, Karachi',
-    lat: 24.86,
-    lng: 67.01,
+    address: 'House 42, Block C, Soan Garden, Islamabad',
+    lat: 33.57,
+    lng: 73.15,
     prescription_name: '',
     preferred_date: new Date().toISOString().split('T')[0],
     preferred_slot: 'morning',
@@ -116,7 +116,7 @@ export default function PublicWebsite() {
                   Hospital-Quality Medical Care Delivered at Your Home
                 </h1>
                 <p style={{ fontSize: '1.1rem', lineHeight: 1.6, color: 'rgba(255,255,255,0.9)', marginBottom: 36, maxWidth: 560 }}>
-                  Licensed doctors, BSN registered nurses, and DPT physiotherapists visiting your family in Karachi. Complete EMR, automated billing, and live map tracking.
+                  Licensed doctors, BSN registered nurses, and DPT physiotherapists visiting your family in Islamabad (PWD, Soan Garden & surrounding areas). Complete EMR, automated billing, and live map tracking.
                 </p>
 
                 <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -158,7 +158,7 @@ export default function PublicWebsite() {
                     Patient: <strong>Tariq Mehmood</strong> (Post-Stroke Care)
                   </div>
                   <div style={{ background: 'rgba(0,0,0,0.2)', padding: '8px 12px', borderRadius: 6, fontSize: '0.75rem', fontFamily: 'var(--font-mono)' }}>
-                    📍 GPS Tracking: 24.8607° N, 67.0011° E (Clifton)
+                    📍 GPS Tracking: 33.5710° N, 73.1510° E (PWD / Soan Garden)
                   </div>
                 </div>
 
@@ -279,7 +279,7 @@ export default function PublicWebsite() {
             <h1 style={{ fontFamily: 'var(--font-heading)', fontSize: '2.6rem', color: '#2d0b43', margin: '0 0 10px', fontWeight: 800 }}>
               Our Home Healthcare Services
             </h1>
-            <p style={{ color: 'var(--status-grey)', maxWidth: 600, margin: '0 auto' }}>Licensed clinical care delivered directly to your home in Karachi</p>
+            <p style={{ color: 'var(--status-grey)', maxWidth: 600, margin: '0 auto' }}>Licensed clinical care delivered directly to your home in PWD & Soan Garden, Islamabad</p>
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: 28 }}>
@@ -422,9 +422,9 @@ export default function PublicWebsite() {
               </p>
             </div>
             <div className="card" style={{ padding: 20 }}>
-              <h3 style={{ fontFamily: 'var(--font-heading)', color: 'var(--teal-800)', margin: '0 0 8px' }}>Branch Coverage</h3>
+              <h3 style={{ fontFamily: 'var(--font-heading)', color: 'var(--teal-800)', margin: '0 0 8px' }}>Main Office & Coverage</h3>
               <p style={{ fontSize: '0.85rem', color: '#4b5563', margin: 0 }}>
-                Operating 4 central dispatch hubs across Karachi: Gulshan-e-Iqbal, Clifton/DHA, North Nazimabad, and PECHS.
+                Main Office: PWD Road, adjacent to Soan Garden, Islamabad. Rapid dispatch coverage across PWD, Soan Garden, and surrounding sectors.
               </p>
             </div>
           </div>
@@ -564,7 +564,7 @@ export default function PublicWebsite() {
                     </div>
                     <div className="form-group" style={{ marginBottom: 0 }}>
                       <label className="form-label">Home Address with Area *</label>
-                      <input className="form-input" value={bookingForm.address} onChange={e => setBookingForm({...bookingForm, address: e.target.value})} placeholder="House #, Block, Area, Karachi" />
+                      <input className="form-input" value={bookingForm.address} onChange={e => setBookingForm({...bookingForm, address: e.target.value})} placeholder="House #, Street, Block, PWD / Soan Garden, Islamabad" />
                     </div>
                   </div>
 
@@ -573,7 +573,7 @@ export default function PublicWebsite() {
                     <MapPin size={20} style={{ color: 'var(--amber-600)', flexShrink: 0 }} />
                     <div>
                       <div style={{ fontWeight: 700, color: 'var(--teal-800)' }}>Address Map Pin Selected</div>
-                      <div style={{ fontSize: '0.72rem', color: 'var(--status-grey)', fontFamily: 'var(--font-mono)' }}>Lat: {bookingForm.lat}, Lng: {bookingForm.lng} (Clifton / Karachi)</div>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--status-grey)', fontFamily: 'var(--font-mono)' }}>Lat: {bookingForm.lat}, Lng: {bookingForm.lng} (PWD / Soan Garden, Islamabad)</div>
                     </div>
                   </div>
                 </div>

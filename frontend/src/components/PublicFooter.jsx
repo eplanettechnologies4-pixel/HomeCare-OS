@@ -54,11 +54,11 @@ export default function PublicFooter({ setActiveTab, onOpenBookingModal }) {
 
         {/* Col 4: Contact & Hotline */}
         <div>
-          <h4 style={{ color: 'white', fontFamily: 'var(--font-heading)', margin: '0 0 14px', fontSize: '0.95rem' }}>Karachi Central Dispatch</h4>
+          <h4 style={{ color: 'white', fontFamily: 'var(--font-heading)', margin: '0 0 14px', fontSize: '0.95rem' }}>Islamabad Central Dispatch</h4>
           <div style={{ fontSize: '0.82rem', display: 'flex', flexDirection: 'column', gap: 10 }}>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               <Phone size={14} style={{ color: 'var(--amber-400)' }} />
-              <span><strong>Hotline:</strong> +92-21-111-CARE-OS (2273)</span>
+              <span><strong>Hotline:</strong> +92-51-111-CARE-OS (2273)</span>
             </div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               <Mail size={14} style={{ color: 'var(--amber-400)' }} />
@@ -66,7 +66,7 @@ export default function PublicFooter({ setActiveTab, onOpenBookingModal }) {
             </div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
               <MapPin size={14} style={{ color: 'var(--amber-400)', flexShrink: 0, marginTop: 2 }} />
-              <span>Branches: Gulshan, Clifton, DHA, North Nazimabad (Karachi)</span>
+              <span>Main Office: PWD Road, adjacent to Soan Garden, Islamabad</span>
             </div>
           </div>
         </div>

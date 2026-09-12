@@ -93,8 +93,8 @@ export default function AddPatientModal({ onClose }) {
       primary_diagnosis: form.primary_diagnosis,
       phone: form.phone,
       address: form.address,
-      latitude: 24.86,
-      longitude: 67.01,
+      latitude: 33.57,
+      longitude: 73.15,
       assigned_care_manager: cmObj,
       care_manager_name: cmObj ? cmObj.full_name : 'Hina Malik',
       is_active: true,
@@ -181,7 +181,7 @@ export default function AddPatientModal({ onClose }) {
               </div>
               <div className="form-group" style={{ marginBottom: 0, gridColumn: 'span 2' }}>
                 <label className="form-label">Home Address *</label>
-                <input className="form-input" value={form.address} onChange={e => set('address', e.target.value)} placeholder="House/Flat #, Block, Area, Karachi" />
+                <input className="form-input" value={form.address} onChange={e => set('address', e.target.value)} placeholder="House/Flat #, Block, Sector / Society, Islamabad (PWD / Soan Garden)" />
                 {errors.address && <span style={{ fontSize: '0.72rem', color: 'var(--status-red)' }}>{errors.address}</span>}
               </div>
               <div className="form-group" style={{ marginBottom: 0 }}>

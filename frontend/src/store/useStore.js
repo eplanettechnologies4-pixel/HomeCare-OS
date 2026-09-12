@@ -2,15 +2,21 @@ import { create } from 'zustand';
 import {
   ALERT_RULES, INITIAL_PERMISSION_MATRIX, ATTENDANCE_THRESHOLDS
 } from '../data/mockData';
+import { apiFetch, setTokenGetter, API_BASE } from '../services/api';
 
-const API_BASE = 'http://localhost:8000/api';
+const savedToken = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+const savedRefresh = typeof window !== 'undefined' ? localStorage.getItem('refresh_token') : null;
+let savedUser = null;
+try {
+  savedUser = typeof window !== 'undefined' ? JSON.parse(localStorage.getItem('currentUser') || 'null') : null;
+} catch (e) {}
 
 const useStore = create((set, get) => ({
   // ── Authentication State ──────────────────────────────────────────────────
-  isAuthenticated: false,
-  currentUser: null,
-  userToken: null,
-  refreshToken: null,
+  isAuthenticated: !!savedToken,
+  currentUser: savedUser,
+  userToken: savedToken,
+  refreshToken: savedRefresh,
   failedLoginAttempts: 0,
   isLockedOut: false,
 
@@ -29,6 +35,15 @@ const useStore = create((set, get) => ({
           role: 'super_admin',
           full_name: emailOrPhone,
         };
+        if (data.access) {
+          localStorage.setItem('access_token', data.access);
+        }
+        if (data.refresh) {
+          localStorage.setItem('refresh_token', data.refresh);
+        }
+        if (user) {
+          localStorage.setItem('currentUser', JSON.stringify(user));
+        }
         set({
           isAuthenticated: true,
           currentUser: user,
@@ -50,7 +65,12 @@ const useStore = create((set, get) => ({
     }
   },
 
-  logout: () =>
+  logout: () => {
+    try {
+      localStorage.removeItem('access_token');
+      localStorage.removeItem('refresh_token');
+      localStorage.removeItem('currentUser');
+    } catch (e) {}
     set({
       isAuthenticated: false,
       currentUser: null,
@@ -63,15 +83,19 @@ const useStore = create((set, get) => ({
       bookings: [],
       liveVisits: [],
       alerts: [],
-    }),
+    });
+  },
 
   // ── Role RBAC ────────────────────────────────────────────────────────────
   currentRole: 'super_admin',
   setCurrentRole: (role) => set({ currentRole: role }),
 
   // ── Active Page ──────────────────────────────────────────────────────────
-  activePage: 'overview',
-  setActivePage: (page) => set({ activePage: page }),
+  activePage: typeof window !== 'undefined' ? (localStorage.getItem('activePage') || 'overview') : 'overview',
+  setActivePage: (page) => {
+    try { localStorage.setItem('activePage', page); } catch (e) {}
+    set({ activePage: page });
+  },
 
   // ── Alerts Feed ──────────────────────────────────────────────────────────
   alerts: [],
@@ -83,7 +107,7 @@ const useStore = create((set, get) => ({
 
   fetchLiveVisits: async () => {
     try {
-      const res = await fetch(`${API_BASE}/tracking/live-visits/`);
+      const res = await apiFetch('/tracking/live-visits/');
       if (res.ok) {
         const data = await res.json();
         const items = Array.isArray(data) ? data : (data.results || []);
@@ -131,7 +155,7 @@ const useStore = create((set, get) => ({
 
   fetchActiveSOS: async () => {
     try {
-      const res = await fetch(`${API_BASE}/tracking/sos/active/`);
+      const res = await apiFetch('/tracking/sos/active/');
       if (res.ok) {
         const data = await res.json();
         const items = Array.isArray(data) ? data : (data.results || []);
@@ -150,13 +174,8 @@ const useStore = create((set, get) => ({
 
   resolveSOSAlert: async (id, notes = '') => {
     try {
-      const token = get().userToken;
-      const res = await fetch(`${API_BASE}/tracking/sos/${id}/resolve/`, {
+      const res = await apiFetch(`/tracking/sos/${id}/resolve/`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
         body: JSON.stringify({ notes }),
       });
       if (res.ok) {
@@ -197,7 +216,7 @@ const useStore = create((set, get) => ({
 
   fetchAlertRules: async () => {
     try {
-      const res = await fetch(`${API_BASE}/tracking/alert-rules/`);
+      const res = await apiFetch('/tracking/alert-rules/');
       if (res.ok) {
         const data = await res.json();
         const rule = Array.isArray(data) ? data[0] : (data.results ? data.results[0] : data);
@@ -220,13 +239,8 @@ const useStore = create((set, get) => ({
   saveAlertRules: async (rules) => {
     set({ alertRules: rules });
     try {
-      const token = get().userToken;
-      const res = await fetch(`${API_BASE}/tracking/alert-rules/`, {
+      const res = await apiFetch('/tracking/alert-rules/', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
         body: JSON.stringify(rules),
       });
       if (res.ok) {
@@ -687,8 +701,8 @@ const useStore = create((set, get) => ({
       primary_diagnosis: data.service_title || 'Home Medical Visit',
       phone: data.phone,
       address: data.address,
-      latitude: data.lat || 24.86,
-      longitude: data.lng || 67.01,
+      latitude: data.lat || 33.57,
+      longitude: data.lng || 73.15,
       care_manager_name: 'Hina Malik',
       is_active: true,
       allergies: 'NKDA',
@@ -713,8 +727,8 @@ const useStore = create((set, get) => ({
       status_display: 'Pending Nurse Assignment',
       assigned_staff: null,
       address: data.address,
-      patient_lat: data.lat || 24.86,
-      patient_lng: data.lng || 67.01,
+      patient_lat: data.lat || 33.57,
+      patient_lng: data.lng || 73.15,
       payment_status: data.payment_method === 'advance' ? 'Paid' : 'Unpaid (Pay on Service)',
       created_at: new Date().toISOString(),
     };
@@ -748,5 +762,8 @@ const useStore = create((set, get) => ({
   sidebarOpen: false,
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
 }));
+
+// Wire centralized API client with the store's user token
+setTokenGetter(() => useStore.getState()?.userToken);
 
 export default useStore;

@@ -25,8 +25,8 @@ export function useMockGPS(enabled = false) {
           const visit = state.liveVisits.find((v) => v.assigned_staff?.id === staffId);
           if (!visit) return {};
 
-          const baseLat = parseFloat(visit.staff_lat) || parseFloat(visit.assigned_staff?.current_latitude) || 24.86;
-          const baseLng = parseFloat(visit.staff_lng) || parseFloat(visit.assigned_staff?.current_longitude) || 67.01;
+          const baseLat = parseFloat(visit.staff_lat) || parseFloat(visit.assigned_staff?.current_latitude) || 33.57;
+          const baseLng = parseFloat(visit.staff_lng) || parseFloat(visit.assigned_staff?.current_longitude) || 73.15;
 
           return {
             liveVisits: state.liveVisits.map((v) =>

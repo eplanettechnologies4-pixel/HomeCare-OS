@@ -91,8 +91,8 @@ export default function PublicVerification({ staffMember, empId }) {
             <span className="badge badge-green" style={{ fontSize: '0.7rem' }}>PMDC / PNC Certified ✓</span>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--sage-100)', paddingBottom: 8 }}>
-            <span style={{ color: 'var(--status-grey)' }}>Branch Location:</span>
-            <strong>Gulshan Branch (Karachi)</strong>
+            <span style={{ color: 'var(--status-grey)' }}>Office / Operational Base:</span>
+            <strong>Main Office (PWD / Soan Garden, Islamabad)</strong>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid var(--sage-100)', paddingBottom: 8 }}>
             <span style={{ color: 'var(--status-grey)' }}>Current Assignment Status:</span>
@@ -112,7 +112,7 @@ export default function PublicVerification({ staffMember, empId }) {
             Questions or Safety Concerns?
           </div>
           <div style={{ color: 'var(--status-grey)', marginBottom: 10 }}>
-            Call Karachi Central Dispatch Helpline: <strong>+92-21-111-CARE-OS</strong>
+            Call Islamabad Central Dispatch Helpline: <strong>+92-51-111-CARE-OS</strong>
           </div>
           <button className="btn btn-ghost btn-sm" style={{ color: 'var(--status-red)', width: '100%', justifyContent: 'center' }}>
             <Phone size={13} /> Report an Issue to Care Manager

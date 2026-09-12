@@ -104,12 +104,15 @@ class TrackingConsumer(AsyncWebsocketConsumer):
 
     @database_sync_to_async
     def update_staff_location(self, staff_id, lat, lng):
-        from django.utils import timezone
         from staff.models import StaffMember
+        from tracking.models import LiveVisit
         StaffMember.objects.filter(pk=staff_id).update(
             current_latitude=lat,
             current_longitude=lng,
-            location_updated_at=timezone.now(),
+        )
+        LiveVisit.objects.filter(staff_id=staff_id).update(
+            current_latitude=lat,
+            current_longitude=lng,
         )
 
     @database_sync_to_async

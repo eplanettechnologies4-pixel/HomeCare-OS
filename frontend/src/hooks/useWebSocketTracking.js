@@ -45,10 +45,15 @@ export function useWebSocketTracking(token) {
   const wsRef = useRef(null);
 
   useEffect(() => {
-    // Resolve host dynamically from window location or env
+    if (!token) return;
+
+    // Resolve host and port dynamically from window location or env
     const host = window.location.hostname || 'localhost';
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${wsProtocol}//${host}:8000/ws/tracking/?token=${encodeURIComponent(token || '')}`;
+    const defaultWsPort = window.location.port === '5173' ? '8000' : (window.location.port || (window.location.protocol === 'https:' ? '443' : '80'));
+    const wsPort = import.meta.env.VITE_WS_PORT || defaultWsPort;
+    const portSuffix = (wsPort === '80' || wsPort === '443') ? '' : `:${wsPort}`;
+    const wsUrl = import.meta.env.VITE_WS_URL || `${wsProtocol}//${host}${portSuffix}/ws/tracking/?token=${encodeURIComponent(token)}`;
 
     let isSubscribed = true;
     let reconnectTimeout = null;

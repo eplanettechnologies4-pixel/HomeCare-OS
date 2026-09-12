@@ -192,13 +192,13 @@ export default function AddStaffUserModal({ onClose, onSuccess }) {
 
             {/* Specialization */}
             <div className="form-group">
-              <label className="form-label">Specialization / Designation / Branch</label>
+              <label className="form-label">Specialization / Designation / Department</label>
               <input
                 type="text"
                 className="form-input"
                 value={form.specialization}
                 onChange={(e) => setF('specialization', e.target.value)}
-                placeholder="e.g. ICU Nurse, General Physician, Karachi Branch"
+                placeholder="e.g. ICU Nurse, General Physician, Main Office (Islamabad)"
               />
             </div>
 

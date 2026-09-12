@@ -29,6 +29,7 @@ if 'testserver' not in ALLOWED_HOSTS and '*' not in ALLOWED_HOSTS:
 FIELD_ENCRYPTION_KEY = config('FIELD_ENCRYPTION_KEY')  # No default — must be set in .env
 
 INSTALLED_APPS = [
+    'daphne',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -104,14 +105,29 @@ DATABASES = {
     )
 }
 
-# Channel layers (Redis)
+# Channel layers (Redis in production; fallback to InMemory for local dev)
+_redis_url = config('REDIS_URL', default='').strip()
+
+def _get_channel_layer():
+    if _redis_url:
+        try:
+            import redis
+            r = redis.from_url(_redis_url, socket_connect_timeout=0.5)
+            r.ping()
+            return {
+                'BACKEND': 'channels_redis.core.RedisChannelLayer',
+                'CONFIG': {
+                    'hosts': [_redis_url],
+                },
+            }
+        except Exception:
+            pass
+    return {
+        'BACKEND': 'channels.layers.InMemoryChannelLayer',
+    }
+
 CHANNEL_LAYERS = {
-    'default': {
-        'BACKEND': 'channels_redis.core.RedisChannelLayer',
-        'CONFIG': {
-            'hosts': [config('REDIS_URL', default='redis://127.0.0.1:6379')],
-        },
-    },
+    'default': _get_channel_layer(),
 }
 
 # Celery
@@ -175,10 +191,13 @@ SIMPLE_JWT = {
 }
 
 # CORS
-CORS_ALLOWED_ORIGINS = config(
-    'CORS_ALLOWED_ORIGINS',
-    default='http://localhost:5173,http://127.0.0.1:5173'
-).split(',')
+CORS_ALLOW_ALL_ORIGINS = DEBUG
+CORS_ALLOWED_ORIGINS = [
+    origin.strip() for origin in config(
+        'CORS_ALLOWED_ORIGINS',
+        default='http://localhost:5173,http://127.0.0.1:5173,http://[::1]:5173,http://localhost:3000,http://127.0.0.1:3000,http://[::1]:3000'
+    ).split(',') if origin.strip()
+]
 CORS_ALLOW_CREDENTIALS = True
 
 # API Schema

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
+import L from 'leaflet';
 
-// Leaflet is loaded via CDN in index.html
 const STATUS_COLORS = {
   in_progress: '#2D6A4F',
   en_route:    '#DE9A3C',
@@ -15,12 +15,11 @@ export default function MiniMap({ visits = [], height = 280, fullScreen = false 
 
   useEffect(() => {
     if (!mapRef.current || mapInstance.current) return;
-    if (typeof window === 'undefined' || !window.L) return;
+    if (!L) return;
 
-    const L = window.L;
     const map = L.map(mapRef.current, {
-      center: [24.8600, 67.0120],
-      zoom: fullScreen ? 13 : 12,
+      center: [33.5700, 73.1500],
+      zoom: fullScreen ? 14 : 13,
       zoomControl: true,
       attributionControl: !fullScreen,
     });
@@ -36,7 +35,6 @@ export default function MiniMap({ visits = [], height = 280, fullScreen = false 
 
   // Update markers when visits change
   useEffect(() => {
-    const L = window.L;
     if (!mapInstance.current || !L) return;
     const map = mapInstance.current;
 

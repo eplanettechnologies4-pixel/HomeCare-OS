@@ -121,7 +121,7 @@ export default function StaffIdCard({ staffMember }) {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', fontSize: '0.7rem', color: 'rgba(255,255,255,0.7)', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: 6 }}>
               <div>
                 <div>ID: <strong style={{ color: 'white', fontFamily: 'var(--font-mono)' }}>{targetStaff.employee_id}</strong></div>
-                <div>Branch: Gulshan (Karachi)</div>
+                <div>Office: Main Office (PWD / Soan Garden, Islamabad)</div>
               </div>
               <div style={{ textAlign: 'right' }}>
                 <div>Valid Till: <strong style={{ color: 'var(--amber-400)' }}>2027-12-31</strong></div>

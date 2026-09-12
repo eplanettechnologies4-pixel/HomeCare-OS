@@ -59,6 +59,13 @@ export default function App() {
   const isAuthenticated = useStore((s) => s.isAuthenticated);
   const activePage      = useStore((s) => s.activePage);
   const currentRole     = useStore((s) => s.currentRole);
+  const fetchAllData    = useStore((s) => s.fetchAllData);
+
+  React.useEffect(() => {
+    if (isAuthenticated) {
+      fetchAllData();
+    }
+  }, [isAuthenticated, fetchAllData]);
 
   // Public Staff Verification QR Page (no login required)
   if (activePage === 'verify-staff') {
