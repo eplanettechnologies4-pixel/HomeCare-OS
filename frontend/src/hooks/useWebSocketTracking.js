@@ -131,6 +131,11 @@ function handleWebSocketMessage(msg) {
           return v;
         }),
       }));
+      // Append to the per-staff trail ring buffer (max 30 pings) so the
+      // StaffProfilePanel polyline grows in real time via the existing WS feed.
+      if (msg.staff_id) {
+        useStore.getState().appendStaffPing(msg.staff_id, lat, lng);
+      }
       break;
     }
 

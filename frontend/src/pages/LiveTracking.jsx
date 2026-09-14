@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Map, List, Settings, AlertTriangle, CheckCircle, Truck, Activity, Clock, X, Shield, Phone, Radio, Play, Square } from 'lucide-react';
+import { Map, List, Settings, AlertTriangle, CheckCircle, Truck, Activity, Clock, X, Shield, Phone, Radio, Play, Square, User } from 'lucide-react';
 import useStore from '../store/useStore';
 import { useMockGPS } from '../hooks/useMockGPS';
 import { useWebSocketTracking } from '../hooks/useWebSocketTracking';
 import { GEOFENCE_EVENTS } from '../data/mockData';
 import { format, formatDistanceToNow } from 'date-fns';
 import MiniMap from '../components/MiniMap';
+import StaffProfilePanel from '../components/StaffProfilePanel';
 
 // ── Visit Status Pipeline ────────────────────────────────────────────────────
 const STATUS_PIPELINE = ['assigned', 'en_route', 'in_progress', 'completed'];
@@ -234,10 +235,16 @@ export default function LiveTracking() {
   const saveAlertRules  = useStore((s) => s.saveAlertRules);
   const geofenceEvents  = useStore((s) => s.geofenceEvents);
 
-  const [view, setView]               = useState('map'); // 'map' | 'list'
+  const [view, setView]                   = useState('map'); // 'map' | 'list'
   const [selectedVisit, setSelectedVisit] = useState(null);
-  const [showRules, setShowRules]     = useState(false);
-  const [activeTab, setActiveTab]     = useState('visits'); // 'visits' | 'geofence' | 'sos'
+  const [selectedStaff, setSelectedStaff] = useState(null); // for StaffProfilePanel
+  const [showRules, setShowRules]         = useState(false);
+  const [activeTab, setActiveTab]         = useState('visits'); // 'visits' | 'geofence' | 'sos'
+
+  // Close staff panel when switching tabs or views
+  const handleSelectStaff = (visit) => {
+    setSelectedStaff((prev) => (prev?.id === visit?.id ? null : visit));
+  };
 
   // B2: Initial page load — REST for snapshot, WebSocket for deltas
   useEffect(() => {
@@ -329,7 +336,12 @@ export default function LiveTracking() {
         <div style={{ flex: 1, position: 'relative', borderRadius: 'var(--radius-md)', overflow: 'hidden', minHeight: 400 }}>
           {view === 'map' ? (
             <>
-              <MiniMap visits={liveVisits} height="100%" fullScreen />
+              <MiniMap
+                visits={liveVisits}
+                height="100%"
+                fullScreen
+                selectedStaffId={selectedStaff?.assigned_staff?.id || selectedStaff?.staff_id || null}
+              />
               {selectedVisit && (
                 <VisitCard visit={selectedVisit} onClose={() => setSelectedVisit(null)} />
               )}
@@ -395,28 +407,46 @@ export default function LiveTracking() {
             <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
 
               {/* ── Visits Tab ────────────────────────────────────────── */}
-              {activeTab === 'visits' && liveVisits.map((v) => (
-                <div
-                  key={v.id}
-                  onClick={() => setSelectedVisit(selectedVisit?.id === v.id ? null : v)}
-                  style={{
-                    padding: '10px 14px', cursor: 'pointer',
-                    background: selectedVisit?.id === v.id ? 'var(--sage-50)' : 'white',
-                    borderBottom: '1px solid var(--sage-100)',
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div>
-                      <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>{v.staff_name}</div>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--status-grey)' }}>→ {v.patient_name}</div>
+              {activeTab === 'visits' && liveVisits.map((v) => {
+                const isActive = selectedStaff?.id === v.id;
+                const staffId  = v.assigned_staff?.id || v.staff_id;
+                return (
+                  <div
+                    key={v.id}
+                    onClick={() => handleSelectStaff(v)}
+                    style={{
+                      padding: '10px 14px', cursor: 'pointer',
+                      background: isActive ? 'var(--sage-100)' : 'white',
+                      borderBottom: '1px solid var(--sage-100)',
+                      borderLeft: isActive ? '3px solid var(--teal-500)' : '3px solid transparent',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: 6 }}>
+                          {v.staff_name}
+                          {isActive && (
+                            <span style={{ fontSize: '0.62rem', background: 'var(--teal-500)', color: 'white', borderRadius: 4, padding: '1px 5px', fontWeight: 700 }}>
+                              LIVE VIEW
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--status-grey)' }}>→ {v.patient_name}</div>
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                        <span className={`badge badge-${v.status==='in_progress'?'green':v.status==='en_route'?'amber':'grey'}`} style={{ fontSize: '0.67rem' }}>
+                          {v.status_display}
+                        </span>
+                        <span style={{ fontSize: '0.67rem', color: 'var(--teal-600)', fontWeight: 600 }}>
+                          {isActive ? '✕ Close' : '👤 Profile'}
+                        </span>
+                      </div>
                     </div>
-                    <span className={`badge badge-${v.status==='in_progress'?'green':v.status==='en_route'?'amber':'grey'}`} style={{ fontSize: '0.67rem' }}>
-                      {v.status_display}
-                    </span>
+                    <StatusPipeline currentStatus={v.status} />
                   </div>
-                  <StatusPipeline currentStatus={v.status} />
-                </div>
-              ))}
+                );
+              })}
 
               {/* ── Geofence Log ──────────────────────────────────────── */}
               {activeTab === 'geofence' && (
@@ -501,6 +531,14 @@ export default function LiveTracking() {
           </div>
         </div>
       </div>
+
+      {/* ── Staff Profile Panel (slides in when a staff row is clicked) ── */}
+      {selectedStaff && (
+        <StaffProfilePanel
+          visit={selectedStaff}
+          onClose={() => setSelectedStaff(null)}
+        />
+      )}
     </div>
   );
 }

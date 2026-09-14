@@ -16,6 +16,7 @@ from homecareOS.auth_views import (
     VerifyOTPView,
     ResetPasswordView,
 )
+from lms.views import CertificateVerifyView
 
 urlpatterns = [
     path('django-admin/', admin.site.urls),
@@ -41,6 +42,10 @@ urlpatterns = [
     path('api/crm/',           include('crm.urls')),
     path('api/portal/',        include('portal.urls')),
     path('api/notifications/', include('notifications.urls')),
+    path('api/lms/',           include('lms.urls')),
+
+    # ── Public Real-Time Certificate Verification ─────────────────────────────
+    path('api/certificates/verify/<str:certificate_id>/', CertificateVerifyView.as_view(), name='public-cert-verify'),
 
     # ── API Schema ────────────────────────────────────────────────────────────
     path('api/schema/', SpectacularAPIView.as_view(),                       name='schema'),

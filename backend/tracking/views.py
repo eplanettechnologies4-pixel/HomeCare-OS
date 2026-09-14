@@ -6,7 +6,7 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from .models import GeofenceEvent, SOSEvent, AlertRule, LiveVisit
+from .models import GeofenceEvent, SOSEvent, AlertRule, LiveVisit, LocationPing
 from .serializers import (
     GeofenceEventSerializer, SOSEventSerializer,
     AlertRuleSerializer, LiveVisitSerializer,
@@ -248,6 +248,14 @@ class GPSPingView(APIView):
             'eta_minutes': live_visit.eta_minutes,
         })
 
+        # Persist this ping so the route trail endpoint has history
+        LocationPing.objects.create(
+            staff=staff,
+            booking=booking,
+            latitude=lat,
+            longitude=lng,
+        )
+
         # 3. Haversine geofence check (only if not already checked in)
         auto_checked_in = False
         if booking.patient.latitude and booking.patient.longitude:
@@ -469,3 +477,41 @@ class CheckOutView(APIView):
             'visit_duration_minutes': visit_duration_minutes,
             'checked_out_at': now.isoformat(),
         }, status=status.HTTP_201_CREATED)
+
+
+# ── 4. STAFF ROUTE HISTORY ────────────────────────────────────────────────────
+
+class StaffRouteView(APIView):
+    """
+    GET /api/tracking/staff/<staff_id>/route/?limit=30
+
+    Returns the most recent GPS pings for a given staff member, ordered
+    oldest-first so the frontend Leaflet polyline is drawn in the correct
+    travel direction.  Used to seed the route trail when the StaffProfilePanel
+    first opens — thereafter the dashboard WebSocket keeps the trail live.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, staff_id):
+        try:
+            limit = max(1, min(int(request.query_params.get('limit', 30)), 200))
+        except (TypeError, ValueError):
+            limit = 30
+
+        pings = (
+            LocationPing.objects
+            .filter(staff_id=staff_id)
+            .order_by('-timestamp')[:limit]
+        )
+
+        # Reverse so oldest ping is first → correct polyline draw direction
+        data = [
+            {
+                'lat': float(p.latitude),
+                'lng': float(p.longitude),
+                'ts':  p.timestamp.isoformat(),
+            }
+            for p in reversed(list(pings))
+        ]
+
+        return Response({'staff_id': staff_id, 'pings': data})

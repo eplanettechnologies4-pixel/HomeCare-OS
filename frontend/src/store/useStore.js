@@ -151,7 +151,47 @@ const useStore = create((set, get) => ({
       ),
     })),
 
-  // ── SOS Events ───────────────────────────────────────────────────────────
+  // ── Staff Route Trails (real-time polyline history) ──────────────────────
+  // Keyed by staff_id → array of {lat, lng, ts} (ring buffer, max 30 pings).
+  // Written by the WS hook on every location_update; read by StaffProfilePanel.
+  staffTrails: {},
+
+  appendStaffPing: (staffId, lat, lng) =>
+    set((s) => {
+      const prev = s.staffTrails[staffId] || [];
+      const next = [...prev, { lat, lng, ts: Date.now() }].slice(-30);
+      return { staffTrails: { ...s.staffTrails, [staffId]: next } };
+    }),
+
+  /**
+   * Seed the trail with historical pings from the REST endpoint.
+   * Called once when StaffProfilePanel first mounts, so the polyline
+   * is populated even before any new WS pings arrive.
+   */
+  fetchStaffRoute: async (staffId, limit = 30) => {
+    try {
+      const res = await apiFetch(`/tracking/staff/${staffId}/route/?limit=${limit}`);
+      if (res.ok) {
+        const data = await res.json();
+        const pings = (data.pings || []).map((p) => ({
+          lat: parseFloat(p.lat),
+          lng: parseFloat(p.lng),
+          ts:  new Date(p.ts).getTime(),
+        }));
+        if (pings.length > 0) {
+          set((s) => ({
+            staffTrails: {
+              ...s.staffTrails,
+              [staffId]: pings,
+            },
+          }));
+        }
+      }
+    } catch (err) {
+      console.warn('[Store] fetchStaffRoute error:', err);
+    }
+  },
+
   sosEvents: [],
   activeSosAlerts: [],
 
@@ -406,6 +446,302 @@ const useStore = create((set, get) => ({
         return { success: true };
       }
       return { success: false, error: 'Failed to delete staff member' };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  },
+
+  // ── LMS — Staff Training Module ────────────────────────────────────────────
+  lmsCourses: [],
+  lmsAssignments: [],
+  staffTrainingData: {},   // keyed by staff_id
+  lmsCertificates: [],
+  staffCertificatesData: {}, // keyed by staff_id
+
+  fetchCourses: async () => {
+    try {
+      const res = await apiFetch('/lms/courses/');
+      if (res.ok) {
+        const data = await res.json();
+        const items = Array.isArray(data) ? data : (data.results || []);
+        set({ lmsCourses: items });
+        return items;
+      }
+    } catch (err) {
+      console.warn('[Store] fetchCourses error:', err);
+    }
+    return get().lmsCourses;
+  },
+
+  createCourse: async (courseData) => {
+    try {
+      const res = await apiFetch('/lms/courses/', {
+        method: 'POST',
+        body: JSON.stringify(courseData),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        await get().fetchCourses();
+        return { success: true, data };
+      }
+      return { success: false, error: data.detail || JSON.stringify(data) };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  },
+
+  updateCourse: async (courseId, courseData) => {
+    try {
+      const res = await apiFetch(`/lms/courses/${courseId}/`, {
+        method: 'PATCH',
+        body: JSON.stringify(courseData),
+      });
+      const data = await res.json();
+      if (res.ok) { await get().fetchCourses(); return { success: true, data }; }
+      return { success: false, error: data.detail || JSON.stringify(data) };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  },
+
+  deleteCourse: async (courseId) => {
+    try {
+      const res = await apiFetch(`/lms/courses/${courseId}/`, { method: 'DELETE' });
+      if (res.ok || res.status === 204) { await get().fetchCourses(); return { success: true }; }
+      return { success: false, error: 'Failed to delete course' };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  },
+
+  createLecture: async (lectureData) => {
+    // lectureData may be a FormData (for file upload) or plain JSON
+    try {
+      const isFormData = lectureData instanceof FormData;
+      const res = await apiFetch('/lms/lectures/', {
+        method: 'POST',
+        body: isFormData ? lectureData : JSON.stringify(lectureData),
+        headers: isFormData ? {} : { 'Content-Type': 'application/json' },
+      });
+      const data = await res.json();
+      if (res.ok) { await get().fetchCourses(); return { success: true, data }; }
+      return { success: false, error: data.detail || JSON.stringify(data) };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  },
+
+  deleteLecture: async (lectureId) => {
+    try {
+      const res = await apiFetch(`/lms/lectures/${lectureId}/`, { method: 'DELETE' });
+      if (res.ok || res.status === 204) { await get().fetchCourses(); return { success: true }; }
+      return { success: false, error: 'Failed to delete lecture' };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  },
+
+  assignCourse: async (courseId, staffIds, dueDate = null) => {
+    try {
+      const res = await apiFetch(`/lms/courses/${courseId}/assign/`, {
+        method: 'POST',
+        body: JSON.stringify({ staff_ids: staffIds, due_date: dueDate }),
+      });
+      const data = await res.json();
+      if (res.ok) { await get().fetchLmsAssignments(); return { success: true, data }; }
+      return { success: false, error: data.error || data.detail || JSON.stringify(data) };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  },
+
+  fetchLmsAssignments: async (params = {}) => {
+    try {
+      let url = '/lms/assignments/';
+      const qs = new URLSearchParams(params).toString();
+      if (qs) url += '?' + qs;
+      const res = await apiFetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        const items = Array.isArray(data) ? data : (data.results || []);
+        set({ lmsAssignments: items });
+        return items;
+      }
+    } catch (err) {
+      console.warn('[Store] fetchLmsAssignments error:', err);
+    }
+    return get().lmsAssignments;
+  },
+
+  /**
+   * Fetch all course assignments for a specific staff member.
+   * Used by the Staff Profile Training tab.
+   */
+  fetchStaffTraining: async (staffId) => {
+    try {
+      const res = await apiFetch(`/lms/staff/${staffId}/training/`);
+      if (res.ok) {
+        const data = await res.json();
+        set((s) => ({ staffTrainingData: { ...s.staffTrainingData, [staffId]: data } }));
+        return data;
+      }
+    } catch (err) {
+      console.warn('[Store] fetchStaffTraining error:', err);
+    }
+    return [];
+  },
+
+  /**
+   * Watch-progress ping — mirrors the GPS 30-second ping architecture.
+   * Called by the video player every 30 seconds.
+   */
+  postLectureProgress: async (lectureId, watchedSeconds, percentage, staffId = null) => {
+    try {
+      const body = { watched_seconds: watchedSeconds, percentage };
+      if (staffId) body.staff_id = staffId;
+      const res = await apiFetch(`/lms/lectures/${lectureId}/progress/`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+      if (res.ok) return { success: true, data: await res.json() };
+      return { success: false };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  },
+
+  /**
+   * Download certificate PDF as a blob and trigger browser download.
+   */
+  downloadCertificate: async (assignmentId, certNumber = 'certificate') => {
+    try {
+      const { API_BASE, getAuthToken } = await import('../services/api.js');
+      const token = getAuthToken();
+      const res = await fetch(`${API_BASE}/lms/assignments/${assignmentId}/certificate/`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) return { success: false, error: 'Failed to download certificate' };
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${certNumber}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  },
+
+  /**
+   * Fetch all certificates (LMS Course Completion + General Manual Certificates).
+   */
+  fetchCertificates: async (params = {}) => {
+    try {
+      let url = '/lms/certificates/';
+      const qs = new URLSearchParams(params).toString();
+      if (qs) url += '?' + qs;
+      const res = await apiFetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        const items = Array.isArray(data) ? data : (data.results || []);
+        set({ lmsCertificates: items });
+        return items;
+      }
+    } catch (err) {
+      console.warn('[Store] fetchCertificates error:', err);
+    }
+    return get().lmsCertificates;
+  },
+
+  /**
+   * Manually generate a certificate via the Admin Certificate Generator Tool.
+   */
+  generateCertificate: async (certData) => {
+    try {
+      const res = await apiFetch('/lms/certificates/', {
+        method: 'POST',
+        body: JSON.stringify(certData),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        await get().fetchCertificates();
+        if (certData.staff) {
+          await get().fetchStaffCertificates(certData.staff);
+        }
+        return { success: true, data };
+      }
+      
+      // Parse validation errors into human-readable text
+      let errorMsg = 'Failed to generate certificate.';
+      if (typeof data === 'string') {
+        errorMsg = data;
+      } else if (data.error && typeof data.error === 'string') {
+        errorMsg = data.error;
+      } else if (data.detail && typeof data.detail === 'string') {
+        errorMsg = data.detail;
+      } else if (data.assignment) {
+        const asgnErr = Array.isArray(data.assignment) ? data.assignment[0] : data.assignment;
+        if (typeof asgnErr === 'string' && asgnErr.toLowerCase().includes('already exists')) {
+          errorMsg = 'A certificate has already been issued for this course assignment.';
+        } else {
+          errorMsg = `Course Assignment error: ${asgnErr}`;
+        }
+      } else {
+        const parts = [];
+        for (const [k, v] of Object.entries(data)) {
+          const val = Array.isArray(v) ? v.join(', ') : String(v);
+          const field = k.replace(/_/g, ' ');
+          parts.push(`${field}: ${val}`);
+        }
+        if (parts.length > 0) errorMsg = parts.join('; ');
+      }
+      return { success: false, error: errorMsg };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  },
+
+  /**
+   * Fetch all certificates issued to a specific staff member.
+   */
+  fetchStaffCertificates: async (staffId) => {
+    try {
+      const res = await apiFetch(`/lms/staff/${staffId}/certificates/`);
+      if (res.ok) {
+        const data = await res.json();
+        const items = Array.isArray(data) ? data : (data.results || []);
+        set((s) => ({ staffCertificatesData: { ...s.staffCertificatesData, [staffId]: items } }));
+        return items;
+      }
+    } catch (err) {
+      console.warn('[Store] fetchStaffCertificates error:', err);
+    }
+    return [];
+  },
+
+  /**
+   * Download any certificate directly by its certificate database ID or certificate_id.
+   */
+  downloadCertificateById: async (certId, filename = 'certificate') => {
+    try {
+      const { API_BASE, getAuthToken } = await import('../services/api.js');
+      const token = getAuthToken();
+      const res = await fetch(`${API_BASE}/lms/certificates/${certId}/download/`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) return { success: false, error: 'Failed to download certificate' };
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${filename}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+      return { success: true };
     } catch (err) {
       return { success: false, error: err.message };
     }

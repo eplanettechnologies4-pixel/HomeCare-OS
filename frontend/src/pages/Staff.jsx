@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import {
   Search, Star, Phone, Mail, Calendar, Clock, X, Award, TrendingUp,
-  UserCheck, AlertCircle, CheckCircle, Sliders, Download, Check, FileText, Plus
+  UserCheck, AlertCircle, CheckCircle, Sliders, Download, Check, FileText, Plus,
+  GraduationCap, BookOpen, Play, ChevronRight, Video, FileCheck
 } from 'lucide-react';
 import useStore from '../store/useStore';
 import StaffIdCard from '../components/StaffIdCard';
+import VideoPlayerModal from '../components/VideoPlayerModal';
+import CertificateHistoryTable from '../components/CertificateHistoryTable';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay } from 'date-fns';
 
 const STATUS_BADGE = {
@@ -49,10 +52,30 @@ export default function Staff() {
   const updateThresholds    = useStore((s) => s.updateAttendanceThresholds);
   const currentRole         = useStore((s) => s.currentRole);
 
+  const lmsCourses          = useStore((s) => s.lmsCourses);
+  const fetchCourses        = useStore((s) => s.fetchCourses);
+  const assignCourse        = useStore((s) => s.assignCourse);
+  const fetchStaffTraining  = useStore((s) => s.fetchStaffTraining);
+  const staffTrainingData   = useStore((s) => s.staffTrainingData);
+  const downloadCertificate = useStore((s) => s.downloadCertificate);
+  const staffCertificatesData = useStore((s) => s.staffCertificatesData);
+  const fetchStaffCertificates = useStore((s) => s.fetchStaffCertificates);
+  const downloadCertificateById = useStore((s) => s.downloadCertificateById);
+
   const isAdminOrCareMgr = ['super_admin', 'admin', 'branch_manager', 'care_manager'].includes(currentRole);
 
   const [activeSubTab, setActiveSubTab] = useState('directory'); // 'directory' | 'daily-log' | 'calendar' | 'leave' | 'payroll'
   const [selectedStaff, setSelectedStaff] = useState(null);
+  const [profileModalTab, setProfileModalTab] = useState('card'); // 'card' | 'training'
+  const [expandedCourseId, setExpandedCourseId] = useState(null);
+  const [activeLectureToWatch, setActiveLectureToWatch] = useState(null);
+
+  const [assignModalStaff, setAssignModalStaff] = useState(null);
+  const [assignCourseId, setAssignCourseId]     = useState('');
+  const [assignDueDate, setAssignDueDate]       = useState('');
+  const [assignSubmitting, setAssignSubmitting] = useState(false);
+  const [assignToast, setAssignToast]           = useState('');
+
   const [search, setSearch]               = useState('');
   const [selectedRole, setSelectedRole]   = useState('');
   const [selectedNurseForCal, setSelectedNurseForCal] = useState(staff.find(s=>s.role==='nurse')?.id || 1);
@@ -66,6 +89,39 @@ export default function Staff() {
   useEffect(() => {
     fetchStaff();
   }, [fetchStaff]);
+
+  useEffect(() => {
+    if (selectedStaff) {
+      fetchStaffTraining(selectedStaff.id);
+      fetchStaffCertificates(selectedStaff.id);
+      fetchCourses();
+    }
+  }, [selectedStaff, fetchStaffTraining, fetchStaffCertificates, fetchCourses]);
+
+  const handleOpenAssignModal = (staffMember) => {
+    fetchCourses();
+    setAssignModalStaff(staffMember);
+    setAssignCourseId('');
+    setAssignDueDate('');
+    setAssignToast('');
+  };
+
+  const handleConfirmAssign = async () => {
+    if (!assignCourseId) return;
+    setAssignSubmitting(true);
+    const res = await assignCourse(assignCourseId, [assignModalStaff.id], assignDueDate || null);
+    setAssignSubmitting(false);
+    if (res.success) {
+      setAssignToast('Course assigned successfully!');
+      fetchStaffTraining(assignModalStaff.id);
+      setTimeout(() => {
+        setAssignModalStaff(null);
+        setAssignToast('');
+      }, 1000);
+    } else {
+      setAssignToast(res.error || 'Failed to assign course');
+    }
+  };
 
   // Filter staff for directory
   const filteredStaff = staff.filter(s => {
@@ -148,7 +204,7 @@ export default function Staff() {
         firstCheckIn: 'No check-in',
         lastCheckOut: '—',
         totalVisits: 0,
-        assignedVisits,
+        assignedVisits: assignedVisits,
         fieldHours: 0,
         overtimeHours: 0,
         notes: 'Possible No-Show (Assigned visits but zero check-ins logged)',
@@ -650,18 +706,87 @@ export default function Staff() {
           </div>
         </div>
       )}
-      {/* Selected Staff Member Digital ID Card Modal */}
+      {/* Selected Staff Member Profile Modal (ID Card + Training & Certificates) */}
       {selectedStaff && (
         <div className="modal-backdrop" onClick={(e) => e.target === e.currentTarget && setSelectedStaff(null)}>
-          <div className="modal" style={{ width: 500 }}>
+          <div className="modal" style={{ width: profileModalTab === 'training' ? 920 : 620, maxWidth: '95vw', transition: 'width 0.2s' }}>
             <div className="modal-header">
-              <h3 style={{ margin: 0, fontFamily: 'var(--font-heading)', color: 'var(--teal-800)' }}>
-                Digital Staff ID Card & Real-Time QR
-              </h3>
+              <div>
+                <h3 style={{ margin: 0, fontFamily: 'var(--font-heading)', color: 'var(--teal-800)' }}>
+                  {selectedStaff.full_name} — Profile &amp; Credentials
+                </h3>
+                <div style={{ fontSize: '0.78rem', color: 'var(--status-grey)' }}>
+                  {selectedStaff.role_display} · ID: {selectedStaff.employee_id}
+                </div>
+              </div>
               <button className="btn btn-ghost btn-icon" onClick={() => setSelectedStaff(null)}><X size={14} /></button>
             </div>
-            <div className="modal-body" style={{ padding: 24 }}>
-              <StaffIdCard staffMember={selectedStaff} />
+
+            {/* Profile Modal Tabs */}
+            <div style={{ display: 'flex', gap: 6, padding: '10px 24px 0', borderBottom: '1px solid var(--sage-200)' }}>
+              <button
+                type="button"
+                className={`tab-item${profileModalTab === 'card' ? ' active' : ''}`}
+                onClick={() => setProfileModalTab('card')}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '8px 14px', fontSize: '0.84rem', display: 'flex', alignItems: 'center', gap: 6 }}
+              >
+                <UserCheck size={14} /> Digital Staff ID Card
+              </button>
+              <button
+                type="button"
+                className={`tab-item${profileModalTab === 'training' ? ' active' : ''}`}
+                onClick={() => setProfileModalTab('training')}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '8px 14px', fontSize: '0.84rem', display: 'flex', alignItems: 'center', gap: 6 }}
+              >
+                <Award size={14} /> Training &amp; Certificates ({ (staffCertificatesData[selectedStaff.id] || []).length })
+              </button>
+            </div>
+
+            <div className="modal-body" style={{ padding: 24, maxHeight: '72vh', overflowY: 'auto' }}>
+              {profileModalTab === 'card' ? (
+                <StaffIdCard staffMember={selectedStaff} />
+              ) : (
+                <div>
+                  {/* Certificate History Table */}
+                  <div style={{ marginBottom: 24 }}>
+                    <CertificateHistoryTable
+                      certificates={staffCertificatesData[selectedStaff.id] || []}
+                      loading={false}
+                      onRefresh={() => fetchStaffCertificates(selectedStaff.id)}
+                      title={`${selectedStaff.full_name}'s Certificate History`}
+                      subtitle="Official credentials, course completions, and achievement awards"
+                      showRecipientColumn={false}
+                      itemsPerPageDefault={5}
+                    />
+                  </div>
+
+                  {/* Assigned LMS Training Courses */}
+                  <div style={{ borderTop: '1px solid var(--sage-200)', paddingTop: 16 }}>
+                    <div style={{ fontWeight: 700, color: 'var(--teal-900)', fontSize: '0.95rem', marginBottom: 12 }}>
+                      Assigned LMS Courses &amp; Progress
+                    </div>
+                    {!(staffTrainingData[selectedStaff.id] || []).length ? (
+                      <div style={{ fontSize: '0.82rem', color: 'var(--status-grey)' }}>
+                        No LMS courses assigned to this staff member yet.
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {(staffTrainingData[selectedStaff.id] || []).map((asgn) => (
+                          <div key={asgn.id} style={{ padding: '10px 14px', background: 'var(--sage-50)', borderRadius: 8, fontSize: '0.84rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div>
+                              <div style={{ fontWeight: 600, color: 'var(--teal-800)' }}>{asgn.course_title}</div>
+                              <div style={{ fontSize: '0.74rem', color: 'var(--status-grey)' }}>{asgn.completed_lectures}/{asgn.total_lectures} lectures completed ({asgn.progress_pct}%)</div>
+                            </div>
+                            <span className={`badge ${asgn.status === 'completed' ? 'badge-green' : 'badge-amber'}`}>
+                              {asgn.status === 'completed' ? 'Completed' : 'In Progress'}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
             <div className="modal-footer">
               <button className="btn btn-ghost" onClick={() => setSelectedStaff(null)}>Close</button>

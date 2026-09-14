@@ -2,7 +2,7 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
     GeofenceEventViewSet, SOSEventViewSet, AlertRuleViewSet, LiveVisitViewSet,
-    GPSPingView, CheckInView, CheckOutView,
+    GPSPingView, CheckInView, CheckOutView, StaffRouteView,
 )
 
 router = DefaultRouter()
@@ -17,4 +17,6 @@ urlpatterns = [
     path('gps-ping/',  GPSPingView.as_view(),  name='tracking-gps-ping'),
     path('check-in/',  CheckInView.as_view(),  name='tracking-check-in'),
     path('check-out/', CheckOutView.as_view(), name='tracking-check-out'),
+    # Route history for Staff Profile Panel
+    path('staff/<int:staff_id>/route/', StaffRouteView.as_view(), name='staff-route'),
 ]

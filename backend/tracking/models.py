@@ -86,3 +86,36 @@ class LiveVisit(models.Model):
 
     def __str__(self):
         return f"Live: {self.staff} → {self.booking.patient}"
+
+
+class LocationPing(models.Model):
+    """
+    Lightweight ring-table that persists every GPS ping for a staff member.
+    Used by GET /api/tracking/staff/<id>/route/ to seed the polyline trail
+    in the StaffProfilePanel when it first opens.
+    Only the most recent pings per staff member are meaningful; older rows
+    can be pruned via a scheduled management command if the table grows large.
+    """
+    staff = models.ForeignKey(
+        'staff.StaffMember',
+        on_delete=models.CASCADE,
+        related_name='location_pings',
+    )
+    booking = models.ForeignKey(
+        'bookings.Booking',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='location_pings',
+    )
+    latitude  = models.DecimalField(max_digits=9, decimal_places=6)
+    longitude = models.DecimalField(max_digits=9, decimal_places=6)
+    timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ['-timestamp']
+        indexes = [
+            models.Index(fields=['staff', 'timestamp']),
+        ]
+
+    def __str__(self):
+        return f"Ping: {self.staff} @ {self.timestamp:%H:%M:%S} ({self.latitude}, {self.longitude})"

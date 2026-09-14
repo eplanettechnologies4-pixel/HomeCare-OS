@@ -791,3 +791,207 @@ h1, h2, h3, h4 { font-family: var(--font-heading); font-weight: 600; }
   border-color: #f59e0b;
   color: #92400e;
 }
+
+/* ── Staff Profile Panel ─────────────────────────────────────────────────── */
+
+@keyframes slideInFromRight {
+  from { transform: translateX(100%); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+
+@keyframes fadeInBackdrop {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* Semi-transparent backdrop behind the panel */
+.staff-profile-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(26, 10, 46, 0.28);
+  backdrop-filter: blur(2px);
+  z-index: 1000;
+  animation: fadeInBackdrop 0.2s ease;
+  cursor: pointer;
+}
+
+/* Main slide-in drawer */
+.staff-profile-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 400px;
+  max-width: 96vw;
+  height: 100vh;
+  background: white;
+  box-shadow: -8px 0 40px rgba(97, 31, 140, 0.2);
+  z-index: 1001;
+  display: flex;
+  flex-direction: column;
+  animation: slideInFromRight 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+  font-family: var(--font-body);
+}
+
+/* Panel header — gradient background */
+.sp-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 20px 20px 16px;
+  background: linear-gradient(135deg, var(--purple-50) 0%, var(--sage-50) 100%);
+  border-bottom: 1px solid var(--sage-200);
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+/* Scrollable body */
+.sp-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* Live status bar */
+.sp-status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--sage-50);
+  border: 1px solid var(--sage-200);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  margin-bottom: 12px;
+}
+
+/* Contact chips row */
+.sp-info-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.sp-info-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--sage-50);
+  border: 1px solid var(--sage-200);
+  border-radius: 20px;
+  padding: 4px 12px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #1a0a2e;
+  text-decoration: none;
+  transition: background 0.15s;
+}
+.sp-info-chip:hover {
+  background: var(--sage-100);
+}
+
+/* Section label */
+.sp-section-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--status-grey);
+  margin-bottom: 8px;
+}
+
+/* Patient assignment card */
+.sp-patient-card {
+  background: var(--sage-50);
+  border: 1px solid var(--sage-200);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  margin-bottom: 14px;
+}
+
+/* Trail statistics row */
+.sp-trail-stats {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.sp-trail-stat {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  color: var(--status-grey);
+  background: var(--sage-50);
+  border: 1px solid var(--sage-100);
+  border-radius: var(--radius-sm);
+  padding: 4px 10px;
+}
+
+/* GPS coordinate rows */
+.sp-coords {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.72rem;
+  padding: 5px 0;
+  border-top: 1px solid var(--sage-100);
+  margin-top: 8px;
+  gap: 8px;
+}
+
+/* Live green dot — re-usable class */
+.live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #22c55e;
+  animation: liveDotPulse 1.8s ease infinite;
+  flex-shrink: 0;
+}
+
+@keyframes liveDotPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.5); }
+  50%       { box-shadow: 0 0 0 5px rgba(34, 197, 94, 0);  }
+}
+
+/* ── LMS & Staff Training Module Styles ────────────────────────── */
+.btn-outline-teal {
+  background: transparent;
+  border: 1.5px solid var(--teal-600);
+  color: var(--teal-700);
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+.btn-outline-teal:hover {
+  background: var(--teal-50);
+  border-color: var(--teal-700);
+  color: var(--teal-900);
+}
+
+.lms-course-card {
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  border: 1px solid var(--sage-200);
+}
+.lms-course-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.06);
+}
+
+.lms-lecture-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--sage-50);
+  border: 1px solid var(--sage-200);
+  border-radius: 8px;
+  transition: background 0.15s ease;
+}
+.lms-lecture-item:hover {
+  background: #edf3f1;
+}
+

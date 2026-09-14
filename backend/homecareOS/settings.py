@@ -55,6 +55,7 @@ INSTALLED_APPS = [
     'crm',
     'portal',
     'notifications',
+    'lms',
 ]
 
 MIDDLEWARE = [

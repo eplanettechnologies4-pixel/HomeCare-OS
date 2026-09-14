@@ -8,7 +8,7 @@ const STATUS_COLORS = {
   completed:   '#6B7280',
 };
 
-export default function MiniMap({ visits = [], height = 280, fullScreen = false }) {
+export default function MiniMap({ visits = [], height = 280, fullScreen = false, selectedStaffId = null }) {
   const mapRef       = useRef(null);
   const mapInstance  = useRef(null);
   const markersRef   = useRef({});
@@ -33,7 +33,7 @@ export default function MiniMap({ visits = [], height = 280, fullScreen = false 
     return () => { map.remove(); mapInstance.current = null; };
   }, []);
 
-  // Update markers when visits change
+  // Update markers when visits or selection changes
   useEffect(() => {
     if (!mapInstance.current || !L) return;
     const map = mapInstance.current;
@@ -51,30 +51,42 @@ export default function MiniMap({ visits = [], height = 280, fullScreen = false 
       const lng = parseFloat(visit.staff_lng) || parseFloat(visit.longitude);
       if (!lat || !lng) return;
 
-      const color = STATUS_COLORS[visit.status] || '#6B7280';
+      // Determine if this staff member is the selected one
+      const visitStaffId = visit.assigned_staff?.id || visit.staff_id;
+      const isSelected   = selectedStaffId && (visitStaffId === selectedStaffId);
+      const isDimmed     = selectedStaffId && !isSelected;
+
+      const color    = STATUS_COLORS[visit.status] || '#6B7280';
       const initials = (visit.staff_name || '?').split(' ').map(n => n[0]).join('').slice(0, 2);
+      const size     = isSelected ? 44 : 36;
+      const opacity  = isDimmed ? 0.38 : 1;
 
       const icon = L.divIcon({
         className: '',
         html: `
           <div style="
-            width:36px;height:36px;border-radius:50%;
-            background:${color};border:3px solid white;
-            box-shadow:0 2px 8px rgba(0,0,0,0.25);
+            width:${size}px;height:${size}px;border-radius:50%;
+            background:${color};border:${isSelected ? '4px' : '3px'} solid white;
+            box-shadow:${isSelected
+              ? `0 0 0 4px ${color}66, 0 3px 12px rgba(0,0,0,0.3)`
+              : '0 2px 8px rgba(0,0,0,0.25)'};
             display:flex;align-items:center;justify-content:center;
-            color:white;font-weight:700;font-size:11px;
+            color:white;font-weight:700;font-size:${isSelected ? 14 : 11}px;
             font-family:'Inter',sans-serif;
+            opacity:${opacity};
+            transition:all 0.3s;
             ${visit.status === 'in_progress' ? 'animation:pulse-map 2s infinite;' : ''}
           ">${initials}</div>
           ${visit.status === 'in_progress' ? `<div style="
             position:absolute;top:-4px;right:-4px;
             width:10px;height:10px;border-radius:50%;
             background:#2D6A4F;border:2px solid white;
+            opacity:${opacity};
           "></div>` : ''}
         `,
-        iconSize: [36, 36],
-        iconAnchor: [18, 18],
-        popupAnchor: [0, -20],
+        iconSize: [size, size],
+        iconAnchor: [size / 2, size / 2],
+        popupAnchor: [0, -size / 2 - 4],
       });
 
       const popup = `
@@ -96,7 +108,7 @@ export default function MiniMap({ visits = [], height = 280, fullScreen = false 
         markersRef.current[String(visit.id)] = marker;
       }
     });
-  }, [visits]);
+  }, [visits, selectedStaffId]);
 
   return (
     <div

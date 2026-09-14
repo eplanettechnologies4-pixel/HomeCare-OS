@@ -211,14 +211,57 @@ export default function Bookings() {
     fetchStaff();
   }, [fetchBookings, fetchPatients, fetchStaff]);
 
+  const isBookingLate = (b) => {
+    if (b.status === 'late') return true;
+    if (['pending', 'assigned', 'en_route'].includes(b.status) && b.scheduled_time) {
+      const sched = new Date(b.scheduled_time).getTime();
+      return !isNaN(sched) && sched < Date.now();
+    }
+    return false;
+  };
+
+  const matchesServiceType = (b, selectedType) => {
+    if (!selectedType) return true;
+    const st = (b.service_type || '').toLowerCase();
+    const std = (b.service_type_display || '').toLowerCase();
+
+    if (selectedType === 'short_service') {
+      return st === 'short_service' || st === 'short_services' || std.includes('short');
+    }
+    if (selectedType === 'medicine_delivery') {
+      return st === 'medicine_delivery' || std.includes('medicine');
+    }
+    if (selectedType === 'long_term') {
+      return (st === 'long_term' && st !== 'long_term_admission') || (std.includes('long-term care') || std === 'long-term');
+    }
+    if (selectedType === 'long_term_admission') {
+      return st === 'long_term_admission' || std.includes('admission');
+    }
+    return st === selectedType;
+  };
+
   const filtered = useMemo(() => bookings.filter((b) => {
-    if (filters.status && b.status !== filters.status) return false;
-    if (filters.service_type && b.service_type !== filters.service_type) return false;
+    // 1. Status filter (exact match + computed late fallback)
+    if (filters.status) {
+      if (filters.status === 'late') {
+        if (!isBookingLate(b)) return false;
+      } else {
+        if (b.status !== filters.status) return false;
+      }
+    }
+
+    // 2. Service Type filter
+    if (filters.service_type && !matchesServiceType(b, filters.service_type)) {
+      return false;
+    }
+
+    // 3. Search query filter
     if (filters.search) {
       const q = filters.search.toLowerCase();
       return (b.patient_name || '').toLowerCase().includes(q) ||
              (b.staff_name || '').toLowerCase().includes(q) ||
-             (b.patient_mr || '').toLowerCase().includes(q);
+             (b.patient_mr || '').toLowerCase().includes(q) ||
+             (b.service_type_display || '').toLowerCase().includes(q);
     }
     return true;
   }), [bookings, filters]);
@@ -238,7 +281,7 @@ export default function Bookings() {
       </div>
 
       {/* Filters */}
-      <div className="filter-bar">
+      <div className="filter-bar" style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
         <div className="search-input-wrap" style={{ flex: '0 1 220px' }}>
           <Filter size={13} />
           <input
@@ -249,19 +292,50 @@ export default function Bookings() {
             style={{ fontSize: '0.85rem' }}
           />
         </div>
-        <select className="form-select" style={{ flex: '0 1 160px' }} value={filters.status} onChange={e => setF('status', e.target.value)}>
-          <option value="">All Statuses</option>
-          {['pending','assigned','en_route','in_progress','completed','cancelled','late'].map(s => (
-            <option key={s} value={s}>{s.replace('_',' ').replace(/\b\w/g, c=>c.toUpperCase())}</option>
-          ))}
-        </select>
-        <select className="form-select" style={{ flex: '0 1 180px' }} value={filters.service_type} onChange={e => setF('service_type', e.target.value)}>
-          <option value="">All Service Types</option>
-          <option value="short_service">Short Service</option>
-          <option value="medicine_delivery">Medicine Delivery</option>
-          <option value="long_term">Long-Term Care</option>
-          <option value="long_term_admission">Long-Term Admission</option>
-        </select>
+
+        {/* Status Filter */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <label htmlFor="status-filter" style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--teal-900)', whiteSpace: 'nowrap' }}>
+            Status:
+          </label>
+          <select
+            id="status-filter"
+            className="form-select"
+            style={{ minWidth: 140 }}
+            value={filters.status}
+            onChange={e => setF('status', e.target.value)}
+          >
+            <option value="">All</option>
+            <option value="pending">Pending</option>
+            <option value="assigned">Assigned</option>
+            <option value="en_route">En Route</option>
+            <option value="in_progress">In Progress</option>
+            <option value="completed">Completed</option>
+            <option value="cancelled">Cancelled</option>
+            <option value="late">Late</option>
+          </select>
+        </div>
+
+        {/* Service Type Filter */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <label htmlFor="service-type-filter" style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--teal-900)', whiteSpace: 'nowrap' }}>
+            Service Type:
+          </label>
+          <select
+            id="service-type-filter"
+            className="form-select"
+            style={{ minWidth: 175 }}
+            value={filters.service_type}
+            onChange={e => setF('service_type', e.target.value)}
+          >
+            <option value="">All</option>
+            <option value="short_service">Short Services</option>
+            <option value="medicine_delivery">Medicine Delivery</option>
+            <option value="long_term">Long-Term Care</option>
+            <option value="long_term_admission">Long-Term Admission</option>
+          </select>
+        </div>
+
         {(filters.status || filters.service_type || filters.search) && (
           <button className="btn btn-ghost btn-sm" onClick={() => setFilters({ status: '', service_type: '', search: '' })}>
             <X size={13} /> Clear
