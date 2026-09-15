@@ -556,9 +556,9 @@ export const DAILY_REPORTS = [
 
 export const ROLE_CONFIG = {
   super_admin:     { label: 'Super Admin',     nav: ['overview', 'bookings', 'live-tracking', 'staff', 'patients', 'therapy', 'admin-hr', 'accounts', 'billing', 'crm', 'lms', 'reports', 'analytics', 'users'] },
-  admin:           { label: 'Admin',           nav: ['overview', 'bookings', 'live-tracking', 'staff', 'patients', 'therapy', 'admin-hr', 'accounts', 'billing', 'crm', 'lms', 'reports', 'analytics', 'users'] },
-  branch_manager:  { label: 'Branch Manager',  nav: ['overview', 'bookings', 'live-tracking', 'staff', 'patients', 'lms', 'reports', 'analytics', 'users'] },
-  care_manager:    { label: 'Care Manager',    nav: ['overview', 'bookings', 'live-tracking', 'patients', 'therapy', 'users'] },
+  admin:           { label: 'Admin',           nav: ['overview', 'bookings', 'live-tracking', 'patients', 'therapy', 'admin-hr', 'crm', 'lms', 'reports', 'analytics'] },
+  branch_manager:  { label: 'Branch Manager',  nav: ['overview', 'bookings', 'live-tracking', 'patients', 'lms', 'reports', 'analytics'] },
+  care_manager:    { label: 'Care Manager',    nav: ['overview', 'bookings', 'live-tracking', 'patients', 'therapy'] },
   nurse:           { label: 'Nurse / Doctor',  nav: ['overview', 'bookings', 'live-tracking', 'patients'] },
   accountant:      { label: 'Accountant',      nav: ['overview', 'accounts', 'billing', 'reports', 'analytics'] },
   crm_executive:   { label: 'CRM Executive',   nav: ['overview', 'crm', 'reports', 'analytics'] },
@@ -578,9 +578,9 @@ export const SYSTEM_USERS = [
 
 export const INITIAL_PERMISSION_MATRIX = {
   super_admin:    { bookings: { view: true, add: true, edit: true, delete: true }, patients: { view: true, add: true, edit: true, delete: true }, billing: { view: true, add: true, edit: true, delete: true }, staff: { view: true, add: true, edit: true, delete: true }, users: { view: true, add: true, edit: true, delete: true } },
-  admin:          { bookings: { view: true, add: true, edit: true, delete: false }, patients: { view: true, add: true, edit: true, delete: false }, billing: { view: true, add: true, edit: true, delete: false }, staff: { view: true, add: true, edit: true, delete: false }, users: { view: true, add: true, edit: true, delete: false } },
-  branch_manager: { bookings: { view: true, add: true, edit: true, delete: false }, patients: { view: true, add: true, edit: true, delete: false }, billing: { view: true, add: false, edit: false, delete: false }, staff: { view: true, add: true, edit: true, delete: false }, users: { view: true, add: false, edit: false, delete: false } },
-  care_manager:   { bookings: { view: true, add: true, edit: true, delete: false }, patients: { view: true, add: true, edit: true, delete: false }, billing: { view: false, add: false, edit: false, delete: false }, staff: { view: true, add: false, edit: false, delete: false }, users: { view: false, add: false, edit: false, delete: false } },
+  admin:          { bookings: { view: true, add: true, edit: true, delete: false }, patients: { view: true, add: true, edit: true, delete: false }, billing: { view: false, add: false, edit: false, delete: false }, staff: { view: false, add: false, edit: false, delete: false }, users: { view: false, add: false, edit: false, delete: false } },
+  branch_manager: { bookings: { view: true, add: true, edit: true, delete: false }, patients: { view: true, add: true, edit: true, delete: false }, billing: { view: false, add: false, edit: false, delete: false }, staff: { view: false, add: false, edit: false, delete: false }, users: { view: false, add: false, edit: false, delete: false } },
+  care_manager:   { bookings: { view: true, add: true, edit: true, delete: false }, patients: { view: true, add: true, edit: true, delete: false }, billing: { view: false, add: false, edit: false, delete: false }, staff: { view: false, add: false, edit: false, delete: false }, users: { view: false, add: false, edit: false, delete: false } },
   nurse:          { bookings: { view: true, add: false, edit: false, delete: false }, patients: { view: true, add: false, edit: false, delete: false }, billing: { view: false, add: false, edit: false, delete: false }, staff: { view: false, add: false, edit: false, delete: false }, users: { view: false, add: false, edit: false, delete: false } },
   accountant:     { bookings: { view: true, add: false, edit: false, delete: false }, patients: { view: true, add: false, edit: false, delete: false }, billing: { view: true, add: true, edit: true, delete: false }, staff: { view: false, add: false, edit: false, delete: false }, users: { view: false, add: false, edit: false, delete: false } },
   crm_executive:  { bookings: { view: true, add: true, edit: false, delete: false }, patients: { view: false, add: false, edit: false, delete: false }, billing: { view: false, add: false, edit: false, delete: false }, staff: { view: false, add: false, edit: false, delete: false }, users: { view: false, add: false, edit: false, delete: false } },

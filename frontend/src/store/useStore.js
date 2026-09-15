@@ -11,7 +11,7 @@ const savedRefresh = typeof window !== 'undefined' ? localStorage.getItem('refre
 let savedUser = null;
 try {
   savedUser = typeof window !== 'undefined' ? JSON.parse(localStorage.getItem('currentUser') || 'null') : null;
-} catch (e) {}
+} catch (e) { }
 
 const useStore = create((set, get) => ({
   // ── Authentication State ──────────────────────────────────────────────────
@@ -72,7 +72,7 @@ const useStore = create((set, get) => ({
       localStorage.removeItem('access_token');
       localStorage.removeItem('refresh_token');
       localStorage.removeItem('currentUser');
-    } catch (e) {}
+    } catch (e) { }
     set({
       isAuthenticated: false,
       currentUser: null,
@@ -95,7 +95,7 @@ const useStore = create((set, get) => ({
   // ── Active Page ──────────────────────────────────────────────────────────
   activePage: typeof window !== 'undefined' ? (localStorage.getItem('activePage') || 'overview') : 'overview',
   setActivePage: (page) => {
-    try { localStorage.setItem('activePage', page); } catch (e) {}
+    try { localStorage.setItem('activePage', page); } catch (e) { }
     set({ activePage: page });
   },
 
@@ -176,7 +176,7 @@ const useStore = create((set, get) => ({
         const pings = (data.pings || []).map((p) => ({
           lat: parseFloat(p.lat),
           lng: parseFloat(p.lng),
-          ts:  new Date(p.ts).getTime(),
+          ts: new Date(p.ts).getTime(),
         }));
         if (pings.length > 0) {
           set((s) => ({
@@ -672,7 +672,7 @@ const useStore = create((set, get) => ({
         }
         return { success: true, data };
       }
-      
+
       // Parse validation errors into human-readable text
       let errorMsg = 'Failed to generate certificate.';
       if (typeof data === 'string') {
@@ -754,7 +754,7 @@ const useStore = create((set, get) => ({
     try {
       if (p) localStorage.setItem('selectedPatient', JSON.stringify(p));
       else localStorage.removeItem('selectedPatient');
-    } catch (e) {}
+    } catch (e) { }
     set({ selectedPatient: p });
   },
   fetchPatients: async () => {
@@ -871,7 +871,7 @@ const useStore = create((set, get) => ({
     const user = s.currentUser;
     const authorName = user?.full_name || (s.currentRole === 'doctor' ? 'Doctor' : 'Staff Nurse');
     const authorRole = user?.role_display || (s.currentRole === 'doctor' ? 'Consultant Physician' : 'Registered Nurse');
-    
+
     const entry = {
       id: Date.now(),
       patient_id: newNote.patient_id,
@@ -905,7 +905,7 @@ const useStore = create((set, get) => ({
   addVitalReading: (reading) => set((s) => {
     const user = s.currentUser;
     const authorName = user?.full_name ? `${user.full_name} (${user.role_display || 'Staff'})` : 'Staff Nurse';
-    
+
     // AI Anomaly Detection Logic
     const anomalies = [];
     const sys = Number(reading.blood_pressure_systolic);
@@ -916,15 +916,15 @@ const useStore = create((set, get) => ({
     const bsr = Number(reading.bsr);
 
     if (sys && sys > 140) anomalies.push(`High Systolic BP (${sys} mmHg)`);
-    if (sys && sys < 90)  anomalies.push(`Low Systolic BP (${sys} mmHg)`);
-    if (dia && dia > 90)  anomalies.push(`High Diastolic BP (${dia} mmHg)`);
+    if (sys && sys < 90) anomalies.push(`Low Systolic BP (${sys} mmHg)`);
+    if (dia && dia > 90) anomalies.push(`High Diastolic BP (${dia} mmHg)`);
     if (temp && temp > 38.0) anomalies.push(`Fever Alert (${temp}°C)`);
     if (temp && temp < 35.5) anomalies.push(`Hypothermia Alert (${temp}°C)`);
     if (pulse && pulse > 100) anomalies.push(`Tachycardia (${pulse} bpm)`);
-    if (pulse && pulse < 60)  anomalies.push(`Bradycardia (${pulse} bpm)`);
+    if (pulse && pulse < 60) anomalies.push(`Bradycardia (${pulse} bpm)`);
     if (spo2 && spo2 < 95) anomalies.push(`Hypoxia Warning (SpO2 ${spo2}%)`);
     if (bsr && bsr > 180) anomalies.push(`Hyperglycemia (BSR ${bsr} mg/dL)`);
-    if (bsr && bsr < 70)  anomalies.push(`Hypoglycemia (BSR ${bsr} mg/dL)`);
+    if (bsr && bsr < 70) anomalies.push(`Hypoglycemia (BSR ${bsr} mg/dL)`);
 
     const newReading = {
       id: Date.now(),

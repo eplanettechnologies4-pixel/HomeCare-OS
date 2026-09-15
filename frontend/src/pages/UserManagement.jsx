@@ -55,6 +55,23 @@ export default function UserManagement() {
     setTimeout(() => setBannerMsg(''), 5000);
   };
 
+  if (!isSuperAdmin) {
+    return (
+      <div className="card" style={{ maxWidth: 520, margin: '60px auto', textAlign: 'center', padding: 40, borderTop: '4px solid var(--status-red)' }}>
+        <div style={{ width: 64, height: 64, borderRadius: '50%', background: 'rgba(239, 68, 68, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', color: 'var(--status-red)' }}>
+          <Shield size={32} />
+        </div>
+        <h2 style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--teal-900)', marginBottom: 8 }}>Super Administrator Access Required</h2>
+        <p style={{ fontSize: '0.88rem', color: 'var(--status-grey)', lineHeight: 1.6, marginBottom: 24 }}>
+          Access to System Settings, User Account Provisioning, and Role Permission Matrices is strictly restricted to Super Administrators.
+        </p>
+        <button className="btn btn-primary" onClick={() => useStore.getState().setActivePage('overview')}>
+          Return to Overview
+        </button>
+      </div>
+    );
+  }
+
   const filteredUsers = staff.filter((u) => {
     if (!search) return true;
     const q = search.toLowerCase();

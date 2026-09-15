@@ -59,19 +59,19 @@ The system manages the complete care lifecycle — from a patient's first public
 ### 🏠 Family Portal
 Dedicated interface for patient families with 7 sub-tabs: visit schedule, clinical notes (Form A), vitals charts (Form B), reports, invoices, and direct chat with the Care Manager.
 
-### 📊 Operations Dashboard (18 Pages)
+### 📊 Operations Dashboard (19 Pages)
 Role-aware dashboard that adapts its KPIs, charts, and actions per the logged-in user's role:
 
 | # | Page | Route | Key Capability |
 |:---|:---|:---|:---|
 | 1 | Public Website | `public-website` | Marketing site + 6-step booking wizard |
-| 2 | Identity Verification | `public-verification` | Real-time staff licence check via QR |
-| 3 | Login / OTP Reset | `login` | JWT login, OTP password reset, demo switcher |
+| 2 | Identity Verification | `public-verification` | Real-time staff licence & certificate check via QR |
+| 3 | Login / OTP Reset | `login` | JWT login (email or username), OTP password reset |
 | 4 | Family Portal | `family-portal` | 7-tab read-only patient/family view |
 | 5 | Overview Dashboard | `overview` | Role-customized KPIs, charts, live map |
 | 6 | Bookings & Scheduling | `bookings` | Status pipeline, nurse assignment, booking drawer |
 | 7 | Live GPS Tracking | `live-tracking` | Real-time map, SOS dispatch, geofence audit log |
-| 8 | Staff & Workforce | `staff` | Directory, daily log, calendar, leave, payroll |
+| 8 | Staff & Workforce | `staff` | Directory, staff profile dossier, leave, payroll |
 | 9 | Patient Directory | `patients` | Full EMR directory, instant search, add/edit |
 | 10 | Patient 360° Dossier | `patient-360` | 10 tabs: Forms A, B, C, labs, care plan, invoices |
 | 11 | Therapy Services | `therapy` | Physio, Speech, Psychotherapy, Dietetics sessions |
@@ -82,10 +82,18 @@ Role-aware dashboard that adapts its KPIs, charts, and actions per the logged-in
 | 16 | Operational Reports | `reports` | Attendance, compliance, revenue, census CSV/PDF |
 | 17 | Executive Analytics | `analytics` | Recharts revenue trends, date-range comparison |
 | 18 | User Management | `users` | User accounts, live permission matrix, audit trail |
+| 19 | Clinical LMS & Certifications | `lms` | CME training, video lectures, certificate studio & QR verify |
+
+### 🎓 Clinical LMS & Certification Studio
+- **Accredited Course Catalog** — Continuing Medical Education (CME) and CEU training modules (BLS/CPR, Infection Control, Advanced Wound Care, Palliative Nursing)
+- **Interactive Video Player Modal** — Lecture streaming with timestamped progress sync and completion tracking
+- **Live Certificate Generator Studio** — Interactive design studio with live SVG preview, custom recipient selection, accreditation seals (IHRA / SECP), issue/expiry dates, and digital signature styling
+- **Tamper-Proof Verification Engine** — Unique QR code and alphanumeric certificate ID with public instant verification page (`/verify/:code`) and backend cryptographic validation
+- **Certificate History & Audit Ledger** — Searchable certificate history table with instant reissue, revoke controls, and high-fidelity ReportLab vector PDF downloads
 
 ### 🗺️ Live GPS & Field Operations
-- Real-time WebSocket location streaming (30-second pings from mobile)
-- Automatic **geofence check-in/out** at 100 m patient home radius
+- Real-time WebSocket location streaming (30-second pings from mobile) via Daphne ASGI
+- Automatic **geofence check-in/out** at 100 m patient home radius (centered at Islamabad Main Office: `33.6844, 73.0479`)
 - **SOS Panic Button** — pulsating alert, exact coordinates, one-click resolution
 - Configurable alert thresholds: late arrival (15 min), no-show (30 min), overstay (120 min)
 
@@ -151,21 +159,31 @@ health/
 │   ├── billing/                # Invoice generation & payment recording
 │   ├── bookings/               # Visit scheduling & status pipeline
 │   ├── crm/                    # Lead pipeline & conversion
+│   ├── lms/                    # Clinical LMS, courses, lectures & certificates
 │   ├── notifications/          # In-app alerts & unread badge
 │   ├── patients/               # EMR, vitals, MAR, daily reports
 │   ├── portal/                 # Family-facing read-only portal API
-│   ├── reports/                # PDF generation (ReportLab)
-│   ├── staff/                  # Workforce, attendance, leave
-│   ├── tracking/               # GPS pings, geofence, SOS
+│   ├── reports/                # PDF generation (ReportLab & certificates)
+│   ├── staff/                  # Workforce, attendance, leave & credentials
+│   ├── tracking/               # GPS pings, geofence, SOS & route history
 │   ├── requirements.txt
 │   └── Dockerfile
-├── frontend/                   # React 18 + Vite SPA
+├── frontend/                   # React 18 + Vite SPA (19 pages)
 │   ├── src/
-│   │   ├── pages/              # 18 route pages
-│   │   ├── components/         # Shared UI components
-│   │   ├── store/              # Zustand global state
+│   │   ├── pages/              # 19 route pages (including LMS & Verify)
+│   │   ├── components/         # Shared UI components & print engine
+│   │   ├── store/              # Zustand global state (real backend sync)
 │   │   └── hooks/              # GPS & WebSocket hooks
+│   ├── .env.production         # Production API_BASE endpoint
 │   └── vite.config.js
+├── mobile/                     # React Native / Expo Mobile App
+│   ├── src/
+│   │   ├── screens/            # 19 Clinician screens + 6 Family screens
+│   │   ├── services/           # API (JWT auto-refresh), GPS tracking, WS
+│   │   ├── components/         # Offline banners, buttons, skeleton loaders
+│   │   └── theme/              # Typography, colors & spacing
+│   ├── app.json                # Expo config & location permissions
+│   └── package.json
 ├── postgres/
 │   ├── postgresql.conf         # ssl=on, logging, performance tuning
 │   └── pg_hba.conf             # hostssl required, plain TCP rejected
@@ -223,17 +241,20 @@ venv\Scripts\activate      # Windows
 # Install dependencies
 pip install -r requirements.txt
 
-# Run migrations (includes Patient field encryption migration)
+# Run migrations (includes Patient encryption & LMS modules)
 python manage.py migrate
 
 # Create superuser
 python manage.py createsuperuser
 
-# Start development server
+# Option A: Start HTTP development server
 python manage.py runserver 0.0.0.0:8000
+
+# Option B: Start ASGI Daphne server (Required for real-time WebSockets)
+daphne -b 0.0.0.0 -p 8000 homecareOS.asgi:application
 ```
 
-### 3. Frontend setup
+### 3. Web Dashboard setup
 
 ```bash
 cd frontend
@@ -241,11 +262,21 @@ npm install
 npm run dev
 ```
 
-| URL | Description |
-|:---|:---|
-| `http://localhost:5173` | React web dashboard |
-| `http://localhost:8000/api/docs/` | Swagger UI |
-| `http://localhost:8000/django-admin/` | Django admin |
+### 4. Mobile App setup (React Native / Expo)
+
+```bash
+cd mobile
+npm install
+npx expo start
+```
+
+| Application / Surface | URL | Description |
+|:---|:---|:---|
+| 🖥️ Web Dashboard | `http://localhost:5173` | React 18 operations platform |
+| 📱 Mobile App (Expo) | `exp://<LAN-IP>:8081` | Nurse & Family mobile app |
+| 📜 Public Verification | `http://localhost:5173/verify/CERT-XYZ` | Instant QR license & certificate check |
+| 📖 Swagger UI Docs | `http://localhost:8000/api/docs/` | Interactive OpenAPI 3.0 testing |
+| ⚙️ Django Admin | `http://localhost:8000/django-admin/` | Superuser administration portal |
 
 ---
 
@@ -299,14 +330,15 @@ sudo bash scripts/install-cron.sh /opt/homecareos
 
 | Prefix | Resource |
 |:---|:---|
-| `POST /api/auth/login/` | Get JWT access + refresh tokens |
+| `POST /api/auth/login/` | Get JWT access + refresh tokens (supports username or email) |
 | `POST /api/auth/refresh/` | Rotate access token |
 | `GET  /api/auth/me/` | Current user profile & permissions |
 | `POST /api/auth/forgot-password/` | Send OTP to email/phone |
 | `GET/POST /api/bookings/` | List & create visit bookings |
 | `POST /api/bookings/{id}/assign_staff/` | Assign nurse to booking |
 | `GET  /api/bookings/stats/` | KPI aggregates for dashboard |
-| `GET/POST /api/staff/members/` | Workforce roster |
+| `GET/POST /api/staff/members/` | Workforce roster (creates linked Django User with password) |
+| `GET  /api/staff/{id}/route/` | Historic GPS tracking path for clinician shift |
 | `POST /api/staff/leave-requests/{id}/approve/` | Approve leave |
 | `GET/POST /api/patients/` | Patient EMR directory |
 | `POST /api/patients/{id}/daily-report/` | Mobile nurse daily report (multipart) |
@@ -319,6 +351,10 @@ sudo bash scripts/install-cron.sh /opt/homecareos
 | `POST /api/billing/invoices/{id}/record_payment/` | Record cash/card payment |
 | `POST /api/crm/leads/{id}/update_stage/` | Move lead in Kanban pipeline |
 | `GET  /api/notifications/unread-count/` | Badge count for notification bell |
+| `GET/POST /api/lms/courses/` | Continuing medical education & training courses |
+| `GET/POST /api/lms/certificates/` | Issued training certificates catalog & generator |
+| `GET  /api/lms/staff/{id}/training/` | Per-staff training overview & course progress |
+| `GET  /api/certificates/verify/{id}/` | Public tamper-proof certificate verification |
 
 ---
 

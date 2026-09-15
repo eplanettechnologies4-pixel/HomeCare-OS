@@ -115,6 +115,22 @@ WS_BASE_URL=ws://192.168.x.x:8000
 | `NotificationsScreen` | `POST` | `/api/notifications/read-all/` | Mark all read |
 | App badge | `GET` | `/api/notifications/unread-count/` | Poll every 60 sec for badge count |
 
+### 2.7 Family Portal Mobile Experience
+| Screen | Method | Endpoint | Notes |
+|---|---|---|---|
+| `FamilyHomeScreen` | `GET` | `/api/portal/my/patient_profile/` | Patient care team & primary diagnosis |
+| `FamilyHomeScreen` / `MyVisitsScreen` | `GET` | `/api/portal/my/visits/` | Scheduled & completed nurse visits |
+| `FamilyLiveTrackingScreen` | `WS` | `/ws/tracking/` | Real-time GPS movement of assigned clinician |
+| `VitalsTrendScreen` | `GET` | `/api/patients/{id}/vitals/` | Vitals telemetry history & trend charts |
+| `FamilyInvoicesScreen` | `GET` | `/api/portal/my/invoices/` | Patient invoice balance & payment receipts |
+
+### 2.8 Clinical LMS & Training Integration
+| Screen / Action | Method | Endpoint | Notes |
+|---|---|---|---|
+| My Courses | `GET` | `/api/lms/staff/{staff_id}/training/` | Clinician enrolled CME training modules |
+| Video Progress Ping | `POST` | `/api/lms/lectures/{id}/progress/` | Watch duration sync (every 15 seconds) |
+| Digital Credentials | `GET` | `/api/lms/staff/{staff_id}/certificates/` | Issued accredited certificates & QR links |
+
 ---
 
 ## 3. WebSocket — Real-Time Link Between Mobile & Dashboard

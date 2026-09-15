@@ -7,23 +7,23 @@
 > **Target Audience:** System Architects, Full-Stack Developers, DevOps Engineers, Healthcare Operations & Clinical Administrators  
 
 ---
-
 ## Table of Contents
 
 1. [System Architecture & Overview](#1-system-architecture--overview)
 2. [Security, Authentication & Role-Based Access Control (RBAC)](#2-security-authentication--role-based-access-control-rbac)
    - [Supported User Roles](#supported-user-roles)
-   - [Authentication Protocol (JWT)](#authentication-protocol-jwt)
+   - [Authentication Protocol (JWT) & Dual Identifier Login](#authentication-protocol-jwt--dual-identifier-login)
+   - [Admin-Set Staff Provisioning & Credentialing](#admin-set-staff-provisioning--credentialing)
    - [Permission Matrix](#permission-matrix)
-3. [Frontend Page Catalog & Detailed Feature Specifications](#3-frontend-page-catalog--detailed-feature-specifications)
+3. [Frontend Page Catalog & Detailed Feature Specifications (19 Pages)](#3-frontend-page-catalog--detailed-feature-specifications-19-pages)
    - [Page 1: Public Website & 6-Step Booking Wizard](#page-1-public-website--6-step-booking-wizard)
-   - [Page 2: Public Identity Verification Portal](#page-2-public-identity-verification-portal)
+   - [Page 2: Public Identity & Certificate Verification Portal](#page-2-public-identity--certificate-verification-portal)
    - [Page 3: Authentication & Password Reset Portal](#page-3-authentication--password-reset-portal)
    - [Page 4: Family Portal (Hospital at Home for Families)](#page-4-family-portal-hospital-at-home-for-families)
    - [Page 5: Operations Overview Dashboard](#page-5-operations-overview-dashboard)
    - [Page 6: Bookings & Scheduling Management](#page-6-bookings--scheduling-management)
    - [Page 7: Live GPS Field Tracking, Geofencing & SOS Dispatch](#page-7-live-gps-field-tracking-geofencing--sos-dispatch)
-   - [Page 8: Staff & Clinical Workforce Roster](#page-8-staff--clinical-workforce-roster)
+   - [Page 8: Staff & Clinical Workforce Roster (with Staff Profile Dossier)](#page-8-staff--clinical-workforce-roster-with-staff-profile-dossier)
    - [Page 9: Patient Directory (EMR)](#page-9-patient-directory-emr)
    - [Page 10: Patient 360° Comprehensive Dossier (Forms A, B, C)](#page-10-patient-360-comprehensive-dossier-forms-a-b-c)
    - [Page 11: Specialized Therapy Services](#page-11-specialized-therapy-services)
@@ -34,22 +34,39 @@
    - [Page 16: Operational Reports](#page-16-operational-reports)
    - [Page 17: Reports & Analytics](#page-17-reports--analytics)
    - [Page 18: Settings & User Management](#page-18-settings--user-management)
+   - [Page 19: Clinical LMS (Learning Management System) & Certification Studio](#page-19-clinical-lms-learning-management-system--certification-studio)
 4. [Backend API Reference (Every Endpoint & URL)](#4-backend-api-reference-every-endpoint--url)
    - [Core & Documentation URLs](#core--documentation-urls)
    - [Authentication Endpoints (`/api/auth/`)](#authentication-endpoints-apiauth)
    - [Bookings API (`/api/bookings/`)](#bookings-api-apibookings)
    - [Staff & HR API (`/api/staff/`)](#staff--hr-api-apistaff)
    - [Patients & EMR API (`/api/patients/`)](#patients--emr-api-apipatients)
-   - [Tracking, Geofencing & SOS API (`/api/tracking/`)](#tracking-geofencing--sos-api-apitracking)
+   - [Tracking, Geofencing & Route API (`/api/tracking/`)](#tracking-geofencing--route-api-apitracking)
    - [Accounts & Financial Reports API (`/api/accounts/`)](#accounts--financial-reports-api-apiaccounts)
    - [Billing & Invoicing API (`/api/billing/`)](#billing--invoicing-api-apibilling)
    - [CRM & Lead Lifecycle API (`/api/crm/`)](#crm--lead-lifecycle-api-apicrm)
+   - [Clinical LMS & Continuing Education API (`/api/lms/`)](#clinical-lms--continuing-education-api-apilms)
+   - [Public Real-Time Certificate Verification (`/api/certificates/verify/`)](#public-real-time-certificate-verification-apicertificatesverify)
    - [Patient/Family Portal API (`/api/portal/`)](#patientfamily-portal-api-apiportal)
    - [Notifications API (`/api/notifications/`)](#notifications-api-apinotifications)
 5. [Universal PDF Generation & Printing Subsystem](#5-universal-pdf-generation--printing-subsystem)
+   - [High-Fidelity Official Accredited Certificate Generator](#high-fidelity-official-accredited-certificate-generator)
 6. [Data Models & Entity-Relationship Schema](#6-data-models--entity-relationship-schema)
+   - [Core Clinical Schema](#core-clinical-schema)
+   - [LMS & Certification Schema](#lms--certification-schema)
 7. [Deployment & Environment Configuration](#7-deployment--environment-configuration)
+   - [Daphne ASGI Server for Real-Time WebSockets](#daphne-asgi-server-for-real-time-websockets)
+   - [Dynamic Frontend API Base (`VITE_API_URL` & `.env.production`)](#dynamic-frontend-api-base-vite_api_url--envproduction)
 8. [Mobile & Dashboard Cross-Platform Integration Architecture](#8-mobile--dashboard-cross-platform-integration-architecture)
+9. [React Native Mobile App Architecture & Screen Catalog (`mobile/`)](#9-react-native-mobile-app-architecture--screen-catalog-mobile)
+   - [Mobile Architecture & Directory Structure](#mobile-architecture--directory-structure)
+   - [Clinician Mobile Workflow Screens (19 Screens)](#clinician-mobile-workflow-screens-19-screens)
+   - [Family Portal Mobile Screens (6 Screens)](#family-portal-mobile-screens-6-screens)
+   - [Mobile Offline Queue & Real-Time Services](#mobile-offline-queue--real-time-services)
+10. [Real Backend Persistence & Data Integrity Architecture](#10-real-backend-persistence--data-integrity-architecture)
+    - [Zero-Mock Real Persistence Enforcement](#zero-mock-real-persistence-enforcement)
+    - [Admin-Set Staff Provisioning & Immediate Login](#admin-set-staff-provisioning--immediate-login)
+    - [Real-Time Scheduling & Dispatch Persistence](#real-time-scheduling--dispatch-persistence)
 
 ---
 
@@ -65,28 +82,29 @@ HomeCare OS is an enterprise healthcare management system specifically designed 
                                           v
 +-----------------------+     +-----------+------------+     +------------------------+
 | Patient Family Portal | <-> | React 18 Single Page   | <-> | Admin / Clinical Staff |
-| (Restricted View)     |     | Application (Vite)     |     | Dashboard (RBAC)       |
+| (Restricted View)     |     | Application (Vite)     |     | Dashboard (19 Pages)   |
 +-----------------------+     +-----------+------------+     +------------------------+
                                           |
-                                          | REST API / JSON (Bearer JWT)
+                                          | REST API / Daphne ASGI WebSockets (Bearer JWT)
                                           v
                               +-----------+------------+
-                              | Django REST Framework  |
+                              | Django 4.2 REST + ASGI |
                               | Backend (homecareOS)   |
                               +-----+-----+------+-----+
                                     |     |      |
          +--------------------------+     |      +------------------------+
          v                                v                               v
 +------------------+             +-----------------+             +------------------+
-| SQLite/Postgres  |             | drf-spectacular |             | ReportLab PDF    |
-| Relational DB    |             | OpenAPI 3.0 Doc |             | Engine Generator |
+| SQLite/Postgres  |             | drf-spectacular |             | ReportLab Vector |
+| Relational DB    |             | OpenAPI 3.0 Doc |             | Cert & Doc Engine|
 +------------------+             +-----------------+             +------------------+
 ```
 
 ### Architectural Key Characteristics
-- **Client Tier (`frontend/`):** React 18 SPA built with Vite. Central state managed by `zustand` (`frontend/src/store/useStore.js`) with persistent caching, optimistic UI updates, and reactive synchronization.
-- **Server Tier (`backend/`):** Django 4.2 framework utilizing Django REST Framework (DRF). Modular app structure separating business domains: `accounts`, `billing`, `bookings`, `crm`, `patients`, `portal`, `reports`, `staff`, `tracking`.
-- **Security:** Token-based authentication using `rest_framework_simplejwt` with short-lived access tokens and refresh rotation.
+- **Client Tier (`frontend/`):** React 18 SPA built with Vite. Central state managed by `zustand` (`frontend/src/store/useStore.js`) connected to real backend endpoints (`import.meta.env.VITE_API_URL`) with persistent caching, optimistic UI updates, and reactive synchronization.
+- **Mobile Tier (`mobile/`):** React Native / Expo cross-platform mobile app for field clinicians and patient families, utilizing Axios interceptors, background geolocation tasks, offline mutation queues, and native WebSockets.
+- **Server Tier (`backend/`):** Django 4.2 framework utilizing Django REST Framework (DRF) and Daphne ASGI for asynchronous WebSocket broadcasting. Modular app structure separating business domains: `accounts`, `billing`, `bookings`, `crm`, `lms`, `notifications`, `patients`, `portal`, `reports`, `staff`, `tracking`.
+- **Security:** Token-based authentication using `rest_framework_simplejwt` with dual username/email login support, admin-set password provisioning, short-lived access tokens, and refresh rotation.
 - **Documentation Engine:** `drf-spectacular` generating automated OpenAPI 3.0 schemas with an interactive Swagger UI.
 
 ---
@@ -99,24 +117,51 @@ HomeCare OS enforces strict role-based access control across navigation, page re
 
 | Role Key | Display Name | Primary Responsibilities | Default Landing Page |
 | :--- | :--- | :--- | :--- |
-| `super_admin` | Super Admin | Unrestricted access across all branches, permissions editing, audit trails, and user lifecycle. | Overview (`overview`) |
-| `admin` | Admin | Branch operations management, staff assignments, patient admissions, and financial reporting. | Overview (`overview`) |
+| `super_admin` | Super Admin | Full unrestricted control across all branches, permissions editing, audit trails, user lifecycle, staff roster, and financial/billing administration. | Overview (`overview`) |
+| `admin` | Admin | Branch operations management, patient admissions, scheduling, CRM leads, and operational workflows. Restricted from billing, staff management, and system settings. | Overview (`overview`) |
 | `branch_manager` | Branch Manager | Local branch operations, bookings, staff attendance, and live dispatch tracking. | Overview (`overview`) |
 | `care_manager` | Care Manager | Patient clinical oversight, nurse visit assignments, care plans, and family coordination. | Overview (`overview`) |
-| `nurse` | Nurse / Doctor | Bedside clinical care, Form A (Nurses Notes), Form B (Vitals), Form C (MAR), daily reports. | Bookings (`bookings`) |
+| `nurse` | Nurse / Doctor | Bedside clinical care, Form A (Nurses Notes), Form B (Vitals), Form C (MAR), daily reports, LMS courses. | Bookings (`bookings`) |
 | `accountant` | Accountant | Invoicing, payments collection, balance reconciliation, and revenue analytics. | Overview (`overview`) |
 | `crm_executive` | CRM Executive | Lead acquisition, inbound phone/web inquiries, and booking conversion pipeline. | CRM (`crm`) |
 | `patient_family` | Patient / Family | Read-only access to care progress, visit schedules, invoices, vitals, and care manager chat. | Family Portal (`family-portal`) |
 
-### Authentication Protocol (JWT)
+### Authentication Protocol (JWT) & Dual Identifier Login
 
 - **Access Token Endpoint:** `POST /api/auth/login/`
-  - Input: `{"username": "<email_or_phone>", "password": "<password>"}`
-  - Output: `{"access": "<JWT_ACCESS_TOKEN>", "refresh": "<JWT_REFRESH_TOKEN>"}`
+  - **Dual Identifier Input:** Supports authentication using either the registered `username` or primary `email`:
+    ```json
+    {
+      "username": "nurse1@homecareos.com",  // Or "nurse1"
+      "password": "your_secure_password"
+    }
+    ```
+  - **Output (200 OK):**
+    ```json
+    {
+      "access": "<JWT_ACCESS_TOKEN>",
+      "refresh": "<JWT_REFRESH_TOKEN>",
+      "user": {
+        "id": 5,
+        "username": "nurse1",
+        "email": "nurse1@homecareos.com",
+        "role": "nurse",
+        "full_name": "Nurse Fatima Zahra",
+        "staff_id": 2
+      }
+    }
+    ```
 - **Refresh Token Endpoint:** `POST /api/auth/refresh/`
   - Input: `{"refresh": "<JWT_REFRESH_TOKEN>"}`
   - Output: `{"access": "<NEW_JWT_ACCESS_TOKEN>"}`
 - **Client Storage:** Tokens stored securely in app memory with optional persistent storage when *Remember Me* is enabled.
+
+### Admin-Set Staff Provisioning & Credentialing
+
+Unlike consumer registration workflows, healthcare staff accounts are administratively provisioned:
+1. When a Super Administrator registers a new staff member via the Web Dashboard (`Staff.jsx` or `UserManagement.jsx`), they specify the clinician's `name`, `role`, `email`, `username`, and an initial **admin-set password**.
+2. The backend `StaffSerializer` atomically creates both the `Staff` record and a linked Django `User` model, setting the hashed password directly via `user.set_password(password)`.
+3. The clinician can immediately log in to the React Native mobile app (`LoginScreen.js`) or web dashboard using their assigned credentials without requiring external email verification links.
 
 ### Permission Matrix
 
@@ -124,9 +169,10 @@ HomeCare OS enforces strict role-based access control across navigation, page re
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | **Bookings** | `V A E D` | `V A E` | `V A E` | `V A E` | `V` | `V` | `V A` | `V` |
 | **Patients (EMR)** | `V A E D` | `V A E` | `V A E` | `V A E` | `V` | `V` | - | `V` |
-| **Billing & Invoices** | `V A E D` | `V A E` | `V` | - | - | `V A E` | - | `V` |
-| **Staff Roster** | `V A E D` | `V A E` | `V A E` | `V` | - | - | - | - |
-| **User Management** | `V A E D` | `V A E` | `V` | - | - | - | - | - |
+| **Billing & Invoices** | `V A E D` | - | `V` | - | - | `V A E` | - | `V` |
+| **Financial Accounts** | `V A E D` | - | - | - | - | `V A E` | - | - |
+| **Staff Roster** | `V A E D` | - | `V A E` | `V` | - | - | - | - |
+| **User Management & Settings** | `V A E D` | - | - | - | - | - | - | - |
 
 *(Legend: **V** = View, **A** = Add/Create, **E** = Edit/Update, **D** = Delete/Purge)*
 
@@ -161,7 +207,8 @@ The frontend router (`frontend/src/App.jsx`) dynamically resolves pages accordin
     ├── [15] CRM Leads Pipeline (`crm`) [Interactive Drag & Drop Kanban]
     ├── [16] Operational Reports (`reports`)
     ├── [17] Executive Analytics (`analytics`)
-    └── [18] User Management & Security (`users`) [Accounts, Permissions Matrix, Audit Trail]
+    ├── [18] User Management & Security (`users`) [Accounts, Permissions Matrix, Audit Trail]
+    └── [19] Clinical LMS & Certifications (`lms`) [Courses, Video Player, Cert Studio & QR]
 ===================================================================================================
 ```
 
@@ -206,16 +253,23 @@ The frontend router (`frontend/src/App.jsx`) dynamically resolves pages accordin
 
 ---
 
-### Page 2: Public Identity Verification Portal
+### Page 2: Public Identity & Certificate Verification Portal
 - **Component:** `frontend/src/pages/PublicVerification.jsx`
-- **Internal Route ID:** `public-verification`
-- **Access Level:** Public (accessible via QR code printed on the clinician's Physical ID card or SMS link)
-- **Parameters:** `empId` (Staff Employee ID)
+- **Internal Route ID:** `public-verification` / `verify/:code`
+- **Access Level:** Public / Unauthenticated (accessible via QR code printed on clinician physical ID cards, digital certificates, or SMS verification links)
+- **Parameters:** `empId` (Staff Employee ID) OR `code` / `certId` (Certificate Unique Verification Code, e.g. `CERT-BLS-2026-001`)
 - **Key Features:**
-  - **Live Verification Status Banner:** Queries the database in real-time. If the staff member's system user account is suspended or terminated, displays a high-visibility red warning: `"NOT CURRENTLY ACTIVE / ACCOUNT SUSPENDED — Do not admit to home"`.
-  - If active, displays a verified green badge: `"OFFICIALLY VERIFIED & ACTIVE STAFF"`.
-  - Clinician photo, full legal name, role designation, and license certification (PMDC / PNC verified).
-  - **Live Visit Status:** Indicates whether the nurse is currently dispatched to an active booking.
+  - **Dual Public Validation Modes:**
+    1. **Staff Identity & License Mode:**
+       - **Live Verification Status Banner:** Queries the database in real-time. If the staff member's system user account is suspended or terminated, displays a high-visibility red warning: `"NOT CURRENTLY ACTIVE / ACCOUNT SUSPENDED — Do not admit to home"`.
+       - If active, displays a verified green badge: `"OFFICIALLY VERIFIED & ACTIVE STAFF"`.
+       - Displays clinician photo, full legal name, role designation, license certification (PMDC / PNC verified), and branch.
+       - **Live Visit Status:** Indicates whether the nurse is currently dispatched to an active home visit.
+    2. **Accredited Certificate Verification Mode (`/verify/:code`):**
+       - Queries `GET /api/certificates/verify/<certificate_id>/`.
+       - Displays tamper-proof accreditation badge: `"ACCREDITED & OFFICIALLY VERIFIED"` or `"REVOKED / EXPIRED"`.
+       - Renders full certificate credential metadata: Course/Achievement Title, Recipient Clinician Name, Staff ID, Issue Date, Expiration Date, Issuing Authority (eHealth Hospital at Home / HomeCare OS), Accreditation Seals (IHRA / SECP), and Digital Signature verification hash.
+       - One-click action to view or download the official ReportLab vector PDF certificate.
   - Direct 24/7 central dispatch helpline button (`+92-21-111-CARE-OS`).
 
 ---
@@ -256,12 +310,26 @@ The frontend router (`frontend/src/App.jsx`) dynamically resolves pages accordin
 - **Component:** `frontend/src/pages/Overview.jsx`
 - **Internal Route ID:** `overview`
 - **Access Level:** All administrative and clinical roles (customizes dynamically per role)
+- **Top-Level Executive Multi-Graph Suite:**
+  - **Dynamic SVG Mini-Sparklines on Stat Cards:** Each KPI card integrates a micro-sparkline vector curve giving instant visual indication of directional acceleration, volatility, and pulse state alongside standard comparative indicators (e.g. `↑15% vs yesterday`, `↓3 vs yesterday`).
+  - **Interactive Multi-Mode Command Center Chart:**
+    - **Mode 1: Trajectory Trend:** Monotone bezier area curves with multi-stop linear gradients for revenue/visit volume, SLA target thresholds, and hover inspection tooltips.
+    - **Mode 2: 24-Hour Clinician Dispatch Velocity & Demand Heatmap:** Composed bar and line chart illustrating completed, en-route, and upcoming visits across 2-hour shift windows, paired with a trendline of active on-road clinicians.
+    - **Mode 3: Target Benchmark vs Actual:** Direct variance bar chart benchmarking completed visits against the +12% target threshold.
+    - **Interactive Time Range Toggle:** Switches dynamically between `7 Days`, `28 Days`, and `90 Days`.
+  - **Clinical Service Mix Distribution Donut Chart:**
+    - Recharts donut visualization categorizing active patient care packages (Skilled Nursing, Physical Rehab & PT, Hospital at Home ICU, Elderly & Palliative, Medicine Logistics, Doctor Consults).
+    - Features embedded center metric counter with total visits, slice padding, animated tooltips, and custom percentage allocation breakdown table.
+  - **Clinical Operational Quality & SLA Radar:**
+    - Multi-axial hexagonal radar diagram benchmarking 6 operational pillars: On-Time Arrival SLA (95.8%), Geofence Check-in Accuracy (98.4%), Vitals Compliance (94.2%), MAR Medication Adherence (99.1%), Patient Rating (97.5%), and Care Plan Goals (91.8%).
+  - **Financial Role Privacy Isolation:** Revenue curves and financial figures are restricted to `super_admin` and `accountant`. Operational administrators (`admin`, `branch_manager`, `care_manager`) view pure clinical dispatch volumes.
 - **Role Customization:**
   - **For Nurses:** Shows "My Visits Today", next scheduled stop countdown, personal review rating, field overtime hours, scheduled visit route table, and personal Digital Staff ID Card.
   - **For Care Managers:** Shows Active Visits, Unassigned Bookings queue, Critical Clinical Alerts, and real-time mini GPS tracking map.
-  - **For Admins & Super Admins:** Shows comprehensive KPI cards (Active visits, bookings, revenue, operational alerts), 28-day financial trend graphs, and field geofence status.
-  - **For Accountants:** Replaces medical KPIs with Invoices Due, Daily Cash Collections, and Outstanding Balances.
-  - **For CRM Executives:** Shows Inbound Leads Pipeline metrics, conversion ratios, and new inquiry queues.
+  - **For Super Admins:** Full operational and financial command center (Active visits, bookings, revenue, operational alerts, multi-period financial trends, and geofence tracking).
+  - **For Admins:** Operations-focused command center with volume trends, active visits, booking queues, and dispatch alerts (financial/billing data masked).
+  - **For Accountants:** Invoices Due, Daily Collections, Outstanding Balances, and multi-period financial trend tracking.
+  - **For CRM Executives:** Inbound Leads Pipeline metrics, conversion ratios, and new inquiry queues.
 
 ---
 
@@ -305,10 +373,10 @@ The frontend router (`frontend/src/App.jsx`) dynamically resolves pages accordin
 
 ---
 
-### Page 8: Staff & Clinical Workforce Roster
+### Page 8: Staff & Clinical Workforce Roster (with Staff Profile Dossier)
 - **Component:** `frontend/src/pages/Staff.jsx`
 - **Internal Route ID:** `staff`
-- **Access Level:** `super_admin`, `admin`, `branch_manager`, `care_manager`
+- **Access Level:** `super_admin` (Workforce roster, scheduling, and compensation locked down to Super Admin only)
 - **Key Features:**
   - **5 Functional Sub-Tabs:**
     1. `directory`: Searchable staff cards with avatar, specialization, employee ID, contact details, rating stars, and status badges (`available`, `on_visit`, `off_duty`, `on_leave`).
@@ -316,10 +384,20 @@ The frontend router (`frontend/src/App.jsx`) dynamically resolves pages accordin
     3. `calendar`: Monthly grid showing clinical roster shifts (`Morning 08:00 - 16:00`, `Evening 16:00 - 00:00`, `Night 00:00 - 08:00`).
     4. `leave`: Leave requests review pipeline (`sick`, `annual`, `casual`, `unpaid`) with one-click Approve / Reject actions.
     5. `payroll`: Attendance threshold configuration and monthly hours reconciliation.
-  - **Interactive Staff Drawer & Digital ID Card (`StaffIdCard.jsx`):**
+  - **Comprehensive Staff Profile Panel (`StaffProfilePanel.jsx`):**
+    - Clicking any staff member slides open a multi-tab clinical dossier drawer:
+      - **Tab 1: Overview & Credentials:** Bio, PMDC/PNC license number, emergency contact, assigned branch, and admin account linking.
+      - **Tab 2: Shift History & Attendance:** Real-time log of clock-ins, clock-outs, and completed visits.
+      - **Tab 3: Route History Map:** Interactive Leaflet route map plotting breadcrumb path of GPS pings fetched from `GET /api/tracking/staff/<id>/route/`.
+      - **Tab 4: Clinical Training (LMS):** Live progress indicators across assigned clinical courses (`GET /api/lms/staff/<id>/training/`), passing scores, and completion status.
+      - **Tab 5: Earned Certificates:** Full list of accredited credentials (`GET /api/lms/staff/<id>/certificates/`) with instant PDF download and public verification link.
+  - **Interactive Digital ID Card (`StaffIdCard.jsx`):**
     - Front face: Organization branding, photo, employee ID, PMDC/PNC QR code, emergency blood group, signature.
     - Back face: Operating rules, central dispatch contact number, and verification URL.
     - One-click physical print button.
+  - **Admin-Set Credential Provisioning:**
+    - Adding a staff member opens a registration form capturing name, specialization, phone, email, username, and an initial password.
+    - Atomically creates both the `Staff` record and a linked Django `User` account with hashed credentials.
 
 ---
 
@@ -390,7 +468,7 @@ The frontend router (`frontend/src/App.jsx`) dynamically resolves pages accordin
 ### Page 13: Financial Accounts
 - **Component:** `frontend/src/pages/Accounts.jsx`
 - **Internal Route ID:** `accounts`
-- **Access Level:** `super_admin`, `admin`, `accountant`
+- **Access Level:** `super_admin`, `accountant` (Financial ledgers and revenue streams locked down from Admin)
 - **Key Features:**
   - Executive Financial KPIs: Total Billed, Total Collected, and Outstanding Balances.
   - **Revenue by Service Line Donut Chart:** Visual breakdown across Nursing Care, Physiotherapy, Doctor Consultations, Elderly Attendant, and Pharmacy Consumables.
@@ -402,7 +480,7 @@ The frontend router (`frontend/src/App.jsx`) dynamically resolves pages accordin
 ### Page 14: Billing & Invoicing
 - **Component:** `frontend/src/pages/Billing.jsx`
 - **Internal Route ID:** `billing`
-- **Access Level:** `super_admin`, `admin`, `accountant`
+- **Access Level:** `super_admin`, `accountant` (Invoicing and payment processing locked down from Admin)
 - **Key Features:**
   - Invoice generation for Monthly Care Packages and Per-Visit home visits.
   - Status filtering: `paid`, `partial`, `pending`, `overdue`.
@@ -461,13 +539,52 @@ The frontend router (`frontend/src/App.jsx`) dynamically resolves pages accordin
 ### Page 18: Settings & User Management
 - **Component:** `frontend/src/pages/UserManagement.jsx`
 - **Internal Route ID:** `users`
-- **Access Level:** `super_admin`, `admin`, `branch_manager`
+- **Access Level:** `super_admin` only (System credentials, permissions matrix, and audit logs locked down exclusively to Super Admin)
 - **Sub-Tabs:**
   1. `users`: System user accounts table showing full name, email, phone, role badge, branch assignment, active/suspended status, and last login.
-     - Add User Modal: Creates accounts and issues auto-generated secure temporary passwords.
+     - Add User Modal: Creates accounts with admin-set passwords.
      - Account Actions: Suspend / Activate account, Reset Password, and Delete (Super Admin only).
   2. `permissions`: Interactive **Role Permission Matrix** allowing Super Admins to toggle View (`V`), Add (`A`), Edit (`E`), and Delete (`D`) permissions across Bookings, Patients, Billing, Staff, and User Management.
   3. `audit`: **Immutable Security Audit Trail** recording actor name, action performed (e.g., *Created Account*, *Suspended Account*, *Updated Permissions*), target account, and timestamp.
+
+---
+
+### Page 19: Clinical LMS (Learning Management System) & Certification Studio
+- **Component:** `frontend/src/pages/LMS.jsx`
+- **Internal Route ID:** `lms`
+- **Access Level:** `super_admin`, `admin`, `care_manager`, `nurse`
+- **Sub-Components:**
+  - `CertificateHistoryTable.jsx`: Filterable/searchable certificate history ledger with instant QR verification links, PDF re-downloads, and revocation workflows.
+  - `VideoPlayerModal.jsx`: Video lecture player with real-time watch duration tracking and API progress sync.
+- **5 Functional Sub-Tabs:**
+  1. `catalog` (**Course Catalog**):
+     - Comprehensive continuing medical education (CME) and CEU training courses (e.g., *Basic Life Support & CPR Refresher*, *Advanced Wound Debridement & Negative Pressure*, *Infection Control & Biohazard Protocols*, *Palliative Pain Management & Symptom Control*).
+     - Filter by clinical discipline, difficulty level (Beginner, Intermediate, Advanced), and CEU credit hours.
+     - Module breakdown displaying lecture counts, duration, passing grade requirement, and accreditation bodies.
+     - One-click course enrollment.
+  2. `my-learning` (**Clinician Learning Portal**):
+     - Tailored dashboard showing enrolled courses, mandatory training deadlines, completed lessons, and active course progress bars.
+     - Launch interactive video player (`VideoPlayerModal.jsx`) which pings backend lecture progress every 15 seconds (`POST /api/lms/lectures/{id}/progress/`).
+     - Post-lecture knowledge assessments with automatic score calculation and minimum passing grade evaluation.
+  3. `generator` (**Accredited Certificate Generator Studio**):
+     - Interactive design studio for generating accredited clinical credentials.
+     - **Live SVG Vector Preview:** WYSIWYG certificate preview rendering real-time design changes (recipient name, achievement title, dates, seals, and signatures).
+     - **Recipient Picker:** Linked directly to staff database with auto-filled staff ID, designation, and branch.
+     - **Certificate Types:** `course_completion`, `cpr_bls`, `infection_control`, `wound_care`, `general_achievement`.
+     - **Accreditation Seals:** Toggleable authentic regulatory badges (Islamabad Healthcare Regulatory Authority - IHRA, Securities & Exchange Commission of Pakistan - SECP).
+     - **Digital Signatures & Issuance:** Configurable signatory authority name, title (e.g. *Chief Medical Officer*), styled signature script, issue date, and optional expiration date.
+     - **One-Click Generation & Storage:** Submits to `POST /api/lms/certificates/`, creating a unique verification code (e.g. `CERT-BLS-2026-0042`), digital signature SHA-256 hash, and high-resolution QR code linking to `/verify/{code}`.
+  4. `history` (**Certificate History & Audit Ledger**):
+     - Complete tabular ledger powered by `CertificateHistoryTable.jsx`.
+     - Columns: Certificate ID, Recipient Clinician, Course/Achievement, Issue Date, Expiration Date, Grade, Status Badge (`Active`, `Revoked`, `Expired`).
+     - Instant Actions:
+       - **Download PDF:** Fetches pixel-perfect ReportLab vector PDF from `/api/lms/certificates/{id}/pdf/`.
+       - **Copy Public Verification Link:** Copies public QR validation URL to clipboard.
+       - **View Public Verification:** Navigates directly to `public-verification` / `/verify/{code}`.
+       - **Revoke / Reissue:** Administrative dialog to revoke a certificate with mandatory clinical justification audit log.
+  5. `analytics` (**Workforce Training Analytics**):
+     - Departmental compliance KPIs: Total Certified Clinicians, Pending Mandatory Certifications, Expiring Accreditations within 30 days, and Course Completion Rates.
+     - Visual charts showing CEU credit distribution and clinical competency breakdown.
 
 ---
 
@@ -533,7 +650,8 @@ Headers: `Authorization: Bearer <JWT_ACCESS_TOKEN>` (for protected endpoints)
 │   ├── GET            /api/tracking/live-visits/
 │   ├── POST           /api/tracking/gps-ping/
 │   ├── POST           /api/tracking/check-in/
-│   └── POST           /api/tracking/check-out/
+│   ├── POST           /api/tracking/check-out/
+│   └── GET            /api/tracking/staff/{id}/route/
 ├── Accounts App (`/api/accounts/`)
 │   ├── GET/POST       /api/accounts/payments/
 │   ├── GET            /api/accounts/payments/revenue_by_service/
@@ -551,6 +669,19 @@ Headers: `Authorization: Bearer <JWT_ACCESS_TOKEN>` (for protected endpoints)
 │   ├── POST           /api/crm/leads/{id}/update_stage/
 │   ├── POST           /api/crm/leads/{id}/add_activity/
 │   └── GET/POST       /api/crm/activities/
+├── Clinical LMS App (`/api/lms/`)
+│   ├── GET/POST       /api/lms/courses/
+│   ├── GET/PUT/DELETE /api/lms/courses/{id}/
+│   ├── GET/POST       /api/lms/lectures/
+│   ├── POST           /api/lms/lectures/{id}/progress/
+│   ├── GET/POST       /api/lms/assignments/
+│   ├── GET/POST       /api/lms/certificates/
+│   ├── POST           /api/lms/certificates/{id}/revoke/
+│   ├── GET            /api/lms/staff/{id}/training/
+│   ├── GET            /api/lms/staff/{id}/certificates/
+│   └── GET            /api/lms/verify/{certificate_id}/
+├── Public Certificate Verification (`/api/certificates/`)
+│   └── GET            /api/certificates/verify/{certificate_id}/
 ├── Patient/Family Portal App (`/api/portal/`)
 │   ├── GET /api/portal/my/patient_profile/
 │   ├── GET /api/portal/my/visits/
@@ -881,6 +1012,29 @@ Headers: `Authorization: Bearer <JWT_ACCESS_TOKEN>` (for protected endpoints)
 - **Request Body:** `{"booking_id": 12, "lat": 24.8607, "lng": 67.0104}`
 - **Response (200 OK):** `{"status": "checked_out", "visit_duration_minutes": 58}`
 
+#### 10. `GET /api/tracking/staff/{staff_id}/route/`
+- **Description:** Returns the chronological GPS breadcrumb route history for a clinician across recent field shifts.
+- **Parameters:** `staff_id` (Integer Staff PK), optional `date` (`YYYY-MM-DD`).
+- **Response (200 OK):**
+  ```json
+  [
+    {
+      "lat": 33.6844,
+      "lng": 73.0479,
+      "timestamp": "2026-09-14T08:30:15Z",
+      "speed": 22.4,
+      "battery": 92
+    },
+    {
+      "lat": 33.6890,
+      "lng": 73.0512,
+      "timestamp": "2026-09-14T08:35:15Z",
+      "speed": 18.1,
+      "battery": 91
+    }
+  ]
+  ```
+- **Usage:** Rendered by `StaffProfilePanel.jsx` on an interactive Leaflet polyline map to review shift movement and route compliance.
 
 ---
 
@@ -994,6 +1148,119 @@ Headers: `Authorization: Bearer <JWT_ACCESS_TOKEN>` (for protected endpoints)
 
 ---
 
+### Clinical LMS & Continuing Education API (`/api/lms/`)
+
+#### 1. `GET /api/lms/courses/` & `POST /api/lms/courses/`
+- **Description:** List accredited clinical courses or author a new training course with passing score and CEU credits.
+- **Query Parameters:** `category`, `difficulty`, `is_active`.
+- **Response (200 OK):**
+  ```json
+  [
+    {
+      "id": 1,
+      "title": "Basic Life Support & CPR Refresher (AHA 2026)",
+      "slug": "bls-cpr-refresher",
+      "category": "emergency",
+      "difficulty": "beginner",
+      "ceu_credits": 4.0,
+      "duration_minutes": 120,
+      "passing_score": 80,
+      "total_lectures": 6,
+      "is_active": true
+    }
+  ]
+  ```
+
+#### 2. `GET/PUT/DELETE /api/lms/courses/{id}/`
+- **Description:** Retrieve full course curriculum including ordered lecture modules, assessment criteria, and enrolled staff counts.
+
+#### 3. `GET/POST /api/lms/lectures/`
+- **Description:** Query or create video lectures within a course module.
+
+#### 4. `POST /api/lms/lectures/{id}/progress/`
+- **Description:** Real-time watch progress telemetry sent by `VideoPlayerModal.jsx` (every 15 seconds).
+- **Request Body:**
+  ```json
+  {
+    "watched_seconds": 450,
+    "total_seconds": 600,
+    "completed": false
+  }
+  ```
+- **Side Effect:** Automatically recalculates `CourseAssignment.progress_percentage` and marks assignment completed if all modules finish with passing score.
+
+#### 5. `GET/POST /api/lms/assignments/`
+- **Description:** Enroll staff in courses or query clinical training assignments across the workforce.
+
+#### 6. `GET /api/lms/certificates/` & `POST /api/lms/certificates/`
+- **Description:** Query issued certificates or issue an accredited certificate with cryptographic digital signature and QR verification code.
+- **Request Body (POST):**
+  ```json
+  {
+    "staff": 2,
+    "course": 1,
+    "certificate_type": "cpr_bls",
+    "achievement_title": "Basic Life Support & CPR Provider",
+    "issue_date": "2026-09-14",
+    "expiry_date": "2028-09-14",
+    "grade": "96%",
+    "signatory_name": "Dr. Sarah Mansoor",
+    "signatory_title": "Chief Medical Officer",
+    "accreditations": ["IHRA", "SECP"]
+  }
+  ```
+- **Response (201 Created):** Returns generated `certificate_id` (e.g., `CERT-BLS-2026-0042`), `verification_url`, `qr_code` data URI, and PDF download endpoint.
+
+#### 7. `POST /api/lms/certificates/{id}/revoke/`
+- **Description:** Administratively revokes a certificate with required justification.
+- **Request Body:** `{"reason": "Audit failed: missing practical skills sign-off"}`
+- **Side Effect:** Sets `revoked = True`, timestamps revocation, and updates public verification page to display `"REVOKED / INVALID"`.
+
+#### 8. `GET /api/lms/staff/{staff_id}/training/`
+- **Description:** Returns clinical course progress, CEU credit sum, and pending requirements for a specific clinician (consumed by `StaffProfilePanel.jsx`).
+
+#### 9. `GET /api/lms/staff/{staff_id}/certificates/`
+- **Description:** Returns all accredited credentials issued to a clinician with one-click PDF reprint links.
+
+---
+
+### Public Real-Time Certificate Verification (`/api/certificates/verify/`)
+
+#### 1. `GET /api/certificates/verify/{certificate_id}/` (also `/api/lms/verify/{certificate_id}/`)
+- **Description:** Public, unauthenticated verification endpoint supporting QR scanning and instant credential validation.
+- **Response (200 OK — Active):**
+  ```json
+  {
+    "status": "valid",
+    "certificate_id": "CERT-BLS-2026-0042",
+    "recipient_name": "Nurse Fatima Zahra",
+    "staff_id": 2,
+    "employee_id": "HC-NUR-002",
+    "course_title": "Basic Life Support & CPR Refresher",
+    "certificate_type": "cpr_bls",
+    "issue_date": "2026-09-14",
+    "expiry_date": "2028-09-14",
+    "is_expired": false,
+    "revoked": false,
+    "issuing_authority": "eHealth Hospital at Home / HomeCare OS",
+    "accreditation": "Registered with Islamabad Healthcare Regulatory Authority (IHRA) & SECP",
+    "signature_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+  ```
+- **Response (200 OK — Revoked):**
+  ```json
+  {
+    "status": "revoked",
+    "certificate_id": "CERT-BLS-2026-0042",
+    "revoked": true,
+    "revoked_at": "2026-09-15T10:00:00Z",
+    "revoke_reason": "License suspended by regulatory authority"
+  }
+  ```
+- **Response (404 Not Found):** `{"status": "invalid", "detail": "Certificate ID not recognized in authentic registry."}`
+
+---
+
 ## 5. Universal PDF Generation & Printing Subsystem
 
 HomeCare OS incorporates a dual-mode document generation engine:
@@ -1010,10 +1277,28 @@ HomeCare OS incorporates a dual-mode document generation engine:
      - Staff Monthly Attendance Summaries.
      - Leave Approval Slips.
      - Executive Analytics Reports.
+     - **Official Clinical Certificates (`report_type='certificate'`):** Landscape A4 vector output with deep purple/gold branding, dual regulatory seals (IHRA / SECP), dynamic recipient wording, authorized signatory line, and embedded verification QR code.
+
+### High-Fidelity Official Accredited Certificate Generator
+
+- **Implementation:** `HomeCarePDFGenerator._generate_official_certificate(buffer)`
+- **Page Layout:** Landscape A4 (`297mm x 210mm`) with precision bleed margins.
+- **Palette:**
+  - Deep Purple (`#5B1A4A`), Dark Purple facet (`#441337`), Mid Purple (`#7A2359`).
+  - Warm Gold Accent (`#D4A94A`), Light Gray overlapping geometric accents (`#E5E7EB`).
+- **Geometric Corner Flourishes:** Custom ReportLab canvas paths drawing multi-layered interlocking geometric triangles and diagonal gold pinstripes across top-left and bottom-right corners.
+- **Header & Branding:** Interlocking eHealth cross emblem, bold gold wordmark, and `"HOSPITAL AT HOME"` clinical subtitle.
+- **Accreditation Seals:**
+  - Top Right: `"Registered with Islamabad Healthcare Regulatory Authority (IHRA)"`.
+  - Bottom Right: `"Registered with Securities and Exchange Commission of Pakistan (SECP)"`.
+- **Dynamic Content:** Certificate for `<Achievement Title>`, `"This is to certify that"`, Recipient Legal Name, Course details, Issue Date, and Expiration Date.
+- **Signatory & Verification:** Authorized signature line (`Chief Medical Officer`), Digital Signature SHA-256 hash, and live embedded vector QR code linking to `/verify/{certificate_id}`.
 
 ---
 
 ## 6. Data Models & Entity-Relationship Schema
+
+### Core Clinical Schema
 
 ```
 +-------------------+        1:N        +-------------------+
@@ -1052,30 +1337,92 @@ HomeCare OS incorporates a dual-mode document generation engine:
 +-------------------+                   +-------------------+
 ```
 
+### LMS & Certification Schema
+
+```
++-------------------+        1:N        +-------------------+
+|      Course       | ----------------< |      Lecture      |
+|-------------------|                   |-------------------|
+| id (PK)           |                   | id (PK)           |
+| title, slug       |                   | course_id (FK)    |
+| category          |                   | title, video_url  |
+| difficulty        |                   | duration_seconds  |
+| ceu_credits       |                   | order, resources  |
+| passing_score     |                   +-------------------+
++---------+---------+                             |
+          |                                       |
+          | 1:N                                   | 1:N
+          v                                       v
++-------------------+        1:N        +-------------------+
+| CourseAssignment  | ----------------< |  LectureProgress  |
+|-------------------|                   |-------------------|
+| id (PK)           |                   | id (PK)           |
+| staff_id (FK)     |                   | assignment_id(FK) |
+| course_id (FK)    |                   | lecture_id (FK)   |
+| progress_pct      |                   | watched_seconds   |
+| status, score     |                   | completed (bool)  |
+| enrolled_at       |                   +-------------------+
+| completed_at      |
++---------+---------+
+          |
+          | 1:1
+          v
++-------------------+
+|    Certificate    |
+|-------------------|
+| id (PK)           |
+| certificate_id    | (e.g. CERT-BLS-2026-0042)
+| staff_id (FK)     |
+| course_id (FK)    |
+| certificate_type  | (cpr_bls, wound_care, etc.)
+| achievement_title |
+| issue_date        |
+| expiry_date       |
+| grade             |
+| signature_hash    | (SHA-256)
+| qr_code (image)   |
+| revoked (bool)    |
+| revoke_reason     |
++-------------------+
+```
+
 ---
 
 ## 7. Deployment & Environment Configuration
 
-### Backend Setup
+### Backend Setup & Daphne ASGI Server
+
+HomeCare OS requires Daphne ASGI for real-time WebSocket connection handling alongside standard HTTP:
+
 ```bash
 # 1. Navigate to backend
 cd backend
 
 # 2. Activate virtual environment
-# Windows:
-venv\Scripts\activate
+venv\Scripts\activate      # Windows
+# source venv/bin/activate  # Linux/macOS
 
 # 3. Install dependencies
 pip install -r requirements.txt
 
-# 4. Run database migrations
+# 4. Run database migrations (applies accounts, patients, staff, tracking, and lms)
 python manage.py migrate
 
-# 5. Start development server
+# 5. Start development servers:
+# Option A: Standard HTTP dev server
 python manage.py runserver 0.0.0.0:8000
+
+# Option B: Daphne ASGI server (Enables real-time WebSockets ws://.../ws/tracking/)
+daphne -b 0.0.0.0 -p 8000 homecareOS.asgi:application
 ```
 
-### Frontend Setup
+### Frontend Setup & Dynamic API Configuration
+
+The web dashboard dynamically configures its target backend URL:
+- Reads `import.meta.env.VITE_API_URL`
+- Defaults to `http://localhost:8000/api` in local development
+- In production, set `VITE_API_URL` in `.env.production` (e.g., `http://179.198.198.179/api`)
+
 ```bash
 # 1. Navigate to frontend
 cd frontend
@@ -1085,6 +1432,21 @@ npm install
 
 # 3. Start development server
 npm run dev
+# Dashboard launches on http://localhost:5173
+```
+
+### Mobile App Setup (React Native / Expo)
+
+```bash
+# 1. Navigate to mobile
+cd mobile
+
+# 2. Install dependencies
+npm install
+
+# 3. Start Expo development server
+npx expo start
+# Scan the displayed QR code using Expo Go on iOS or Android
 ```
 
 ### Production Environment Variables
@@ -1093,8 +1455,11 @@ npm run dev
 | `DEBUG` | Django debug flag | `False` |
 | `SECRET_KEY` | Cryptographic secret for signing JWTs and sessions | `django-insecure-prod-key-xyz` |
 | `ALLOWED_HOSTS` | Permitted hostnames | `homecareos.com,api.homecareos.com` |
-| `DATABASE_URL` | PostgreSQL connection string | `postgres://user:pass@localhost:5432/homecareos` |
-| `CORS_ALLOWED_ORIGINS` | Trusted origins for frontend requests | `https://homecareos.com` |
+| `DATABASE_URL` | PostgreSQL connection string with SSL | `postgres://user:pass@localhost:5432/homecareos?sslmode=require` |
+| `FIELD_ENCRYPTION_KEY` | 32-byte Fernet key for encrypting patient PHI | `fernet-key-base64==` |
+| `REDIS_URL` | Redis URL for Channels channel layer and Celery | `redis://localhost:6379/0` |
+| `CORS_ALLOWED_ORIGINS` | Trusted origins for frontend requests | `https://homecareos.com,http://localhost:5173` |
+| `VITE_API_URL` | Frontend API base endpoint | `https://api.homecareos.com/api` |
 
 ---
 
@@ -1195,6 +1560,135 @@ The entire cross-platform tracking pipeline is validated through the automated i
 
 > **Complete Implementation Reference:**  
 > For complete React Native service code, Axios interceptors, offline queue implementations, and step-by-step curl test scripts, refer to [`MOBILE_INTEGRATION.md`](file:///c:/Users/Administrator/Desktop/health/MOBILE_INTEGRATION.md).
+
+---
+
+## 9. React Native Mobile App Architecture & Screen Catalog (`mobile/`)
+
+The mobile application (`mobile/`) is built using React Native and Expo, tailored for field clinicians (nurses, therapists, doctors) and patient families. It connects to the Django REST Framework API and Daphne ASGI WebSockets.
+
+### 9.1 Mobile Architecture & Directory Structure
+
+```
+mobile/
+├── App.js                     # Root navigation, auth state listener, offline banner
+├── app.json                   # Expo configuration, location permissions & schemes
+├── assets/                    # Clinical icons, eHealth logos, splash screens
+└── src/
+    ├── components/            # Reusable UI component library
+    │   ├── AnimatedButton.js  # Haptic-ready pressable with spring animation
+    │   ├── AnimatedCheckbox.js# Micro-animated clinical checklist checkbox
+    │   ├── Card.js            # Elevated container with iOS/Android shadow
+    │   ├── EmptyState.js      # Zero-data illustration & action prompt
+    │   ├── FadeInView.js      # Smooth opacity transition container
+    │   ├── NoInternetBanner.js# Floating offline warning indicator
+    │   ├── PrimaryButton.js   # High-contrast action button with loading spinner
+    │   ├── PulsingDot.js      # Live GPS transmission indicator
+    │   ├── SessionExpiredModal.js # Auto-prompts re-auth on JWT expiry
+    │   ├── SkeletonLoader.js  # Content placeholder animation
+    │   ├── StatusBadge.js     # Standardized clinical status pills
+    │   └── Toast.js           # Animated notification toast overlay
+    ├── screens/               # 19 Clinician workflow screens
+    │   ├── AttendanceScreen.js       # Shift clock-in / clock-out with GPS pin
+    │   ├── CheckoutScreen.js         # Visit completion & departure confirmation
+    │   ├── DailyReportScreen.js      # Multipart Form A notes & wound photo upload
+    │   ├── HomeScreen.js             # Clinician home dashboard hub
+    │   ├── LeaveRequestScreen.js     # Staff leave application & balance tracker
+    │   ├── LoginScreen.js            # DRF JWT login (supports username or email)
+    │   ├── ManagerViewScreen.js      # Field supervisor overview & staff status
+    │   ├── NotificationsScreen.js    # Operational alerts & assignment updates
+    │   ├── NursesNoteScreen.js       # Form A clinical notes editor
+    │   ├── OnboardingScreen.js       # First-time app walkthrough
+    │   ├── PhotoViewerScreen.js      # High-res wound inspection photo viewer
+    │   ├── ProfileScreen.js          # Clinician digital ID & licensing credentials
+    │   ├── ResetPasswordScreen.js    # 2-step OTP password reset screen
+    │   ├── SplashScreen.js           # Branded initial boot screen
+    │   ├── TodayScheduleScreen.js    # Today's assigned visit itinerary
+    │   ├── TodaysMedsScreen.js       # Form C 7-day MAR administration grid
+    │   ├── VisitDetailScreen.js      # Active visit cockpit, map & SOS trigger
+    │   ├── VitalsEntryScreen.js      # Form B vitals input with anomaly alerts
+    │   ├── WelcomeScreen.js          # Platform selection & welcome banner
+    │   └── family/                   # 6 Family Portal mobile screens
+    │       ├── FamilyHomeScreen.js         # Patient status & upcoming nurse visits
+    │       ├── FamilyInvoicesScreen.js     # Billing summaries & invoice PDFs
+    │       ├── FamilyLiveTrackingScreen.js # Real-time nurse en-route map
+    │       ├── FamilyMessagesScreen.js     # Direct care manager chat
+    │       ├── MyVisitsScreen.js           # Chronological visit history
+    │       └── VitalsTrendScreen.js        # Interactive vitals trend charts
+    ├── services/              # Core networking, tracking & storage services
+    │   ├── api.js             # Axios client with JWT auto-refresh & error handler
+    │   ├── locationService.js # Expo TaskManager background location tracking
+    │   ├── location.js        # Foreground GPS coordinates & permission helpers
+    │   ├── offlineQueue.js    # AsyncStorage persistent mutation queue (FIFO)
+    │   ├── tracking.js        # High-level tracking API dispatchers
+    │   └── websocket.js       # Reconnecting WebSocket client for Daphne
+    └── theme/                 # Standard design tokens (colors, typography, spacing)
+```
+
+### 9.2 Clinician Mobile Workflow Screens (19 Screens)
+
+1. **`LoginScreen.js`:** Authenticates against `POST /api/auth/login/` supporting username or email. Securely stores JWT access and refresh tokens in AsyncStorage.
+2. **`ResetPasswordScreen.js`:** 2-step OTP verification (`POST /api/auth/verify-otp/`) and password reset (`POST /api/auth/reset-password/`).
+3. **`AttendanceScreen.js`:** Captures clinician GPS coordinates and timestamp for daily clock-in/out (`POST /api/staff/attendance/`).
+4. **`TodayScheduleScreen.js`:** Lists all scheduled visits for the day fetched from `GET /api/bookings/today/`, badge-coded by status (`assigned`, `en_route`, `in_progress`, `completed`).
+5. **`VisitDetailScreen.js`:** Active visit control cockpit:
+   - Displays patient name, MR number, address, diagnosis, and care instructions.
+   - **"Start Visit"** action: Requests background GPS permissions and initiates `homecare-location-task`.
+   - **Emergency SOS Button:** High-contrast red button triggering immediate distress broadcast via WebSocket and REST.
+   - Shortcuts to Vitals Entry (Form B), Medication Administration (Form C MAR), and Nurses Notes (Form A).
+6. **`VitalsEntryScreen.js`:** Captures systolic, diastolic, pulse, temperature, SpO2, respiratory rate, and blood sugar (`POST /api/patients/vitals/`). Displays immediate warnings for abnormal physiological ranges.
+7. **`TodaysMedsScreen.js`:** Form C MAR sheet. Displays medications due today with dosage, route, and schedule. Ticking a dose calls `POST /api/patients/{id}/mar/administer/` with duplicate dose rejection (`409 Conflict`).
+8. **`NursesNoteScreen.js`:** Form A subjective/objective progress notes (`POST /api/patients/notes/`).
+9. **`DailyReportScreen.js`:** Comprehensive end-of-visit submission supporting multi-photo bedside wound uploads via `multipart/form-data` (`POST /api/patients/{id}/daily-report/`).
+10. **`CheckoutScreen.js`:** Final departure confirmation (`POST /api/tracking/check-out/`). Automatically calculates visit duration and terminates background location tracking.
+11. **`LeaveRequestScreen.js`:** Allows staff to submit leave requests (`POST /api/staff/leave-requests/`) with date pickers and reason categories.
+12. **`HomeScreen.js`:** Clinician daily overview with quick KPIs, next stop, and shift status.
+13. **`ManagerViewScreen.js`:** Field supervisor view for monitoring nurse statuses and active visits.
+14. **`NotificationsScreen.js`:** In-app operational alerts and assignment updates.
+15. **`ProfileScreen.js`:** Clinician digital ID card, license credentials (PMDC/PNC), and branch assignment.
+16. **`PhotoViewerScreen.js`:** Full-screen zoomable viewer for clinical wound photos.
+17. **`OnboardingScreen.js`:** First-run onboarding carousel.
+18. **`WelcomeScreen.js`:** Role entry selection.
+19. **`SplashScreen.js`:** Branded launch screen with automatic JWT validity checking.
+
+### 9.3 Family Portal Mobile Screens (6 Screens)
+
+1. **`FamilyHomeScreen.js`:** Family overview displaying current patient status, attending nurse details, and next scheduled home visit.
+2. **`FamilyLiveTrackingScreen.js`:** Live OpenStreetMap tracking showing the attending nurse moving towards the patient's home in real-time.
+3. **`MyVisitsScreen.js`:** Chronological history of past visits, attending clinicians, and care summaries.
+4. **`VitalsTrendScreen.js`:** Interactive trend charts showing blood pressure, heart rate, temperature, and oxygen saturation over time.
+5. **`FamilyInvoicesScreen.js`:** Itemized invoice balances, payment history, and downloadable PDF receipts.
+6. **`FamilyMessagesScreen.js`:** Direct two-way messaging channel with the assigned Care Manager.
+
+### 9.4 Mobile Offline Queue & Real-Time Services
+
+- **Axios JWT Auto-Refresh (`api.js`):** Intercepts HTTP 401 responses, calls `POST /api/auth/refresh/` using the stored refresh token, and replays the original failed request seamlessly.
+- **Offline Mutation Queue (`offlineQueue.js`):** If a network error occurs during critical clinical actions (e.g. administering a medication or checking in), the payload is enqueued into AsyncStorage with a unique UUID idempotency key (`X-Idempotency-Key`). A `NetInfo` listener flushes pending requests once connectivity is re-established.
+- **Background GPS Service (`locationService.js`):** Registers an `expo-task-manager` background task `homecare-location-task` that transmits coordinates every 30 seconds (`POST /api/tracking/gps-ping/`) while preserving clinician device battery.
+- **WebSocket Streaming (`websocket.js`):** Auto-reconnecting WebSocket connection to `ws://<server>/ws/tracking/?token=<JWT>` for live location broadcasting and instantaneous SOS alerts.
+
+---
+
+## 10. Real Backend Persistence & Data Integrity Architecture
+
+### 10.1 Zero-Mock Real Persistence Enforcement
+
+HomeCare OS operates on **100% real database persistence across both web and mobile surfaces**:
+- **Removal of Mock Fallbacks:** Hardcoded mock arrays were systematically eliminated from `useStore.js`, `Patients.jsx`, `Bookings.jsx`, `Staff.jsx`, and `FamilyPortal.jsx`.
+- **Direct API Synchronization:** All CRUD operations communicate directly with the Django REST Framework endpoints. State modifications are reflected reactively in Zustand only upon verified HTTP `200/201` server responses.
+- **Data Integrity:** Database migrations ensure relational integrity between `User`, `Staff`, `Patient`, `Booking`, `VitalSign`, `NurseNote`, `Invoice`, `CourseAssignment`, and `Certificate`.
+
+### 10.2 Admin-Set Staff Provisioning & Immediate Login
+
+- Administrators can register clinicians directly from the Web Dashboard (`Staff.jsx`).
+- The registration form captures `username`, `email`, and an initial **admin-set password**.
+- The backend `StaffSerializer` creates both the `Staff` profile and the underlying Django `User` object, hashing the password using `user.set_password(...)`.
+- The clinician can immediately log in to the mobile app or web dashboard without requiring external email activation workflows.
+
+### 10.3 Real-Time Scheduling & Dispatch Persistence
+
+- Newly created patients and nurses immediately persist to the database and are dynamically loaded into scheduling assignment dropdowns and dispatch rosters.
+- Booking status transitions (`pending` → `assigned` → `en_route` → `in_progress` → `completed`) trigger real-time database updates and Daphne ASGI WebSocket broadcasts, ensuring hospital dispatchers and field nurses maintain identical operational state.
 
 ---
 *© 2026 HomeCare OS Enterprise. All rights reserved. Hospital at Home Management Platform.*

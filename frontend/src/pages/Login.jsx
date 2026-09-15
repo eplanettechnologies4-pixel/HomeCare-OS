@@ -3,25 +3,25 @@ import { Heart, Eye, EyeOff, Lock, Mail, Shield, AlertCircle, CheckCircle, Arrow
 import useStore from '../store/useStore';
 
 export default function Login() {
-  const login         = useStore((s) => s.login);
-  const setCurrentRole= useStore((s) => s.setCurrentRole);
+  const login = useStore((s) => s.login);
+  const setCurrentRole = useStore((s) => s.setCurrentRole);
   const setActivePage = useStore((s) => s.setActivePage);
 
   const [emailOrPhone, setEmailOrPhone] = useState('');
-  const [password, setPassword]         = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [rememberMe, setRememberMe]     = useState(true);
-  const [loading, setLoading]           = useState(false);
-  const [errorMsg, setErrorMsg]         = useState('');
-  const [isSuspended, setIsSuspended]   = useState(false);
+  const [rememberMe, setRememberMe] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
+  const [isSuspended, setIsSuspended] = useState(false);
 
   // Forgot Password Modal state
   const [showForgotModal, setShowForgotModal] = useState(false);
-  const [forgotStep, setForgotStep]           = useState(1); // 1: Request, 2: Reset Form
-  const [resetTarget, setResetTarget]         = useState('');
-  const [otpCode, setOtpCode]                 = useState('');
-  const [newPassword, setNewPassword]         = useState('');
-  const [resetSuccess, setResetSuccess]       = useState(false);
+  const [forgotStep, setForgotStep] = useState(1); // 1: Request, 2: Reset Form
+  const [resetTarget, setResetTarget] = useState('');
+  const [otpCode, setOtpCode] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [resetSuccess, setResetSuccess] = useState(false);
 
   const handleLoginSubmit = async (e) => {
     if (e) e.preventDefault();
@@ -68,7 +68,7 @@ export default function Login() {
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh', width: '100vw', background: 'var(--teal-900)', fontFamily: 'var(--font-body)', overflow: 'hidden' }}>
-      
+
       {/* ── LEFT HERO BRAND COLUMN ────────────────────────────────────── */}
       <div style={{
         flex: '1 1 50%',
@@ -141,7 +141,7 @@ export default function Login() {
         overflowY: 'auto'
       }}>
         <div style={{ width: '100%', maxWidth: 420 }}>
-          
+
           <div style={{ marginBottom: 28 }}>
             <h2 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.75rem', fontWeight: 700, margin: '0 0 6px', color: 'var(--teal-900)' }}>
               Sign In to Your Account

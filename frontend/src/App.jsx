@@ -1,7 +1,9 @@
 import React from 'react';
+import { Shield } from 'lucide-react';
 import Sidebar from './components/Sidebar';
 import Topbar from './components/Topbar';
 import useStore from './store/useStore';
+import { ROLE_CONFIG } from './data/mockData';
 import Overview      from './pages/Overview';
 import LiveTracking  from './pages/LiveTracking';
 import Bookings      from './pages/Bookings';
@@ -118,6 +120,35 @@ export default function App() {
   // Patient / Family Role → Family Portal Screen
   if (currentRole === 'patient_family' || activePage === 'family-portal') {
     return <FamilyPortal />;
+  }
+
+  // Role Access Guard: Check if the current role is authorized to view this page
+  const allowedNav = ROLE_CONFIG[currentRole]?.nav || ['overview'];
+  const isAllowed = allowedNav.includes(activePage);
+
+  if (!isAllowed) {
+    return (
+      <div className="app-shell">
+        <Sidebar />
+        <div className="main-area">
+          <Topbar pageTitle="Access Restricted" pageSubtitle="Insufficient Permissions" />
+          <main className="page-content" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '60vh' }}>
+            <div className="card" style={{ maxWidth: 480, textAlign: 'center', padding: 36, borderTop: '4px solid var(--status-red)' }}>
+              <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'rgba(239, 68, 68, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', color: 'var(--status-red)' }}>
+                <Shield size={28} />
+              </div>
+              <h2 style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--teal-900)', marginBottom: 8 }}>Access Restricted</h2>
+              <p style={{ fontSize: '0.88rem', color: 'var(--status-grey)', lineHeight: 1.5, marginBottom: 20 }}>
+                This module (<strong>{PAGE_META[activePage]?.title || activePage}</strong>) is locked down for Super Administrator access only. Your current role is <strong>{ROLE_CONFIG[currentRole]?.label || currentRole}</strong>.
+              </p>
+              <button className="btn btn-primary" onClick={() => useStore.getState().setActivePage('overview')}>
+                Return to Overview
+              </button>
+            </div>
+          </main>
+        </div>
+      </div>
+    );
   }
 
   const meta = PAGE_META[activePage] || { title: 'eHealth', subtitle: 'Hospital at Home' };
