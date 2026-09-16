@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { X, Eye, EyeOff, Shield, User, Lock, AlertCircle, CheckCircle } from 'lucide-react';
 import useStore from '../store/useStore';
 
-export const ROLE_OPTIONS = [
+const ROLE_OPTIONS = [
   { value: 'nurse', label: 'Nurse', category: 'Clinical Staff', defaultPlatform: 'mobile' },
   { value: 'doctor', label: 'Doctor', category: 'Clinical Staff', defaultPlatform: 'mobile' },
   { value: 'physio', label: 'Physiotherapist', category: 'Clinical Staff', defaultPlatform: 'mobile' },

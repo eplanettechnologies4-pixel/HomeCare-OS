@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import {
   Heart, Calendar, MapPin, Phone, ShieldCheck, CheckCircle, ArrowRight,
-  Star, Clock, Upload, FileText, Activity, AlertCircle, X, ChevronRight, MessageSquare, User
+  Star, Clock, Upload, FileText, Activity, AlertCircle, X, ChevronRight, MessageSquare, User,
+  Stethoscope, AlertTriangle
 } from 'lucide-react';
 import useStore from '../store/useStore';
 import PublicHeader from '../components/PublicHeader';
@@ -29,20 +30,96 @@ export default function PublicWebsite() {
     service_id: 'long_term',
     service_title: 'Long-Term Skilled Nursing',
     patient_name: '',
-    age: '',
+    age: '65',
+    date_of_birth: '1961-01-01',
     gender: 'M',
     phone: '+92-3',
-    contact_person: '',
+    email: '',
     address: 'House 42, Block C, Soan Garden, Islamabad',
     lat: 33.57,
     lng: 73.15,
+    emergency_contact_name: '',
+    emergency_contact_phone: '+92-3',
+    diagnosis: '',
+    allergies: 'No Known Drug Allergies (NKDA)',
+    has_prescription: true,
     prescription_name: '',
+    consult_doctor_needed: false,
     preferred_date: new Date().toISOString().split('T')[0],
     preferred_slot: 'morning',
+    start_time: '09:00',
+    shift_duration: '4_hours',
+    shift_frequency: 'once',
     payment_method: 'advance', // 'advance' | 'pay_on_service'
+    gender_preference: 'no_pref',
+    consultant_name: '',
+    consultant_details: '',
+    notes: '',
   });
 
   const [bookingResult, setBookingResult] = useState(null);
+
+  const handleDobChange = (dob) => {
+    if (!dob) {
+      setBookingForm(prev => ({ ...prev, date_of_birth: '', age: '' }));
+      return;
+    }
+    const birth = new Date(dob);
+    const now = new Date();
+    let ageCalc = now.getFullYear() - birth.getFullYear();
+    const m = now.getMonth() - birth.getMonth();
+    if (m < 0 || (m === 0 && now.getDate() < birth.getDate())) {
+      ageCalc--;
+    }
+    setBookingForm(prev => ({ ...prev, date_of_birth: dob, age: Math.max(0, ageCalc).toString() }));
+  };
+
+  const handleAgeChange = (ageVal) => {
+    const numericAge = parseInt(ageVal, 10);
+    if (!isNaN(numericAge) && numericAge >= 0) {
+      const year = new Date().getFullYear() - numericAge;
+      const estimatedDob = `${year}-01-01`;
+      setBookingForm(prev => ({ ...prev, age: ageVal, date_of_birth: estimatedDob }));
+    } else {
+      setBookingForm(prev => ({ ...prev, age: ageVal }));
+    }
+  };
+
+  const handleNextStep = () => {
+    if (bookingStep === 2) {
+      if (!bookingForm.patient_name.trim()) {
+        alert('Please enter the Patient Name.');
+        return;
+      }
+      if (!bookingForm.age || !bookingForm.date_of_birth) {
+        alert('Please provide Patient Age and Date of Birth.');
+        return;
+      }
+      if (!bookingForm.phone || bookingForm.phone === '+92-3') {
+        alert('Please enter a valid Patient Contact Number.');
+        return;
+      }
+      if (!bookingForm.address.trim()) {
+        alert('Please enter the Written Home Address.');
+        return;
+      }
+      if (!bookingForm.emergency_contact_name.trim() || !bookingForm.emergency_contact_phone.trim()) {
+        alert('Please enter Emergency Contact Name and Phone Number.');
+        return;
+      }
+    }
+    if (bookingStep === 3) {
+      if (!bookingForm.diagnosis.trim()) {
+        alert('Please provide the Diagnosis or Medical Condition.');
+        return;
+      }
+      if (!bookingForm.allergies.trim()) {
+        alert('Please specify Allergies (keep default NKDA if none).');
+        return;
+      }
+    }
+    setBookingStep(bookingStep + 1);
+  };
 
   const handleContactSubmit = (e) => {
     e.preventDefault();
@@ -73,6 +150,14 @@ export default function PublicWebsite() {
   const handleBookingSubmit = () => {
     if (!bookingForm.patient_name || !bookingForm.phone || !bookingForm.address) {
       alert('Please fill in patient name, contact number and home address.');
+      return;
+    }
+    if (!bookingForm.diagnosis) {
+      alert('Please specify diagnosis or medical condition.');
+      return;
+    }
+    if (!bookingForm.emergency_contact_name || !bookingForm.emergency_contact_phone) {
+      alert('Please provide emergency contact name and phone.');
       return;
     }
 
@@ -492,26 +577,26 @@ export default function PublicWebsite() {
       {/* ── 6-STEP PUBLIC BOOKING WIZARD MODAL ───────────────────────────── */}
       {showBookingModal && (
         <div className="modal-backdrop" onClick={(e) => e.target === e.currentTarget && setShowBookingModal(false)}>
-          <div className="modal" style={{ width: 620 }}>
-            <div className="modal-header" style={{ background: 'var(--teal-800)', color: 'white' }}>
+          <div className="modal" style={{ width: 680, maxWidth: '95vw', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
+            <div className="modal-header" style={{ background: 'var(--teal-800)', color: 'white', flexShrink: 0 }}>
               <div>
                 <h3 style={{ margin: 0, fontFamily: 'var(--font-heading)', color: 'white' }}>
                   Public Self-Service Visit Booking
                 </h3>
                 <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.7)', marginTop: 2 }}>
-                  Step {bookingStep} of 6 — {['Select Service', 'Patient Details & Map Pin', 'Prescription Upload', 'Date & Time', 'Payment Review', 'Confirmation'][bookingStep - 1]}
+                  Step {bookingStep} of 6 — {['Service Selection', 'Patient & Address Intake', 'Clinical & Prescription', 'Schedule & Shift Duration', 'Review & Payment', 'Confirmation'][bookingStep - 1]}
                 </div>
               </div>
               <button className="btn btn-ghost btn-icon" style={{ color: 'white' }} onClick={() => setShowBookingModal(false)}><X size={16} /></button>
             </div>
 
-            <div className="modal-body" style={{ padding: 22 }}>
+            <div className="modal-body" style={{ padding: 22, overflowY: 'auto', flex: 1 }}>
               
               {/* STEP 1: Select Service */}
               {bookingStep === 1 && (
                 <div>
                   <div style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--teal-800)', marginBottom: 12 }}>
-                    Step 1: Choose Required Healthcare Service
+                    Step 1: Choose Required Healthcare Service *
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                     {PUBLIC_SERVICES.map(srv => (
@@ -538,135 +623,353 @@ export default function PublicWebsite() {
               {bookingStep === 2 && (
                 <div>
                   <div style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--teal-800)', marginBottom: 12 }}>
-                    Step 2: Patient Information & Address Map Pin
+                    Step 2: Patient Demographics & Written Address
                   </div>
                   <div className="grid-2" style={{ gap: 12 }}>
                     <div className="form-group" style={{ marginBottom: 0 }}>
                       <label className="form-label">Patient Full Name *</label>
-                      <input className="form-input" value={bookingForm.patient_name} onChange={e => setBookingForm({...bookingForm, patient_name: e.target.value})} placeholder="e.g. Tariq Mehmood" />
+                      <input
+                        className="form-input"
+                        required
+                        value={bookingForm.patient_name}
+                        onChange={e => setBookingForm({...bookingForm, patient_name: e.target.value})}
+                        placeholder="e.g. Tariq Mehmood"
+                      />
                     </div>
                     <div className="grid-2" style={{ gap: 6, marginBottom: 0 }}>
                       <div className="form-group" style={{ marginBottom: 0 }}>
                         <label className="form-label">Age *</label>
-                        <input type="number" className="form-input" value={bookingForm.age} onChange={e => setBookingForm({...bookingForm, age: e.target.value})} placeholder="65" />
+                        <input
+                          type="number"
+                          className="form-input"
+                          min="0"
+                          max="120"
+                          value={bookingForm.age}
+                          onChange={e => handleAgeChange(e.target.value)}
+                          placeholder="65"
+                        />
                       </div>
                       <div className="form-group" style={{ marginBottom: 0 }}>
-                        <label className="form-label">Gender</label>
-                        <select className="form-select" value={bookingForm.gender} onChange={e => setBookingForm({...bookingForm, gender: e.target.value})}>
-                          <option value="M">Male</option>
-                          <option value="F">Female</option>
-                        </select>
+                        <label className="form-label">Date of Birth (DOB) *</label>
+                        <input
+                          type="date"
+                          className="form-input"
+                          value={bookingForm.date_of_birth}
+                          onChange={e => handleDobChange(e.target.value)}
+                        />
                       </div>
                     </div>
+
                     <div className="form-group" style={{ marginBottom: 0 }}>
                       <label className="form-label">Contact Phone (+92) *</label>
-                      <input className="form-input" value={bookingForm.phone} onChange={e => setBookingForm({...bookingForm, phone: e.target.value})} placeholder="+92-300-1234567" />
+                      <input
+                        className="form-input"
+                        required
+                        value={bookingForm.phone}
+                        onChange={e => setBookingForm({...bookingForm, phone: e.target.value})}
+                        placeholder="+92-300-1234567"
+                      />
                     </div>
+
                     <div className="form-group" style={{ marginBottom: 0 }}>
-                      <label className="form-label">Home Address with Area *</label>
-                      <input className="form-input" value={bookingForm.address} onChange={e => setBookingForm({...bookingForm, address: e.target.value})} placeholder="House #, Street, Block, PWD / Soan Garden, Islamabad" />
+                      <label className="form-label">Email Address (Optional)</label>
+                      <input
+                        type="email"
+                        className="form-input"
+                        value={bookingForm.email}
+                        onChange={e => setBookingForm({...bookingForm, email: e.target.value})}
+                        placeholder="family@example.com"
+                      />
+                    </div>
+
+                    <div className="form-group" style={{ gridColumn: 'span 2', marginBottom: 0 }}>
+                      <label className="form-label">Home Address Written *</label>
+                      <input
+                        className="form-input"
+                        required
+                        value={bookingForm.address}
+                        onChange={e => setBookingForm({...bookingForm, address: e.target.value})}
+                        placeholder="House #, Street, Block, PWD / Soan Garden, Islamabad"
+                      />
+                    </div>
+
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label">Emergency Contact Name *</label>
+                      <input
+                        className="form-input"
+                        required
+                        value={bookingForm.emergency_contact_name}
+                        onChange={e => setBookingForm({...bookingForm, emergency_contact_name: e.target.value})}
+                        placeholder="e.g. Asim Tariq (Son)"
+                      />
+                    </div>
+
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label">Emergency Contact Phone *</label>
+                      <input
+                        className="form-input"
+                        required
+                        value={bookingForm.emergency_contact_phone}
+                        onChange={e => setBookingForm({...bookingForm, emergency_contact_phone: e.target.value})}
+                        placeholder="+92-333-7654321"
+                      />
                     </div>
                   </div>
 
                   {/* Leaflet Address Map Pin Simulation */}
                   <div style={{ marginTop: 14, background: 'var(--sage-100)', padding: 12, borderRadius: 8, display: 'flex', gap: 10, alignItems: 'center', fontSize: '0.8rem' }}>
                     <MapPin size={20} style={{ color: 'var(--amber-600)', flexShrink: 0 }} />
-                    <div>
-                      <div style={{ fontWeight: 700, color: 'var(--teal-800)' }}>Address Map Pin Selected</div>
-                      <div style={{ fontSize: '0.72rem', color: 'var(--status-grey)', fontFamily: 'var(--font-mono)' }}>Lat: {bookingForm.lat}, Lng: {bookingForm.lng} (PWD / Soan Garden, Islamabad)</div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 700, color: 'var(--teal-800)' }}>Current Location Map Pin (GPS Coordinates)</div>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--status-grey)', fontFamily: 'var(--font-mono)' }}>
+                        Lat: {bookingForm.lat}, Lng: {bookingForm.lng} (Auto-calibrated for PWD / Soan Garden dispatch)
+                      </div>
                     </div>
+                    <span className="badge badge-teal" style={{ fontSize: '0.7rem' }}>GPS Calibrated</span>
                   </div>
                 </div>
               )}
 
-              {/* STEP 3: Upload Prescription */}
+              {/* STEP 3: Clinical Condition & Prescription / Doctor Consultation */}
               {bookingStep === 3 && (
                 <div>
                   <div style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--teal-800)', marginBottom: 12 }}>
-                    Step 3: Upload Doctor's Prescription (Optional)
-                  </div>
-                  <div style={{ border: '2px dashed var(--sage-300)', padding: 30, borderRadius: 10, textAlign: 'center', background: 'var(--sage-50)' }}>
-                    <Upload size={32} style={{ color: 'var(--teal-600)', marginBottom: 10 }} />
-                    <div style={{ fontWeight: 600, fontSize: '0.88rem', color: 'var(--teal-800)', marginBottom: 4 }}>
-                      Click to upload doctor prescription image or PDF
-                    </div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--status-grey)', marginBottom: 14 }}>
-                      Helps our Care Manager verify required medication & clinical SOPs
-                    </div>
-                    <input
-                      type="file"
-                      id="rx-upload"
-                      style={{ display: 'none' }}
-                      onChange={(e) => {
-                        if (e.target.files[0]) setBookingForm({...bookingForm, prescription_name: e.target.files[0].name});
-                      }}
-                    />
-                    <label htmlFor="rx-upload" className="btn btn-ghost btn-sm" style={{ cursor: 'pointer' }}>
-                      Select File
-                    </label>
+                    Step 3: Clinical Condition & Medical Verification
                   </div>
 
-                  {bookingForm.prescription_name && (
-                    <div className="badge badge-teal" style={{ marginTop: 12, fontSize: '0.78rem' }}>
-                      <FileText size={12} /> {bookingForm.prescription_name} Attached
+                  <div className="form-group" style={{ marginBottom: 12 }}>
+                    <label className="form-label">Diagnosis or Medical Condition *</label>
+                    <textarea
+                      className="form-input"
+                      rows={2}
+                      required
+                      value={bookingForm.diagnosis}
+                      onChange={e => setBookingForm({...bookingForm, diagnosis: e.target.value})}
+                      placeholder="e.g. Post-stroke rehabilitation, Hypertension, Bedbound stage 2 care"
+                    />
+                  </div>
+
+                  <div className="form-group" style={{ marginBottom: 14 }}>
+                    <label className="form-label">Allergies (Clinical Safety) *</label>
+                    <input
+                      className="form-input"
+                      required
+                      value={bookingForm.allergies}
+                      onChange={e => setBookingForm({...bookingForm, allergies: e.target.value})}
+                      placeholder="e.g. Penicillin, NSAIDs (Default: No Known Drug Allergies - NKDA)"
+                    />
+                  </div>
+
+                  {/* Prescription vs Consult Doctor Toggle */}
+                  <div style={{ border: '1px solid var(--sage-300)', borderRadius: 8, padding: 14, background: 'var(--sage-50)', marginBottom: 14 }}>
+                    <label className="form-label" style={{ marginBottom: 8 }}>
+                      Prescription of Medication or Hospital Discharge Summary *
+                    </label>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+                      <div
+                        onClick={() => setBookingForm({...bookingForm, has_prescription: true, consult_doctor_needed: false})}
+                        style={{
+                          border: bookingForm.has_prescription ? '2px solid var(--teal-700)' : '1px solid var(--sage-200)',
+                          background: bookingForm.has_prescription ? 'white' : 'transparent',
+                          padding: 10,
+                          borderRadius: 6,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          fontSize: '0.82rem',
+                          fontWeight: 600
+                        }}
+                      >
+                        <FileText size={16} color="var(--teal-700)" />
+                        <span>Yes (Pic / File Upload)</span>
+                      </div>
+
+                      <div
+                        onClick={() => setBookingForm({...bookingForm, has_prescription: false, consult_doctor_needed: true, prescription_name: ''})}
+                        style={{
+                          border: bookingForm.consult_doctor_needed ? '2px solid var(--amber-600)' : '1px solid var(--sage-200)',
+                          background: bookingForm.consult_doctor_needed ? 'white' : 'transparent',
+                          padding: 10,
+                          borderRadius: 6,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          fontSize: '0.82rem',
+                          fontWeight: 600
+                        }}
+                      >
+                        <Stethoscope size={16} color="var(--amber-600)" />
+                        <span>No (Consult a Doctor)</span>
+                      </div>
                     </div>
-                  )}
+
+                    {bookingForm.has_prescription ? (
+                      <div style={{ border: '2px dashed var(--sage-300)', padding: 16, borderRadius: 8, textAlign: 'center', background: 'white' }}>
+                        <Upload size={24} style={{ color: 'var(--teal-600)', marginBottom: 6 }} />
+                        <div style={{ fontWeight: 600, fontSize: '0.82rem', color: 'var(--teal-800)', marginBottom: 4 }}>
+                          Upload Prescription or Discharge Summary (Image/PDF)
+                        </div>
+                        <input
+                          type="file"
+                          id="rx-upload"
+                          style={{ display: 'none' }}
+                          onChange={(e) => {
+                            if (e.target.files[0]) setBookingForm({...bookingForm, prescription_name: e.target.files[0].name});
+                          }}
+                        />
+                        <label htmlFor="rx-upload" className="btn btn-ghost btn-sm" style={{ cursor: 'pointer', marginTop: 4 }}>
+                          Select File / Picture
+                        </label>
+                        {bookingForm.prescription_name && (
+                          <div className="badge badge-teal" style={{ marginTop: 8, fontSize: '0.78rem' }}>
+                            <FileText size={12} /> {bookingForm.prescription_name} Attached
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div style={{ background: '#fffbeb', border: '1px solid #fef3c7', padding: 12, borderRadius: 8, fontSize: '0.8rem', color: '#92400e', display: 'flex', gap: 8 }}>
+                        <AlertTriangle size={18} style={{ flexShrink: 0, marginTop: 2 }} />
+                        <div>
+                          <strong>Physician Tele-Consult Flagged:</strong> Because no prescription was provided, our Medical Director will conduct a brief verification prior to dispensing medications or invasive nursing.
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="grid-2" style={{ gap: 12 }}>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label">Consultant Details (Optional)</label>
+                      <input
+                        className="form-input"
+                        value={bookingForm.consultant_name}
+                        onChange={e => setBookingForm({...bookingForm, consultant_name: e.target.value})}
+                        placeholder="e.g. Dr. Salman Khan (Shifa / Maroof)"
+                      />
+                    </div>
+
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label">Staff Gender Preference (Optional)</label>
+                      <select
+                        className="form-select"
+                        value={bookingForm.gender_preference}
+                        onChange={e => setBookingForm({...bookingForm, gender_preference: e.target.value})}
+                      >
+                        <option value="no_pref">No Preference</option>
+                        <option value="female">Female Staff Preferred</option>
+                        <option value="male">Male Staff Preferred</option>
+                      </select>
+                    </div>
+                  </div>
                 </div>
               )}
 
-              {/* STEP 4: Choose Date & Time */}
+              {/* STEP 4: Choose Date, Time, Shift Duration & Frequency */}
               {bookingStep === 4 && (
                 <div>
                   <div style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--teal-800)', marginBottom: 12 }}>
-                    Step 4: Choose Preferred Date & Time Slot
+                    Step 4: Shift Duration, Frequency & Schedule
                   </div>
-                  <div className="form-group">
-                    <label className="form-label">Preferred Visit Date</label>
-                    <input
-                      type="date"
-                      className="form-input"
-                      value={bookingForm.preferred_date}
-                      onChange={e => setBookingForm({...bookingForm, preferred_date: e.target.value})}
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Time Slot Preference</label>
-                    <div style={{ display: 'flex', gap: 10 }}>
-                      {[
-                        { id: 'morning', label: 'Morning Slot (09:00 AM - 12:00 PM)' },
-                        { id: 'afternoon', label: 'Afternoon Slot (02:00 PM - 05:00 PM)' },
-                      ].map(slot => (
-                        <button
-                          key={slot.id}
-                          type="button"
-                          className={`btn ${bookingForm.preferred_slot === slot.id ? 'btn-primary' : 'btn-ghost'}`}
-                          style={{ flex: 1, fontSize: '0.78rem' }}
-                          onClick={() => setBookingForm({...bookingForm, preferred_slot: slot.id})}
-                        >
-                          {slot.label}
-                        </button>
-                      ))}
+
+                  <div className="grid-2" style={{ gap: 12, marginBottom: 12 }}>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label">Required Start Date *</label>
+                      <input
+                        type="date"
+                        className="form-input"
+                        required
+                        value={bookingForm.preferred_date}
+                        onChange={e => setBookingForm({...bookingForm, preferred_date: e.target.value})}
+                      />
                     </div>
+
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label">Required Start Time *</label>
+                      <input
+                        type="time"
+                        className="form-input"
+                        required
+                        value={bookingForm.start_time}
+                        onChange={e => setBookingForm({...bookingForm, start_time: e.target.value})}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid-2" style={{ gap: 12, marginBottom: 12 }}>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label">Shift Duration *</label>
+                      <select
+                        className="form-select"
+                        value={bookingForm.shift_duration}
+                        onChange={e => setBookingForm({...bookingForm, shift_duration: e.target.value})}
+                      >
+                        <option value="1_hour">1 Hour (Procedure / Injection Visit)</option>
+                        <option value="2_hours">2 Hours (Wound Care / Physio)</option>
+                        <option value="4_hours">4 Hours (Half Day Shift)</option>
+                        <option value="8_hours">8 Hours (Full Day Shift)</option>
+                        <option value="12_hours">12 Hours (Extended Shift)</option>
+                        <option value="24_hours">24 Hours (Bedside Live-In)</option>
+                      </select>
+                    </div>
+
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label">Shift Frequency *</label>
+                      <select
+                        className="form-select"
+                        value={bookingForm.shift_frequency}
+                        onChange={e => setBookingForm({...bookingForm, shift_frequency: e.target.value})}
+                      >
+                        <option value="once">Once (Single Visit)</option>
+                        <option value="daily">Daily Visits</option>
+                        <option value="alternate_days">Alternate Days</option>
+                        <option value="weekly">Weekly Routine</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">Additional Clinical / Access Notes (Optional)</label>
+                    <textarea
+                      className="form-input"
+                      rows={2}
+                      value={bookingForm.notes}
+                      onChange={e => setBookingForm({...bookingForm, notes: e.target.value})}
+                      placeholder="e.g. Patient on nasal cannula oxygen, gate bell is ring #2"
+                    />
                   </div>
                 </div>
               )}
 
-              {/* STEP 5: Review & Payment */}
+              {/* STEP 5: Review & Payment Method */}
               {bookingStep === 5 && (
                 <div>
                   <div style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--teal-800)', marginBottom: 12 }}>
-                    Step 5: Review Booking & Select Payment Option
-                  </div>
-                  <div style={{ background: 'var(--sage-50)', padding: 14, borderRadius: 8, fontSize: '0.84rem', marginBottom: 16 }}>
-                    <div><strong>Service:</strong> {bookingForm.service_title}</div>
-                    <div><strong>Patient:</strong> {bookingForm.patient_name} ({bookingForm.age}y / {bookingForm.gender})</div>
-                    <div><strong>Contact:</strong> {bookingForm.phone}</div>
-                    <div><strong>Address:</strong> {bookingForm.address}</div>
-                    <div><strong>Date & Slot:</strong> {bookingForm.preferred_date} ({bookingForm.preferred_slot})</div>
+                    Step 5: Review Clinical Dossier & Select Payment Method
                   </div>
 
-                  <div className="form-group">
-                    <label className="form-label">Select Payment Method</label>
+                  <div style={{ background: 'var(--sage-50)', padding: 14, borderRadius: 8, fontSize: '0.84rem', marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div><strong>Service:</strong> {bookingForm.service_title} ({bookingForm.shift_duration.replace('_', ' ')} · {bookingForm.shift_frequency})</div>
+                    <div><strong>Patient:</strong> {bookingForm.patient_name} (Age: {bookingForm.age}y · DOB: {bookingForm.date_of_birth})</div>
+                    <div><strong>Contact:</strong> {bookingForm.phone} {bookingForm.email ? `· ${bookingForm.email}` : ''}</div>
+                    <div><strong>Emergency Contact:</strong> {bookingForm.emergency_contact_name} ({bookingForm.emergency_contact_phone})</div>
+                    <div><strong>Home Address:</strong> {bookingForm.address}</div>
+                    <div><strong>Coordinates:</strong> Lat {bookingForm.lat}, Lng {bookingForm.lng}</div>
+                    <div><strong>Diagnosis:</strong> {bookingForm.diagnosis}</div>
+                    <div><strong>Allergies:</strong> {bookingForm.allergies}</div>
+                    <div>
+                      <strong>Prescription Status:</strong>{' '}
+                      {bookingForm.has_prescription
+                        ? (bookingForm.prescription_name ? `Attached: ${bookingForm.prescription_name}` : 'Yes (Doctor Rx Available)')
+                        : 'No - Physician Tele-Consult Requested'}
+                    </div>
+                    {bookingForm.consultant_name && <div><strong>Consultant:</strong> {bookingForm.consultant_name}</div>}
+                    <div><strong>Schedule:</strong> {bookingForm.preferred_date} at {bookingForm.start_time}</div>
+                  </div>
+
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">Select Payment Method *</label>
                     <div style={{ display: 'flex', gap: 10 }}>
                       <button
                         type="button"
@@ -682,7 +985,7 @@ export default function PublicWebsite() {
                         style={{ flex: 1, fontSize: '0.8rem' }}
                         onClick={() => setBookingForm({...bookingForm, payment_method: 'pay_on_service'})}
                       >
-                        Pay on Service Arrival
+                        Pay on Service Arrival (Cash / POS)
                       </button>
                     </div>
                   </div>
@@ -700,7 +1003,7 @@ export default function PublicWebsite() {
                     Booking Ref: {bookingResult.reference}
                   </div>
                   <p style={{ fontSize: '0.85rem', color: '#4b5563', maxWidth: 450, margin: '0 auto 20px', lineHeight: 1.5 }}>
-                    SMS & Email confirmation sent to {bookingForm.phone}. Our Client Care Manager (Hina Malik) is assigning your nurse right now.
+                    SMS & Email confirmation sent to {bookingForm.phone}. Our Clinical Care Manager (Hina Malik) is assigning your primary nurse and backup staff right now.
                   </p>
 
                   {/* Account Creation Prompt for Family Portal (Requirement 13) */}
@@ -721,14 +1024,14 @@ export default function PublicWebsite() {
 
             {/* Modal Navigation Footer */}
             {bookingStep < 6 && (
-              <div className="modal-footer">
+              <div className="modal-footer" style={{ flexShrink: 0 }}>
                 {bookingStep > 1 && (
                   <button className="btn btn-ghost" onClick={() => setBookingStep(bookingStep - 1)}>
                     ← Back
                   </button>
                 )}
                 {bookingStep < 5 ? (
-                  <button className="btn btn-primary" onClick={() => setBookingStep(bookingStep + 1)}>
+                  <button className="btn btn-primary" onClick={handleNextStep}>
                     Next Step →
                   </button>
                 ) : (

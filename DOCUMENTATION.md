@@ -226,30 +226,54 @@ The frontend router (`frontend/src/App.jsx`) dynamically resolves pages accordin
   5. `about`: Accreditation credentials, PMDC/PNC licensing disclosures, and leadership overview.
   6. `contact`: Inbound message form that automatically creates a lead in the CRM pipeline.
 
-#### 6-Step Public Booking Wizard Flow:
+#### 6-Step Public Booking Wizard Flow & Intake Field Specifications:
 ```
 [ Step 1: Select Service ]
          |
          v
-[ Step 2: Patient & Contact Details ]
+[ Step 2: Patient Demographics, Age/DOB, Emergency Contact & Written Address ]
          |
          v
-[ Step 3: Address & Precise Map Pin ]
+[ Step 3: Clinical Condition, Allergies & Prescription / Doctor Consult ]
          |
          v
-[ Step 4: Prescription & Clinical Notes ]
+[ Step 4: Schedule, Shift Duration & Frequency ]
          |
          v
-[ Step 5: Preferred Date, Time Slot & Payment Method ]
+[ Step 5: Clinical Dossier Review & Payment Method ]
          |
          v
-[ Step 6: Confirmation, Booking Code & Family Portal Invitation ]
+[ Step 6: Confirmation, Booking Reference (BK-2026-XXXX) & Family Portal Access ]
 ```
+
+##### Standardized Booking Intake Field Catalog:
+- **Required Fields (Enforced at Step Navigation & Submission):**
+  1. `patient_name`: Full legal name of patient.
+  2. `age` & `date_of_birth`: Bi-directionally synchronized. Changing age estimates year-of-birth; selecting birth date calculates exact chronological age.
+  3. `phone`: Patient/family primary contact number (+92 formatted).
+  4. `address`: Full written home address (House #, Street, Sector/Block, Locality, Islamabad).
+  5. `latitude` & `longitude`: GPS coordinates pinned for navigation and geofencing.
+  6. `emergency_contact_name` & `emergency_contact_phone`: Designated family representative for clinical emergencies.
+  7. `diagnosis`: Primary illness, medical condition, or post-surgical status.
+  8. `allergies`: Known adverse drug reactions (defaults to `No Known Drug Allergies (NKDA)`).
+  9. `has_prescription` / `prescription_name` OR `consult_doctor_needed`:
+     - **If Yes:** Clinical prescription or hospital discharge summary picture/PDF attached.
+     - **If No:** System flags `consult_doctor_needed=True` for Medical Director tele-consultation before medication dispensation.
+  10. `service_type`: Clinical package selected from catalog.
+  11. `scheduled_time` (`start_date` & `start_time`): Requested initiation datetime.
+  12. `shift_duration`: Length of bedside care (`1_hour`, `2_hours`, `4_hours`, `8_hours`, `12_hours`, `24_hours`).
+  13. `shift_frequency`: Cadence of visits (`once`, `daily`, `alternate_days`, `weekly`).
+  14. `payment_method`: Settlement method (`advance` online card payment vs `pay_on_service` cash/POS).
+- **Optional Fields:**
+  - `email`: Patient/family digital correspondence address.
+  - `consultant_name` & `consultant_details`: Referring specialist physician and hospital.
+  - `gender_preference`: Clinician gender requirement (`no_pref`, `female`, `male`).
+  - `notes`: Specific home access codes, oxygen status, or bedside instructions.
+
 - **Store Hook:** `submitPublicBooking(formData)` atomically:
-  - Generates a new `MR-YYYY-XXX` medical record.
-  - Registers the patient record.
-  - Creates a booking entry in `pending` status.
-  - Registers a lead in the CRM pipeline for follow-up verification.
+  - Generates a new `MR-YYYY-XXX` medical record and registers the patient.
+  - Creates a booking entry with reference code `BK-2026-XXXX` in `pending` status.
+  - Registers a converted lead in the CRM pipeline for care coordination follow-up.
 
 ---
 
@@ -338,15 +362,51 @@ The frontend router (`frontend/src/App.jsx`) dynamically resolves pages accordin
 - **Internal Route ID:** `bookings`
 - **Access Level:** `super_admin`, `admin`, `branch_manager`, `care_manager`, `nurse`, `crm_executive`
 - **Key Features:**
-  - Comprehensive data table displaying Booking ID, Patient Name, Service Type, Status Badge, Attending Clinician, Scheduled Time, Amount, and Payment Status.
-  - Status filters: `pending`, `assigned`, `en_route`, `in_progress`, `completed`, `cancelled`, `late`, `no_show`.
+  - Comprehensive clinical data table displaying Booking Reference (`BK-2026-XXXX`), Patient Name, Service Type, Shift Duration (`4h`, `8h`, `12h`, `24h`), Status Badge, Primary Assigned Clinician, Backup Staff, Scheduled Time, Payment Method, and Payment Status.
+  - Granular multi-status filters: `pending`, `assigned`, `en_route`, `in_progress`, `completed`, `cancelled`, `late`, `no_show`.
   - Service filters: `short_service`, `medicine_delivery`, `long_term`, `long_term_admission`.
-  - **Slide-out Booking Drawer:**
-    - Patient EMR profile summary with diagnosis.
-    - Embedded OpenStreetMap iframe showing exact home destination pin.
-    - Actual start, end, and duration tracking.
-    - Integrated `NurseAssignPanel` allowing rapid assignment and reassignment of available field staff.
-  - **New Booking Modal:** Quick modal for creating on-demand and scheduled home visits.
+
+#### Standardized Booking Creation Modal (Intake Protocol):
+- Supports dual patient modes: **Existing Patient** (auto-populating demographics, MR number, emergency contact, and address) vs **New Patient Registration**.
+- **Required Intake Fields:**
+  1. Patient name
+  2. Age and DOB (two-way synchronized)
+  3. Contact number (+92 formatted)
+  4. Written home address
+  5. Current location (lat/lng coordinates & Leaflet map pin)
+  6. Emergency contact (Name and Phone)
+  7. Diagnosis or medical condition
+  8. Prescription of medication or Hospital Discharge Summary:
+     - Picture/PDF document upload if yes
+     - Medical Director Tele-Consult assistance flag if no
+  9. Allergies (clinical safety check, default `No Known Drug Allergies (NKDA)`)
+  10. Required healthcare service
+  11. Required Start date and time
+  12. Shift duration (`1h`, `2h`, `4h`, `8h`, `12h`, `24h`) and frequency (`once`, `daily`, `alternate_days`, `weekly`)
+  13. Payment method (`advance` online card payment vs `pay_on_service` cash/POS)
+- **Optional Intake Fields:**
+  - Email address
+  - Consultant details (Referring doctor, hospital/phone)
+  - Staff Gender preference (`no_pref`, `female`, `male`)
+  - Additional clinical & access notes
+
+#### 10-Point Mandatory Booking Assignment Protocol (`NurseAssignPanel.jsx`):
+When a Care Manager or Administrator assigns or modifies field clinicians for a booking, the assignment modal strictly validates and persists all 10 clinical and operational fields:
+1. **Booking Reference Number:** Formal institutional reference (`BK-2026-XXXX`).
+2. **Patient Name & Written Address:** Complete with geocoded coordinates (Lat/Lng) and open map pin.
+3. **Service & Shift Details:** Clinical package alongside specified shift duration (`8h Full Day`, `12h Extended`, `24h Bedside Live-In`) and visit frequency (`Daily`, `Alternate Days`).
+4. **Assigned Primary Staff Member:** Full name, Employee ID (e.g. `EMP-2024-001`), and clinical designation (e.g. `BSN Registered Nurse`).
+5. **Shift Date & Time:** Scheduled start and end window.
+6. **Clinic Care Manager's Name:** Designated overseeing coordinator (e.g. `Hina Malik`).
+7. **Clinical Requirements & Special Instructions:** Vital signs monitoring, IV line maintenance, wound dressing, medication timings, and home access notes.
+8. **Assignment Status:** Current operational assignment status (`assigned`, `confirmed`).
+9. **Assigned On Date:** Automatic timestamp recording the assignment transaction.
+10. **Backup Staff Member:** Mandatory secondary qualified clinician (with Employee ID and Designation) designated for emergency clinical cover and failover.
+
+- **Slide-out Booking Drawer (`BookingDrawer`):**
+  - Instant inspection of complete patient clinical dossier, diagnosis, allergy warnings, uploaded prescription image preview or tele-consult flag, and emergency contacts.
+  - Interactive OpenStreetMap route view.
+  - One-click trigger to launch `NurseAssignPanel` for real-time clinician re-dispatch.
 
 ---
 
@@ -927,7 +987,7 @@ Headers: `Authorization: Bearer <JWT_ACCESS_TOKEN>` (for protected endpoints)
       "administered_at": null,
       "administered_by": null
     }
-  ]
+  
   ```
 
 #### 13. `POST /api/patients/{id}/mar/administer/`

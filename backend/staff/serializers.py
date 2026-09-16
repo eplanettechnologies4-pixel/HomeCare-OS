@@ -13,7 +13,10 @@ class StaffSummarySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = StaffMember
-        fields = ['id', 'full_name', 'role', 'role_display', 'status', 'status_display', 'photo', 'rating']
+        fields = [
+            'id', 'full_name', 'employee_id', 'role', 'role_display',
+            'specialization', 'phone', 'status', 'status_display', 'photo', 'rating'
+        ]
 
 
 class StaffListSerializer(serializers.ModelSerializer):

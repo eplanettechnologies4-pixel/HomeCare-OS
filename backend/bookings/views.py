@@ -44,7 +44,7 @@ class BookingViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def assign_staff(self, request, pk=None):
-        """Assign or reassign a staff member to this booking."""
+        """Assign or reassign a primary and backup staff member to this booking."""
         booking = self.get_object()
         staff_id = request.data.get('staff_id')
         if not staff_id:
@@ -53,10 +53,28 @@ class BookingViewSet(viewsets.ModelViewSet):
         try:
             staff = StaffMember.objects.get(pk=staff_id)
         except StaffMember.DoesNotExist:
-            return Response({'error': 'Staff not found'}, status=status.HTTP_404_NOT_FOUND)
+            return Response({'error': 'Primary staff not found'}, status=status.HTTP_404_NOT_FOUND)
+        
         booking.assigned_staff = staff
-        booking.status = 'assigned'
-        booking.save(update_fields=['assigned_staff', 'status'])
+        booking.status = request.data.get('status', 'assigned')
+        booking.assigned_on = timezone.now()
+
+        # Optional / required assignment fields
+        backup_staff_id = request.data.get('backup_staff_id')
+        if backup_staff_id:
+            try:
+                booking.backup_staff = StaffMember.objects.get(pk=backup_staff_id)
+            except StaffMember.DoesNotExist:
+                pass
+        
+        if request.data.get('care_manager_name'):
+            booking.care_manager_name = request.data.get('care_manager_name')
+        if request.data.get('clinical_requirements'):
+            booking.clinical_requirements = request.data.get('clinical_requirements')
+        if request.data.get('instructions'):
+            booking.notes = request.data.get('instructions')
+
+        booking.save()
 
         # Fire a notification to the assigned nurse/doctor's linked auth.User
         if staff.user:
@@ -64,8 +82,8 @@ class BookingViewSet(viewsets.ModelViewSet):
             create_notification(
                 recipient_user=staff.user,
                 message=(
-                    f'📋 New booking assigned: {booking.patient.full_name} — '
-                    f'{booking.get_service_type_display()} on '
+                    f'📋 New booking assigned ({booking.reference_code or f"#{booking.pk}"}): {booking.patient.full_name} — '
+                    f'{booking.get_service_type_display()} ({booking.get_shift_duration_display()}) on '
                     f'{booking.scheduled_time.strftime("%d %b %Y at %H:%M")}'
                 ),
                 icon_key='calendar',

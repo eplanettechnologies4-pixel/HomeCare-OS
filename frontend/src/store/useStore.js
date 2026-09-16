@@ -342,17 +342,27 @@ const useStore = create((set, get) => ({
     }
   },
   assignNurseToBooking: async (bookingId, assignmentData) => {
+    const assignedOnIso = assignmentData.assignedOn || new Date().toISOString();
     // 1. Optimistic update
     set((s) => ({
       bookings: s.bookings.map(b => b.id === bookingId ? {
         ...b,
         assigned_staff: assignmentData.staff,
         staff_name: assignmentData.staff?.full_name,
+        staff_employee_id: assignmentData.staff?.employee_id,
+        staff_designation: assignmentData.staff ? `${assignmentData.staff.role_display || assignmentData.staff.role} ${assignmentData.staff.specialization ? `(${assignmentData.staff.specialization})` : ''}`.trim() : null,
         backup_staff: assignmentData.backupStaff,
+        backup_staff_name: assignmentData.backupStaff?.full_name,
+        backup_staff_employee_id: assignmentData.backupStaff?.employee_id,
+        backup_staff_designation: assignmentData.backupStaff ? `${assignmentData.backupStaff.role_display || assignmentData.backupStaff.role} ${assignmentData.backupStaff.specialization ? `(${assignmentData.backupStaff.specialization})` : ''}`.trim() : null,
+        care_manager_name: assignmentData.careManagerName || b.care_manager_name,
+        clinical_requirements: assignmentData.clinicalRequirements || b.clinical_requirements,
         recurring_days: assignmentData.recurringDays,
         nurse_instructions: assignmentData.instructions,
-        status: 'assigned',
-        status_display: 'Assigned'
+        notes: assignmentData.instructions || b.notes,
+        assigned_on: assignedOnIso,
+        status: assignmentData.status || 'assigned',
+        status_display: assignmentData.status === 'confirmed' ? 'Confirmed' : assignmentData.status === 'en_route' ? 'En Route' : 'Assigned'
       } : b)
     }));
 
@@ -361,7 +371,14 @@ const useStore = create((set, get) => ({
       try {
         await apiFetch(`/bookings/${bookingId}/assign_staff/`, {
           method: 'POST',
-          body: JSON.stringify({ staff_id: assignmentData.staff.id }),
+          body: JSON.stringify({
+            staff_id: assignmentData.staff.id,
+            backup_staff_id: assignmentData.backupStaff?.id || null,
+            care_manager_name: assignmentData.careManagerName || '',
+            clinical_requirements: assignmentData.clinicalRequirements || '',
+            instructions: assignmentData.instructions || '',
+            status: assignmentData.status || 'assigned',
+          }),
         });
         await get().fetchBookings();
       } catch (err) {
@@ -369,8 +386,26 @@ const useStore = create((set, get) => ({
       }
     }
   },
-
-  // ── Staff ─────────────────────────────────────────────────────────────────
+  updateBookingStatus: async (bookingId, status) => {
+    // 1. Optimistic update
+    set((s) => ({
+      bookings: s.bookings.map(b => b.id === bookingId ? {
+        ...b,
+        status,
+        status_display: status === 'in_progress' ? 'In Progress' : status === 'completed' ? 'Completed' : status.charAt(0).toUpperCase() + status.slice(1)
+      } : b)
+    }));
+    // 2. Persist to backend PATCH /bookings/{id}/
+    try {
+      await apiFetch(`/bookings/${bookingId}/`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status }),
+      });
+      await get().fetchBookings();
+    } catch (err) {
+      console.warn('[Store] updateBookingStatus error:', err);
+    }
+  },
   staff: [],
   selectedStaff: null,
   setSelectedStaff: (s_) => set({ selectedStaff: s_ }),
@@ -1083,19 +1118,22 @@ const useStore = create((set, get) => ({
       first_name: data.patient_name.split(' ')[0],
       last_name: data.patient_name.split(' ').slice(1).join(' ') || '',
       age: Number(data.age) || 60,
-      date_of_birth: `${2026 - (Number(data.age) || 60)}-01-01`,
+      date_of_birth: data.date_of_birth || `${2026 - (Number(data.age) || 60)}-01-01`,
       gender: data.gender || 'M',
       gender_display: data.gender === 'F' ? 'Female' : 'Male',
-      blood_type: 'O+',
-      primary_diagnosis: data.service_title || 'Home Medical Visit',
+      blood_type: data.blood_type || 'O+',
+      primary_diagnosis: data.diagnosis || data.service_title || 'Home Medical Visit',
       phone: data.phone,
+      email: data.email || '',
       address: data.address,
       latitude: data.lat || 33.57,
       longitude: data.lng || 73.15,
-      care_manager_name: 'Hina Malik',
+      care_manager_name: 'Hina Malik (Care Coordinator)',
       is_active: true,
-      allergies: 'NKDA',
-      emergency_contact: `${data.contact_person || data.patient_name} (${data.phone})`,
+      allergies: data.allergies || 'NKDA',
+      emergency_contact: `${data.emergency_contact_name || data.contact_person || data.patient_name} (${data.emergency_contact_phone || data.phone})`,
+      emergency_contact_name: data.emergency_contact_name || data.contact_person || '',
+      emergency_contact_phone: data.emergency_contact_phone || '',
       service_package: {
         type: data.service_id,
         plan: data.payment_method === 'advance' ? 'Prepaid Online' : 'Pay on Service',
@@ -1109,16 +1147,43 @@ const useStore = create((set, get) => ({
       reference_code: bkRef,
       patient: newPatient,
       patient_name: newPatient.full_name,
+      patient_mr: mrNum,
       service_type: data.service_id,
       service_type_display: data.service_title,
       scheduled_time: `${data.preferred_date} ${data.preferred_slot === 'morning' ? '09:00' : '15:00'}`,
+      shift_duration: data.shift_duration || '4_hours',
+      shift_duration_display: data.shift_duration === '8_hours' ? '8 Hours (Full Day/Night)' : data.shift_duration === '12_hours' ? '12 Hours (Extended Shift)' : data.shift_duration === '24_hours' ? '24 Hours (Full Bedside)' : '4 Hours (Half Day)',
+      shift_frequency: data.shift_frequency || 'once',
+      shift_frequency_display: data.shift_frequency === 'daily' ? 'Daily' : data.shift_frequency === 'alternate_days' ? 'Alternate Days' : 'Once (Single Visit)',
       status: 'pending',
       status_display: 'Pending Nurse Assignment',
       assigned_staff: null,
+      backup_staff: null,
+      care_manager_name: 'Hina Malik (Care Coordinator)',
+      clinical_requirements: data.clinical_requirements || '',
       address: data.address,
+      latitude: data.lat || 33.57,
+      longitude: data.lng || 73.15,
       patient_lat: data.lat || 33.57,
       patient_lng: data.lng || 73.15,
-      payment_status: data.payment_method === 'advance' ? 'Paid' : 'Unpaid (Pay on Service)',
+      patient_dob: newPatient.date_of_birth,
+      patient_age: newPatient.age,
+      emergency_contact_name: newPatient.emergency_contact_name,
+      emergency_contact_phone: newPatient.emergency_contact_phone,
+      diagnosis: data.diagnosis || data.service_title || 'Home Care Admission',
+      allergies: data.allergies || 'NKDA',
+      has_prescription: !!data.has_prescription,
+      consult_doctor_needed: !!data.consult_doctor_needed,
+      prescription_attachment: data.prescription_name || null,
+      gender_preference: data.gender_preference || 'any',
+      consultant_name: data.consultant_name || '',
+      consultant_details: data.consultant_details || '',
+      notes: data.notes || '',
+      amount: data.amount || 2500,
+      amount_paid: data.payment_method === 'advance' ? (data.amount || 2500) : 0,
+      payment_method: data.payment_method || 'pay_on_service',
+      payment_status: data.payment_method === 'advance' ? 'advance' : 'pending',
+      payment_status_display: data.payment_method === 'advance' ? 'Advance Paid' : 'Payment Pending',
       created_at: new Date().toISOString(),
     };
 
