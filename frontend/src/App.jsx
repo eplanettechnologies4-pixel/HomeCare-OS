@@ -124,7 +124,11 @@ export default function App() {
 
   // Role Access Guard: Check if the current role is authorized to view this page
   const allowedNav = ROLE_CONFIG[currentRole]?.nav || ['overview'];
-  const isAllowed = allowedNav.includes(activePage);
+  const isSuperAdmin = currentRole === 'super_admin';
+  const isAllowed =
+    isSuperAdmin ||
+    allowedNav.includes(activePage) ||
+    (activePage === 'patient-360' && allowedNav.includes('patients'));
 
   if (!isAllowed) {
     return (

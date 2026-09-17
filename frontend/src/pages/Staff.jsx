@@ -2,12 +2,13 @@ import React, { useState, useEffect } from 'react';
 import {
   Search, Star, Phone, Mail, Calendar, Clock, X, Award, TrendingUp,
   UserCheck, AlertCircle, CheckCircle, Sliders, Download, Check, FileText, Plus,
-  GraduationCap, BookOpen, Play, ChevronRight, Video, FileCheck
+  GraduationCap, BookOpen, Play, ChevronRight, Video, FileCheck, Edit3, Trash2
 } from 'lucide-react';
 import useStore from '../store/useStore';
 import StaffIdCard from '../components/StaffIdCard';
 import VideoPlayerModal from '../components/VideoPlayerModal';
 import CertificateHistoryTable from '../components/CertificateHistoryTable';
+import EditStaffModal from '../components/EditStaffModal';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay } from 'date-fns';
 
 const STATUS_BADGE = {
@@ -44,6 +45,7 @@ const AddStaffModal = AddStaffUserModal;
 export default function Staff() {
   const staff               = useStore((s) => s.staff);
   const fetchStaff          = useStore((s) => s.fetchStaff);
+  const deleteStaffMember   = useStore((s) => s.deleteStaffMember);
   const bookings            = useStore((s) => s.bookings);
   const dailyReports        = useStore((s) => s.dailyReports);
   const leaveRequests       = useStore((s) => s.leaveRequests);
@@ -84,7 +86,18 @@ export default function Staff() {
   const [showConfigModal, setShowConfigModal]       = useState(false);
   const [configForm, setConfigForm]                 = useState(attendanceThresholds);
   const [showAddModal, setShowAddModal]             = useState(false);
+  const [editingStaff, setEditingStaff]             = useState(null);
   const [createdStaffConfirmation, setCreatedStaffConfirmation] = useState(null);
+
+  const handleDeleteStaff = (s, e) => {
+    if (e) e.stopPropagation();
+    if (window.confirm(`Are you sure you want to delete staff member "${s.full_name || s.username || 'Staff'}" (${s.employee_id || ''})?\n\nThis will remove their profile and assignments.`)) {
+      deleteStaffMember(s.id);
+      if (selectedStaff?.id === s.id) {
+        setSelectedStaff(null);
+      }
+    }
+  };
 
   useEffect(() => {
     fetchStaff();
@@ -391,6 +404,28 @@ export default function Staff() {
                     <span className={`badge ${STATUS_BADGE[s.status] || 'badge-green'}`}>{s.status_display || 'Available'}</span>
                     <span className="ts" style={{ fontSize: '0.75rem', color: 'var(--status-grey)' }}>ID: {s.employee_id}</span>
                   </div>
+                  {isAdminOrCareMgr && (
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 10, paddingTop: 8, borderTop: '1px dashed #e5e7eb' }}>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        style={{ padding: '3px 8px', fontSize: '0.75rem', color: '#b87320', borderColor: '#fef3c7' }}
+                        title="Edit Staff Member"
+                        onClick={(e) => { e.stopPropagation(); setEditingStaff(s); }}
+                      >
+                        <Edit3 size={13} /> Edit
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-danger btn-sm"
+                        style={{ padding: '3px 8px', fontSize: '0.75rem' }}
+                        title="Delete Staff Member"
+                        onClick={(e) => handleDeleteStaff(s, e)}
+                      >
+                        <Trash2 size={13} /> Delete
+                      </button>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -719,7 +754,29 @@ export default function Staff() {
                   {selectedStaff.role_display} · ID: {selectedStaff.employee_id}
                 </div>
               </div>
-              <button className="btn btn-ghost btn-icon" onClick={() => setSelectedStaff(null)}><X size={14} /></button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {isAdminOrCareMgr && (
+                  <>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      style={{ color: '#b87320', borderColor: '#fef3c7', fontSize: '0.78rem', padding: '4px 10px' }}
+                      onClick={() => setEditingStaff(selectedStaff)}
+                    >
+                      <Edit3 size={13} /> Edit Profile
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-danger btn-sm"
+                      style={{ fontSize: '0.78rem', padding: '4px 10px' }}
+                      onClick={(e) => handleDeleteStaff(selectedStaff, e)}
+                    >
+                      <Trash2 size={13} /> Delete Staff
+                    </button>
+                  </>
+                )}
+                <button className="btn btn-ghost btn-icon" onClick={() => setSelectedStaff(null)}><X size={14} /></button>
+              </div>
             </div>
 
             {/* Profile Modal Tabs */}
@@ -843,6 +900,19 @@ export default function Staff() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Edit Staff Modal */}
+      {editingStaff && (
+        <EditStaffModal
+          staff={editingStaff}
+          onClose={() => setEditingStaff(null)}
+          onUpdated={(updated) => {
+            if (selectedStaff?.id === updated.id) {
+              setSelectedStaff({ ...selectedStaff, ...updated });
+            }
+          }}
+        />
       )}
     </div>
   );

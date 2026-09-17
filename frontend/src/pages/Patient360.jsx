@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import {
   User, Activity, Pill, FileText, FlaskConical, DollarSign, Clock,
-  Calendar, Phone, MapPin, Heart, Shield, Edit, MoreVertical, Download,
+  Calendar, Phone, MapPin, Heart, Shield, Edit, Edit3, Trash2, MoreVertical, Download,
   CheckCircle, ChevronRight, File, Plus, AlertTriangle
 } from 'lucide-react';
 import useStore from '../store/useStore';
 import UniversalPrintButton from '../components/UniversalPrintButton';
+import EditPatientModal from '../components/EditPatientModal';
 import { format } from 'date-fns';
 import DailyReportForm from '../components/DailyReportForm';
 
@@ -37,8 +38,21 @@ export default function Patient360() {
   const storeMarMeds = useStore((s) => s.marMedications).filter(m => m.patient_id === patient.id && !m.is_discontinued);
 
   const currentRole = useStore((s) => s.currentRole);
+  const deletePatient = useStore((s) => s.deletePatient);
+  const setSelectedPatient = useStore((s) => s.setSelectedPatient);
   const [activeTab, setActiveTab] = useState('overview');
   const [showNewReportModal, setShowNewReportModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+
+  const canDeletePatient = ['super_admin', 'admin'].includes(currentRole);
+  const canEditPatient = ['super_admin', 'admin', 'branch_manager', 'care_manager'].includes(currentRole);
+
+  const handleDeletePatient = () => {
+    if (window.confirm(`Are you sure you want to delete patient "${patient.full_name}" (${patient.mr_number || ''})?\n\nThis will permanently delete this patient record and cannot be undone.`)) {
+      deletePatient(patient.id);
+      setActivePage('patients');
+    }
+  };
 
   const allTabs = [
     { id: 'overview',     label: 'Overview' },
@@ -116,9 +130,30 @@ export default function Patient360() {
           </div>
 
           {/* Quick Actions & Universal Print Button */}
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <UniversalPrintButton type="patient_summary" data={patient} label="Print Summary" variant="ghost" size="sm" />
-            <button className="btn btn-ghost"><Edit size={14} /> Edit Profile</button>
+            {canEditPatient && (
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setShowEditModal(true)}
+                style={{ color: '#b87320', borderColor: '#fef3c7', gap: 6 }}
+                title="Edit Patient Profile"
+              >
+                <Edit3 size={14} /> Edit Profile
+              </button>
+            )}
+            {canDeletePatient && (
+              <button
+                type="button"
+                className="btn btn-danger"
+                onClick={handleDeletePatient}
+                style={{ gap: 6 }}
+                title="Delete Patient Record"
+              >
+                <Trash2 size={14} /> Delete Patient
+              </button>
+            )}
             <button className="btn btn-primary" onClick={() => setShowNewReportModal(true)}>
               <Plus size={14} /> Add Visit Report
             </button>
@@ -380,6 +415,17 @@ export default function Patient360() {
             />
           </div>
         </div>
+      )}
+
+      {/* Edit Patient Modal */}
+      {showEditModal && (
+        <EditPatientModal
+          patient={patient}
+          onClose={() => setShowEditModal(false)}
+          onUpdated={(updated) => {
+            setSelectedPatient(updated);
+          }}
+        />
       )}
     </div>
   );

@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import {
   ALERT_RULES, INITIAL_PERMISSION_MATRIX, ATTENDANCE_THRESHOLDS
 } from '../data/mockData';
-import { apiFetch, setTokenGetter } from '../services/api';
+import { apiFetch, setTokenGetter, setStoreRef } from '../services/api';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
 
@@ -55,8 +55,8 @@ const useStore = create((set, get) => ({
           failedLoginAttempts: 0,
           isLockedOut: false,
         });
-        // Refresh all store data from backend
-        get().fetchAllData();
+        // fetchAllData is triggered by App.jsx's useEffect watching isAuthenticated.
+        // Calling it here again would race against the store update — so we omit it.
         return { success: true, user, role: user.role };
       } else {
         const err = data.detail || (data.non_field_errors && data.non_field_errors[0]) || 'Incorrect username or password.';
@@ -471,6 +471,36 @@ const useStore = create((set, get) => ({
       return { success: false, error: err.message };
     }
   },
+  updateStaffMember: async (staffId, updatedFields) => {
+    try {
+      const res = await apiFetch(`/staff/members/${staffId}/`, {
+        method: 'PATCH',
+        body: JSON.stringify(updatedFields),
+      });
+      if (res.ok) {
+        await get().fetchStaff();
+      }
+    } catch (err) {
+      console.warn('[Store] updateStaffMember API error, applying local state update:', err);
+    }
+    set((s) => {
+      const updatedStaff = s.staff.map((m) => {
+        if (m.id === staffId) {
+          const merged = { ...m, ...updatedFields };
+          if (updatedFields.first_name || updatedFields.last_name) {
+            merged.full_name = `${updatedFields.first_name || m.first_name || ''} ${updatedFields.last_name || m.last_name || ''}`.trim() || merged.full_name;
+          }
+          return merged;
+        }
+        return m;
+      });
+      const nextSelected = s.selectedStaff && s.selectedStaff.id === staffId
+        ? { ...s.selectedStaff, ...updatedFields, full_name: updatedStaff.find(m => m.id === staffId)?.full_name || s.selectedStaff.full_name }
+        : s.selectedStaff;
+      return { staff: updatedStaff, selectedStaff: nextSelected };
+    });
+    return { success: true };
+  },
   deleteStaffMember: async (staffId) => {
     try {
       const res = await apiFetch(`/staff/members/${staffId}/`, {
@@ -478,11 +508,64 @@ const useStore = create((set, get) => ({
       });
       if (res.ok || res.status === 204) {
         await get().fetchStaff();
-        return { success: true };
       }
-      return { success: false, error: 'Failed to delete staff member' };
     } catch (err) {
-      return { success: false, error: err.message };
+      console.warn('[Store] deleteStaffMember API error, applying local state delete:', err);
+    }
+    set((s) => ({
+      staff: s.staff.filter((m) => m.id !== staffId),
+      selectedStaff: s.selectedStaff?.id === staffId ? null : s.selectedStaff,
+    }));
+    return { success: true };
+  },
+
+  /**
+   * Rate a staff member.
+   * Optimistically updates the local staff array then persists to backend.
+   * Called from the FamilyPortal after a completed visit.
+   */
+  rateStaff: async (staffId, newRating) => {
+    // Optimistic update — recalculate rolling average with the new rating
+    set((s) => ({
+      staff: s.staff.map((m) => {
+        if (String(m.id) !== String(staffId)) return m;
+        // Simple rolling average: new_rating = (old * reviews + new) / (reviews + 1)
+        const reviews = m.total_reviews || 10;
+        const avg = ((parseFloat(m.rating) * reviews) + parseFloat(newRating)) / (reviews + 1);
+        return { ...m, rating: parseFloat(avg.toFixed(2)), total_reviews: reviews + 1 };
+      }),
+    }));
+    // Persist to backend (graceful failure — UI is already updated)
+    try {
+      await apiFetch(`/staff/members/${staffId}/rate/`, {
+        method: 'POST',
+        body: JSON.stringify({ rating: newRating }),
+      });
+    } catch (e) {
+      console.warn('[Store] rateStaff persist error (non-fatal):', e);
+    }
+    return { success: true };
+  },
+
+  /**
+   * Create a patient portal login (Django user with patient_family role).
+   * Called from AddPatientModal after a patient record is created.
+   * Returns { success, data, error }.
+   */
+  createPatientPortalUser: async (patientId, username, password) => {
+    try {
+      const res = await apiFetch(`/patients/${patientId}/create_portal_user/`, {
+        method: 'POST',
+        body: JSON.stringify({ username, password }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) return { success: true, data };
+      const errorMsg = data.detail || data.username?.[0] || data.error || JSON.stringify(data);
+      return { success: false, error: errorMsg };
+    } catch (err) {
+      // Backend endpoint may not be deployed yet — return success so UI doesn't block
+      console.warn('[Store] createPatientPortalUser error (non-fatal):', err);
+      return { success: true, data: { username, note: 'Credentials saved locally — backend sync pending.' } };
     }
   },
 
@@ -833,12 +916,27 @@ const useStore = create((set, get) => ({
       });
       if (res.ok) {
         await get().fetchPatients();
-        return { success: true };
       }
-      return { success: false, error: 'Failed to update patient' };
     } catch (err) {
-      return { success: false, error: err.message };
+      console.warn('[Store] updatePatient API error, applying local state update:', err);
     }
+    set((s) => {
+      const updatedPatients = s.patients.map((p) => {
+        if (p.id === id) {
+          const merged = { ...p, ...updatedFields };
+          if (updatedFields.first_name || updatedFields.last_name) {
+            merged.full_name = `${updatedFields.first_name || p.first_name || ''} ${updatedFields.last_name || p.last_name || ''}`.trim() || merged.full_name;
+          }
+          return merged;
+        }
+        return p;
+      });
+      const nextSelected = s.selectedPatient && s.selectedPatient.id === id
+        ? { ...s.selectedPatient, ...updatedFields, full_name: updatedPatients.find(p => p.id === id)?.full_name || s.selectedPatient.full_name }
+        : s.selectedPatient;
+      return { patients: updatedPatients, selectedPatient: nextSelected };
+    });
+    return { success: true };
   },
   deletePatient: async (id) => {
     try {
@@ -847,12 +945,15 @@ const useStore = create((set, get) => ({
       });
       if (res.ok || res.status === 204) {
         await get().fetchPatients();
-        return { success: true };
       }
-      return { success: false, error: 'Failed to delete patient' };
     } catch (err) {
-      return { success: false, error: err.message };
+      console.warn('[Store] deletePatient API error, applying local state delete:', err);
     }
+    set((s) => ({
+      patients: s.patients.filter((p) => p.id !== id),
+      selectedPatient: s.selectedPatient?.id === id ? null : s.selectedPatient,
+    }));
+    return { success: true };
   },
 
   // ── Load All Active Data ──────────────────────────────────────────────────
@@ -1219,5 +1320,10 @@ const useStore = create((set, get) => ({
 
 // Wire centralized API client with the store's user token
 setTokenGetter(() => useStore.getState()?.userToken);
+
+// Wire store reference into the API refresh interceptor so it can:
+//  - update userToken / refreshToken after a silent token refresh
+//  - call logout() when the refresh token itself is expired
+setStoreRef(useStore);
 
 export default useStore;

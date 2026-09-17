@@ -1,19 +1,39 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   User, Phone, MapPin, Heart, AlertTriangle, Upload, X, CheckCircle,
-  Shield, FileText, Clock, Stethoscope, HeartPulse, CreditCard, FileCheck
+  Shield, FileText, Clock, Stethoscope, HeartPulse, CreditCard, FileCheck,
+  Eye, EyeOff, RefreshCw, KeyRound, Copy, UserCheck
 } from 'lucide-react';
 import useStore from '../store/useStore';
 
+// ── Utility: generate a slug username from a full name ────────────────────
+function slugUsername(name) {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, '')
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .join('.')
+    .slice(0, 20) || 'patient';
+}
+
+// ── Utility: generate a random password ───────────────────────────────────
+function generatePassword() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789@#!';
+  return Array.from({ length: 10 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+}
+
 export default function AddPatientModal({ onClose }) {
-  const patients           = useStore((s) => s.patients);
-  const staff              = useStore((s) => s.staff);
-  const fetchStaff         = useStore((s) => s.fetchStaff);
-  const fetchPatients      = useStore((s) => s.fetchPatients);
-  const createPatient      = useStore((s) => s.createPatient);
-  const createBooking      = useStore((s) => s.createBooking);
-  const setSelectedPatient = useStore((s) => s.setSelectedPatient);
-  const setActivePage      = useStore((s) => s.setActivePage);
+  const patients                  = useStore((s) => s.patients);
+  const staff                     = useStore((s) => s.staff);
+  const fetchStaff                = useStore((s) => s.fetchStaff);
+  const fetchPatients             = useStore((s) => s.fetchPatients);
+  const createPatient             = useStore((s) => s.createPatient);
+  const createBooking             = useStore((s) => s.createBooking);
+  const createPatientPortalUser   = useStore((s) => s.createPatientPortalUser);
+  const setSelectedPatient        = useStore((s) => s.setSelectedPatient);
+  const setActivePage             = useStore((s) => s.setActivePage);
 
   useEffect(() => {
     fetchStaff();
@@ -65,6 +85,24 @@ export default function AddPatientModal({ onClose }) {
   const [validationError, setValidationError]         = useState('');
   const [duplicateWarning, setDuplicateWarning]       = useState('');
   const [isSubmitting, setIsSubmitting]               = useState(false);
+
+  // ── Portal Credentials State ───────────────────────────────────────────────
+  const [portalForm, setPortalForm] = useState({
+    create_portal_account: true,
+    portal_username: '',
+    portal_password: generatePassword(),
+    show_password: false,
+    copied: false,
+  });
+  const [createdPortalCreds, setCreatedPortalCreds] = useState(null); // { username, password } shown after creation
+  const [createdPatientForNav, setCreatedPatientForNav] = useState(null);
+
+  // Auto-generate username from patient name
+  useEffect(() => {
+    if (form.patient_name?.length > 2) {
+      setPortalForm((prev) => ({ ...prev, portal_username: slugUsername(form.patient_name) }));
+    }
+  }, [form.patient_name]);
 
   const set = (key, val) => {
     setForm(prev => {
@@ -250,15 +288,108 @@ export default function AddPatientModal({ onClose }) {
 
       await createBooking(bookingPayload);
 
+      // 3. Create Patient Portal Login (if enabled)
+      if (portalForm.create_portal_account && portalForm.portal_username && portalForm.portal_password) {
+        await createPatientPortalUser(
+          patientId,
+          portalForm.portal_username,
+          portalForm.portal_password,
+        );
+      }
+
       setIsSubmitting(false);
-      if (onClose) onClose();
-      setSelectedPatient(createdPatient);
-      setActivePage('patient-360');
+      // Show credentials confirmation before navigating to Patient 360
+      setCreatedPatientForNav(createdPatient);
+      if (portalForm.create_portal_account) {
+        setCreatedPortalCreds({
+          username: portalForm.portal_username,
+          password: portalForm.portal_password,
+          patientName: form.patient_name,
+        });
+      } else {
+        if (onClose) onClose();
+        setSelectedPatient(createdPatient);
+        setActivePage('patient-360');
+      }
     } catch (err) {
       setIsSubmitting(false);
       setValidationError(err.message || 'Error onboarding patient. Please check your network.');
     }
   };
+
+  // ── Portal Credentials Confirmation Modal ─────────────────────────────────
+  if (createdPortalCreds) {
+    return (
+      <div className="modal-backdrop">
+        <div className="modal" style={{ width: 480 }}>
+          <div className="modal-header" style={{ background: 'linear-gradient(135deg, #0f766e, #115e59)', color: 'white' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <CheckCircle size={20} style={{ color: '#86efac' }} />
+              <div>
+                <h3 style={{ margin: 0, color: 'white', fontFamily: 'var(--font-heading)' }}>Patient Registered Successfully</h3>
+                <div style={{ fontSize: '0.75rem', opacity: 0.8 }}>{createdPortalCreds.patientName} · Portal account created</div>
+              </div>
+            </div>
+          </div>
+          <div className="modal-body" style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <p style={{ margin: 0, fontSize: '0.88rem', color: '#374151' }}>
+              Share these credentials with the patient or their family so they can log into the <strong>Patient Portal</strong>.
+            </p>
+            {/* Credentials Box */}
+            <div style={{ background: '#f0fdf4', border: '1.5px solid #86efac', borderRadius: 10, padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div>
+                <div style={{ fontSize: '0.7rem', fontWeight: 800, color: '#15803d', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>Username</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ flex: 1, fontFamily: 'var(--font-mono)', fontSize: '1.1rem', fontWeight: 800, color: '#065f46', background: 'white', padding: '8px 12px', borderRadius: 6, border: '1px solid #d1fae5' }}>
+                    {createdPortalCreds.username}
+                  </div>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => { navigator.clipboard.writeText(createdPortalCreds.username); }}
+                    title="Copy username"
+                  >
+                    <Copy size={14} />
+                  </button>
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: '0.7rem', fontWeight: 800, color: '#15803d', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>Password</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ flex: 1, fontFamily: 'var(--font-mono)', fontSize: '1.1rem', fontWeight: 800, color: '#065f46', background: 'white', padding: '8px 12px', borderRadius: 6, border: '1px solid #d1fae5' }}>
+                    {createdPortalCreds.password}
+                  </div>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => { navigator.clipboard.writeText(createdPortalCreds.password); }}
+                    title="Copy password"
+                  >
+                    <Copy size={14} />
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div style={{ fontSize: '0.78rem', color: '#6b7280', display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+              <AlertTriangle size={13} style={{ flexShrink: 0, color: '#f59e0b', marginTop: 1 }} />
+              These credentials are shown <strong>only once</strong>. Please save or share them now. The password can be reset from the Patient 360 profile.
+            </div>
+          </div>
+          <div className="modal-footer">
+            <button
+              className="btn btn-primary"
+              onClick={() => {
+                setCreatedPortalCreds(null);
+                if (onClose) onClose();
+                setSelectedPatient(createdPatientForNav);
+                setActivePage('patient-360');
+              }}
+            >
+              <UserCheck size={15} /> Done — Open Patient Profile
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="modal-backdrop" onClick={(e) => e.target === e.currentTarget && !isSubmitting && onClose()}>
@@ -296,7 +427,110 @@ export default function AddPatientModal({ onClose }) {
 
         {/* Scrollable Form Body */}
         <div className="modal-body" style={{ overflowY: 'auto', padding: '0 24px 20px' }}>
-          
+
+          {/* ── SECTION 0: PORTAL ACCESS (PATIENT LOGIN ACCOUNT) ─────────────── */}
+          <div style={{
+            marginBottom: 18, borderBottom: '1px solid #e5e7eb', paddingBottom: 16,
+            background: portalForm.create_portal_account ? 'linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%)' : 'transparent',
+            border: portalForm.create_portal_account ? '1.5px solid #86efac' : '1.5px dashed #e5e7eb',
+            borderRadius: 10, padding: '14px 16px', marginTop: 4,
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: portalForm.create_portal_account ? 14 : 0 }}>
+              <div style={{ fontSize: '0.82rem', fontWeight: 800, color: '#065f46', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <KeyRound size={14} style={{ color: '#0d9488' }} />
+                0. Patient Portal Login Account
+              </div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                <div style={{
+                  width: 40, height: 22, borderRadius: 11, position: 'relative',
+                  background: portalForm.create_portal_account ? '#0d9488' : '#d1d5db',
+                  transition: 'background 0.2s', cursor: 'pointer',
+                  flexShrink: 0,
+                }}>
+                  <div style={{
+                    position: 'absolute', width: 18, height: 18, borderRadius: '50%', background: 'white',
+                    top: 2, left: portalForm.create_portal_account ? 20 : 2,
+                    transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                  }} />
+                  <input
+                    type="checkbox"
+                    checked={portalForm.create_portal_account}
+                    onChange={(e) => setPortalForm((p) => ({ ...p, create_portal_account: e.target.checked }))}
+                    style={{ position: 'absolute', opacity: 0, width: '100%', height: '100%', cursor: 'pointer' }}
+                  />
+                </div>
+                <span style={{ fontSize: '0.8rem', fontWeight: 700, color: portalForm.create_portal_account ? '#065f46' : '#6b7280' }}>
+                  {portalForm.create_portal_account ? 'Enabled' : 'Disabled'}
+                </span>
+              </label>
+            </div>
+
+            {portalForm.create_portal_account && (
+              <>
+                <div style={{ fontSize: '0.78rem', color: '#047857', marginBottom: 12 }}>
+                  The patient or family will use these credentials to log into the <strong>Family Portal</strong> and view their EMR, vitals, reports, and rate nurses.
+                </div>
+                <div className="grid-2" style={{ gap: 10, marginBottom: 10 }}>
+                  {/* Username */}
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">Portal Username</label>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <input
+                        type="text"
+                        className="form-input"
+                        value={portalForm.portal_username}
+                        onChange={(e) => setPortalForm((p) => ({ ...p, portal_username: e.target.value.toLowerCase().replace(/\s/g, '') }))}
+                        placeholder="auto.generated"
+                        style={{ fontFamily: 'var(--font-mono)', flex: 1 }}
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-icon"
+                        title="Regenerate username"
+                        onClick={() => setPortalForm((p) => ({ ...p, portal_username: slugUsername(form.patient_name || 'patient') }))}
+                      >
+                        <RefreshCw size={14} />
+                      </button>
+                    </div>
+                  </div>
+                  {/* Password */}
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">Portal Password</label>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <div style={{ position: 'relative', flex: 1 }}>
+                        <input
+                          type={portalForm.show_password ? 'text' : 'password'}
+                          className="form-input"
+                          value={portalForm.portal_password}
+                          onChange={(e) => setPortalForm((p) => ({ ...p, portal_password: e.target.value }))}
+                          style={{ fontFamily: 'var(--font-mono)', paddingRight: 36 }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setPortalForm((p) => ({ ...p, show_password: !p.show_password }))}
+                          style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--status-grey)' }}
+                        >
+                          {portalForm.show_password ? <EyeOff size={14} /> : <Eye size={14} />}
+                        </button>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-icon"
+                        title="Generate new password"
+                        onClick={() => setPortalForm((p) => ({ ...p, portal_password: generatePassword(), show_password: true }))}
+                      >
+                        <RefreshCw size={14} />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <div style={{ fontSize: '0.72rem', color: '#047857', display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <CheckCircle size={11} /> Auto-generated from patient name. You can edit before saving.
+                </div>
+              </>
+            )}
+          </div>
+
           {/* ── SECTION 1: PATIENT DEMOGRAPHICS & LOCATION (REQUIRED) ─────────── */}
           <div style={{ marginBottom: 18, borderBottom: '1px solid #e5e7eb', paddingBottom: 16 }}>
             <div style={{ fontSize: '0.82rem', fontWeight: 800, color: 'var(--teal-900)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
