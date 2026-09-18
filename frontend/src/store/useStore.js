@@ -4,7 +4,8 @@ import {
 } from '../data/mockData';
 import { apiFetch, setTokenGetter, setStoreRef } from '../services/api';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+const rawBase = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
+const API_BASE = rawBase.endsWith('/api') ? rawBase : `${rawBase.replace(/\/+$/, '')}/api`;
 
 const savedToken = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
 const savedRefresh = typeof window !== 'undefined' ? localStorage.getItem('refresh_token') : null;

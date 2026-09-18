@@ -33,10 +33,9 @@ services:
       - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
       # Custom pg_hba.conf (rejects plain TCP, requires hostssl)
       - ./postgres/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
-    command: >
-      postgres
-        -c config_file=/etc/postgresql/postgresql.conf
-        -c hba_file=/etc/postgresql/pg_hba.conf
+    entrypoint: >
+      sh -c "cp /etc/ssl/private/pg/server.key /tmp/server.key && chmod 600 /tmp/server.key && chown postgres:postgres /tmp/server.key && exec docker-entrypoint.sh postgres -c config_file=/etc/postgresql/postgresql.conf -c hba_file=/etc/postgresql/pg_hba.conf -c ssl_key_file=/tmp/server.key"
+
     # ⚠ NO 'ports:' section — Postgres is ONLY reachable inside the
     #   'homecare_net' bridge network. Never exposed to the host OS or internet.
     networks:
@@ -122,6 +121,23 @@ services:
     networks:
       - homecare_net
     command: celery -A homecareOS beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+
+  # ── Frontend (React/Vite dashboard served by Nginx) ───────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://179.198.198.179:8000}
+        VITE_API_URL: ${VITE_API_URL:-http://179.198.198.179:8000/api}
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+    networks:
+      - homecare_net
+    depends_on:
+      - web
+
 
 # ── Named volumes ────────────────────────────────────────────────────────────
 volumes:

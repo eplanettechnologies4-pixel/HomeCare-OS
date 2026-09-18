@@ -43,6 +43,7 @@ INSTALLED_APPS = [
     'channels',
     'django_filters',
     'drf_spectacular',
+    'django_celery_beat',
     # Field-level encryption handled by patients.encryption (custom Fernet — django-cryptography
     # is incompatible with Django 6+ due to removed django.utils.baseconv).
     # HomeCare OS apps

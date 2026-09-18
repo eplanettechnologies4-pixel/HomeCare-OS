@@ -2,6 +2,7 @@ Django==4.2.16
 djangorestframework==3.15.2
 djangorestframework-simplejwt==5.3.1
 django-cors-headers==4.4.0
+daphne==4.1.2
 channels==4.1.0
 channels-redis==4.2.0
 celery==5.4.0
@@ -16,3 +17,5 @@ django-cryptography==1.1          # field-level Fernet encryption on Patient mod
 dj-database-url==2.2.0            # parse DATABASE_URL with sslmode=require support
 gunicorn==22.0.0                  # production WSGI server (used in Dockerfile CMD)
 cryptography==42.0.8              # Fernet key generation (django-cryptography dep)
+django-celery-beat==2.6.0         # periodic task scheduler using DatabaseScheduler
+

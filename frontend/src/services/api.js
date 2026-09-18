@@ -1,7 +1,8 @@
 // frontend/src/services/api.js
 // Centralized HTTP client / fetch helper for HomeCare OS Web Dashboard
 
-export const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
+const rawBase = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
+export const API_BASE = rawBase.endsWith('/api') ? rawBase : `${rawBase.replace(/\/+$/, '')}/api`;
 
 let tokenGetter = null;
 let storeRef = null; // lazy reference to useStore to avoid circular imports
