@@ -1,5 +1,5 @@
 import React from 'react';
-import { Shield } from 'lucide-react';
+import { Shield, Smartphone } from 'lucide-react';
 import Sidebar from './components/Sidebar';
 import Topbar from './components/Topbar';
 import useStore from './store/useStore';
@@ -64,6 +64,7 @@ export default function App() {
   const isAuthenticated = useStore((s) => s.isAuthenticated);
   const activePage      = useStore((s) => s.activePage);
   const currentRole     = useStore((s) => s.currentRole);
+  const currentUser     = useStore((s) => s.currentUser);
   const fetchAllData    = useStore((s) => s.fetchAllData);
 
   React.useEffect(() => {
@@ -117,6 +118,32 @@ export default function App() {
     return <Login />;
   }
 
+  // Mobile-Only Account Guard: Field staff configured for mobile only must use the mobile app
+  if (currentUser?.platform_allowed === 'mobile') {
+    return (
+      <div style={{ display: 'flex', minHeight: '100vh', width: '100vw', alignItems: 'center', justifyContent: 'center', background: 'var(--teal-900)', fontFamily: 'var(--font-body)', padding: 20 }}>
+        <div className="card" style={{ maxWidth: 520, textAlign: 'center', padding: 40, borderTop: '4px solid var(--status-amber)' }}>
+          <div style={{ width: 64, height: 64, borderRadius: '50%', background: 'rgba(245, 158, 11, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px', color: 'var(--status-amber)' }}>
+            <Smartphone size={32} />
+          </div>
+          <h2 style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--teal-900)', marginBottom: 12 }}>
+            Mobile App Access Only
+          </h2>
+          <p style={{ fontSize: '0.92rem', color: 'var(--status-grey)', lineHeight: 1.6, marginBottom: 20 }}>
+            Hello <strong>{currentUser.full_name || currentUser.username}</strong>. Your account is configured for <strong>Mobile Only</strong> access ({currentUser.role_display || 'Field Staff'}). Field visits, vitals recording, and clinical shift tasks must be performed through the <strong>HomeCare OS Mobile App</strong>.
+          </p>
+          <div style={{ background: 'var(--sage-50)', padding: 16, borderRadius: 'var(--radius-md)', marginBottom: 24, textAlign: 'left', fontSize: '0.85rem', color: 'var(--teal-800)' }}>
+            <div>📱 <strong>Mobile App:</strong> Available on iOS & Android field devices</div>
+            <div style={{ marginTop: 6 }}>🔒 <strong>Platform Allowed:</strong> Mobile Only</div>
+          </div>
+          <button className="btn btn-primary" style={{ width: '100%' }} onClick={() => useStore.getState().logout()}>
+            Sign Out & Return to Login
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   // Patient / Family Role → Family Portal Screen
   if (currentRole === 'patient_family' || activePage === 'family-portal') {
     return <FamilyPortal />;
@@ -124,7 +151,7 @@ export default function App() {
 
   // Role Access Guard: Check if the current role is authorized to view this page
   const allowedNav = ROLE_CONFIG[currentRole]?.nav || ['overview'];
-  const isSuperAdmin = currentRole === 'super_admin';
+  const isSuperAdmin = currentRole === 'super_admin' && currentUser?.role === 'super_admin';
   const isAllowed =
     isSuperAdmin ||
     allowedNav.includes(activePage) ||

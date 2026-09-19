@@ -3,11 +3,13 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.db.models import Sum
+from homecareOS.permissions import IsFinancialStaff
 from .models import Invoice, BillingPayment
 from .serializers import InvoiceListSerializer, InvoiceDetailSerializer, BillingPaymentSerializer
 
 
 class InvoiceViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsFinancialStaff]
     queryset = Invoice.objects.select_related('patient', 'booking').prefetch_related('line_items').all()
 
     def get_serializer_class(self):

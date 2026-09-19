@@ -2,7 +2,9 @@ from django.utils import timezone
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from homecareOS.permissions import CanDeletePatient
 from .models import (
     Patient, Prescription, VitalSign, NurseNote, LabResult,
     DailyReport, ReportPhoto, MARAdministration,
@@ -16,6 +18,7 @@ from .serializers import (
 
 
 class PatientViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticated, CanDeletePatient]
     queryset = Patient.objects.select_related('assigned_care_manager').all().order_by('-created_at')
 
     def get_serializer_class(self):

@@ -1,6 +1,7 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from homecareOS.permissions import get_user_role
 
 ROLE_WIDGET_CONFIG = {
     'super_admin': ['total_revenue', 'active_patients', 'nurses_on_visit', 'completed_today', 'revenue_chart', 'top_services', 'live_alerts', 'recent_activity'],
@@ -18,9 +19,7 @@ class DashboardSummaryView(APIView):
 
     def get(self, request):
         user = request.user
-        role = 'super_admin'
-        if hasattr(user, 'profile'):
-            role = user.profile.role
+        role = get_user_role(user) or 'nurse'
 
         allowed_widgets = ROLE_WIDGET_CONFIG.get(role, [])
         data = {'allowed_widgets': allowed_widgets}

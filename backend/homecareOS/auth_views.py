@@ -53,6 +53,24 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         role = staff_member.role if staff_member else ('super_admin' if user.is_superuser else 'admin')
         platform_allowed = staff_member.platform_allowed if staff_member else 'web'
 
+        req = self.context.get('request')
+        client_platform = None
+        if req:
+            client_platform = req.data.get('platform') or req.headers.get('X-Client-Platform')
+
+        if client_platform == 'web' and platform_allowed == 'mobile':
+            raise serializers.ValidationError({
+                'detail': 'This account is configured for mobile app access only. Please log in using the HomeCare OS Mobile App.',
+                'code': 'mobile_only',
+                'platform_allowed': 'mobile'
+            })
+        if client_platform == 'mobile' and platform_allowed == 'web':
+            raise serializers.ValidationError({
+                'detail': 'This account is configured for web access only. Please log in at the HomeCare OS web dashboard.',
+                'code': 'web_only',
+                'platform_allowed': 'web'
+            })
+
         data['user'] = {
             'id': user.id,
             'username': user.username,

@@ -1,11 +1,13 @@
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from homecareOS.permissions import IsCRMAllowed
 from .models import Lead, LeadActivity
 from .serializers import LeadSerializer, LeadActivitySerializer
 
 
 class LeadViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsCRMAllowed]
     queryset = Lead.objects.select_related('assigned_to', 'converted_patient', 'converted_booking').prefetch_related('activities').all()
     serializer_class = LeadSerializer
 

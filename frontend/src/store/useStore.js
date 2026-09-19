@@ -27,32 +27,43 @@ const useStore = create((set, get) => ({
     try {
       const res = await fetch(`${API_BASE}/auth/login/`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: emailOrPhone.trim(), password }),
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Client-Platform': 'web',
+        },
+        body: JSON.stringify({
+          username: emailOrPhone.trim(),
+          password,
+          platform: 'web',
+        }),
       });
       const data = await res.json();
       if (res.ok) {
-        const user = data.user || {
-          id: 1,
-          username: emailOrPhone,
-          role: 'super_admin',
-          full_name: emailOrPhone,
-        };
+        const user = data.user;
+        if (!user) {
+          return { success: false, error: 'Authentication response was missing user profile.' };
+        }
+        // Reject mobile-only staff accounts from accessing web dashboard
+        if (user.platform_allowed === 'mobile') {
+          return {
+            success: false,
+            error: 'This account is configured for mobile app access only. Please log in using the HomeCare OS Mobile App.',
+            isMobileOnly: true,
+          };
+        }
         if (data.access) {
           localStorage.setItem('access_token', data.access);
         }
         if (data.refresh) {
           localStorage.setItem('refresh_token', data.refresh);
         }
-        if (user) {
-          localStorage.setItem('currentUser', JSON.stringify(user));
-        }
+        localStorage.setItem('currentUser', JSON.stringify(user));
         set({
           isAuthenticated: true,
           currentUser: user,
           userToken: data.access,
           refreshToken: data.refresh,
-          currentRole: user.role || 'super_admin',
+          currentRole: user.role || 'nurse',
           failedLoginAttempts: 0,
           isLockedOut: false,
         });
@@ -60,8 +71,11 @@ const useStore = create((set, get) => ({
         // Calling it here again would race against the store update — so we omit it.
         return { success: true, user, role: user.role };
       } else {
-        const err = data.detail || (data.non_field_errors && data.non_field_errors[0]) || 'Incorrect username or password.';
-        return { success: false, error: err };
+        const err = (data.detail && (Array.isArray(data.detail) ? data.detail[0] : data.detail)) ||
+                    (data.non_field_errors && data.non_field_errors[0]) ||
+                    'Incorrect username or password.';
+        const isMobileOnly = data.code === 'mobile_only' || (Array.isArray(data.code) && data.code.includes('mobile_only'));
+        return { success: false, error: err, isMobileOnly };
       }
     } catch (err) {
       return { success: false, error: 'Cannot connect to server. Please check backend is running on port 8000.' };
@@ -79,7 +93,7 @@ const useStore = create((set, get) => ({
       currentUser: null,
       userToken: null,
       refreshToken: null,
-      currentRole: 'super_admin',
+      currentRole: 'nurse',
       activePage: 'overview',
       staff: [],
       patients: [],
@@ -89,9 +103,17 @@ const useStore = create((set, get) => ({
     });
   },
 
-  // ── Role RBAC ────────────────────────────────────────────────────────────
-  currentRole: 'super_admin',
-  setCurrentRole: (role) => set({ currentRole: role }),
+  // ── Role RBAC (defaults to rehydrated user's role, or safest restricted role 'nurse') ───────
+  currentRole: savedUser?.role || 'nurse',
+  setCurrentRole: (role) => {
+    const user = get().currentUser;
+    // Only allow Super Admins to freely switch roles via dev selector
+    if (user?.role === 'super_admin') {
+      set({ currentRole: role });
+    } else {
+      console.warn('Role switching is restricted to Super Administrators.');
+    }
+  },
 
   // ── Active Page ──────────────────────────────────────────────────────────
   activePage: typeof window !== 'undefined' ? (localStorage.getItem('activePage') || 'overview') : 'overview',

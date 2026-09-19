@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Heart, Eye, EyeOff, Lock, Mail, Shield, AlertCircle, CheckCircle, ArrowRight, X, Phone, Key, Activity } from 'lucide-react';
+import { Heart, Eye, EyeOff, Lock, Mail, Shield, AlertCircle, CheckCircle, ArrowRight, X, Phone, Key, Activity, Smartphone } from 'lucide-react';
 import useStore from '../store/useStore';
 
 export default function Login() {
@@ -14,6 +14,7 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [isSuspended, setIsSuspended] = useState(false);
+  const [isMobileOnly, setIsMobileOnly] = useState(false);
 
   // Forgot Password Modal state
   const [showForgotModal, setShowForgotModal] = useState(false);
@@ -27,6 +28,7 @@ export default function Login() {
     if (e) e.preventDefault();
     setErrorMsg('');
     setIsSuspended(false);
+    setIsMobileOnly(false);
     setLoading(true);
 
     try {
@@ -36,6 +38,7 @@ export default function Login() {
       if (!res.success) {
         setErrorMsg(res.error || 'Authentication failed');
         if (res.isSuspended) setIsSuspended(true);
+        if (res.isMobileOnly) setIsMobileOnly(true);
       } else {
         const role = res.role;
         if (role === 'patient_family') {
@@ -151,11 +154,11 @@ export default function Login() {
             </p>
           </div>
 
-          {/* Inline Error / Suspended Alert */}
+          {/* Inline Error / Suspended / Mobile-Only Alert */}
           {errorMsg && (
             <div style={{
-              background: isSuspended ? '#fff5f5' : '#fff8f0',
-              border: `1px solid ${isSuspended ? 'var(--status-red)' : 'var(--amber-500)'}`,
+              background: isSuspended ? '#fff5f5' : (isMobileOnly ? 'rgba(245, 158, 11, 0.1)' : '#fff8f0'),
+              border: `1px solid ${isSuspended ? 'var(--status-red)' : (isMobileOnly ? 'var(--status-amber)' : 'var(--amber-500)')}`,
               borderRadius: 8,
               padding: '12px 14px',
               marginBottom: 20,
@@ -163,10 +166,14 @@ export default function Login() {
               gap: 10,
               alignItems: 'center',
               fontSize: '0.85rem',
-              color: isSuspended ? 'var(--status-red)' : '#b87320'
+              color: isSuspended ? 'var(--status-red)' : (isMobileOnly ? '#92400e' : '#b87320')
             }}>
-              <AlertCircle size={18} style={{ flexShrink: 0 }} />
-              <div>{errorMsg}</div>
+              {isMobileOnly ? (
+                <Smartphone size={20} style={{ flexShrink: 0, color: 'var(--status-amber)' }} />
+              ) : (
+                <AlertCircle size={18} style={{ flexShrink: 0 }} />
+              )}
+              <div style={{ lineHeight: 1.4 }}>{errorMsg}</div>
             </div>
           )}
 

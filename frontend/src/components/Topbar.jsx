@@ -39,8 +39,8 @@ export default function Topbar({ pageTitle, pageSubtitle }) {
         )}
       </div>
 
-      {/* Role Switcher Demo Widget */}
-      <RoleSelector />
+      {/* Role Switcher Demo Widget — strictly restricted to genuine Super Admins */}
+      {currentUser?.role === 'super_admin' && <RoleSelector />}
 
       {/* Public Site Switcher Button */}
       <button

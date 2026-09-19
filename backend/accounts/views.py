@@ -2,12 +2,14 @@ from django.db.models import Sum, Count
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from homecareOS.permissions import IsFinancialStaff
 from .models import Payment, Invoice
 from .serializers import PaymentSerializer, InvoiceSerializer
 from bookings.models import Booking
 
 
 class PaymentViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsFinancialStaff]
     queryset = Payment.objects.select_related('patient', 'booking').all()
     serializer_class = PaymentSerializer
 
@@ -40,5 +42,6 @@ class PaymentViewSet(viewsets.ModelViewSet):
 
 
 class InvoiceViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsFinancialStaff]
     queryset = Invoice.objects.select_related('patient', 'booking').all()
     serializer_class = InvoiceSerializer

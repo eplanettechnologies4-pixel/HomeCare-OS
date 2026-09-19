@@ -38,6 +38,7 @@ export default function Sidebar() {
   const sidebarOpen   = useStore((s) => s.sidebarOpen);
   const toggleSidebar  = useStore((s) => s.toggleSidebar);
   const currentRole   = useStore((s) => s.currentRole);
+  const currentUser   = useStore((s) => s.currentUser);
 
   const allowedNav = ROLE_CONFIG[currentRole]?.nav || ['overview'];
 
@@ -116,11 +117,15 @@ export default function Sidebar() {
         {/* Footer */}
         <div className="sidebar-footer">
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div className="avatar" style={{ background: 'rgba(255,255,255,0.15)', color: 'white' }}>AD</div>
-            <div>
-              <div style={{ color: 'white', fontSize: '0.8rem', fontWeight: 600 }}>Admin User</div>
+            <div className="avatar" style={{ background: 'rgba(255,255,255,0.15)', color: 'white' }}>
+              {currentUser?.full_name ? currentUser.full_name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase() : 'HC'}
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ color: 'white', fontSize: '0.8rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {currentUser?.full_name || 'Staff Member'}
+              </div>
               <div style={{ color: 'var(--amber-400)', fontSize: '0.7rem', textTransform: 'capitalize' }}>
-                {ROLE_CONFIG[currentRole]?.label || currentRole}
+                {currentUser?.role_display || ROLE_CONFIG[currentRole]?.label || currentRole}
               </div>
             </div>
           </div>

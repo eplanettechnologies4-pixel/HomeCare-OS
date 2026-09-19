@@ -1,6 +1,8 @@
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+from homecareOS.permissions import IsStaffManagementAllowed, IsCareManagerOrAdmin
 from .models import StaffMember, LeaveRequest, AttendanceRecord
 from .serializers import (
     StaffListSerializer, StaffDetailSerializer, StaffCreateSerializer,
@@ -10,6 +12,7 @@ from .serializers import (
 
 class StaffViewSet(viewsets.ModelViewSet):
     queryset = StaffMember.objects.all().order_by('-created_at')
+    permission_classes = [IsStaffManagementAllowed]
 
     def get_serializer_class(self):
         if self.action in ['list']:
@@ -65,8 +68,9 @@ class StaffViewSet(viewsets.ModelViewSet):
 class LeaveRequestViewSet(viewsets.ModelViewSet):
     queryset = LeaveRequest.objects.select_related('staff').all()
     serializer_class = LeaveRequestSerializer
+    permission_classes = [IsAuthenticated]
 
-    @action(detail=True, methods=['post'])
+    @action(detail=True, methods=['post'], permission_classes=[IsCareManagerOrAdmin])
     def approve(self, request, pk=None):
         leave = self.get_object()
         leave.status = 'approved'
@@ -89,7 +93,7 @@ class LeaveRequestViewSet(viewsets.ModelViewSet):
 
         return Response(LeaveRequestSerializer(leave).data)
 
-    @action(detail=True, methods=['post'])
+    @action(detail=True, methods=['post'], permission_classes=[IsCareManagerOrAdmin])
     def reject(self, request, pk=None):
         leave = self.get_object()
         leave.status = 'rejected'
