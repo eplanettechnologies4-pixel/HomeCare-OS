@@ -20,6 +20,20 @@ export default function Patient360() {
   const patient         = selectedPatient || patients[0];
   const setActivePage   = useStore((s) => s.setActivePage);
 
+  const allBookings     = useStore((s) => s.bookings);
+  const allInvoices     = useStore((s) => s.invoices);
+  const allDailyReports = useStore((s) => s.dailyReports);
+  const allStoreVitals  = useStore((s) => s.vitals);
+  const allStoreMarMeds = useStore((s) => s.marMedications);
+  const staff           = useStore((s) => s.staff);
+
+  const currentRole        = useStore((s) => s.currentRole);
+  const deletePatient      = useStore((s) => s.deletePatient);
+  const setSelectedPatient = useStore((s) => s.setSelectedPatient);
+  const [activeTab, setActiveTab] = useState('overview');
+  const [showNewReportModal, setShowNewReportModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+
   if (!patient) {
     return (
       <div style={{ padding: 48, textAlign: 'center' }}>
@@ -31,18 +45,11 @@ export default function Patient360() {
     );
   }
 
-  const bookings = useStore((s) => s.bookings).filter(b => b.patient_name === patient.full_name || b.patient?.id === patient.id);
-  const invoices = useStore((s) => s.invoices).filter(i => i.patient_id === patient.id || i.patient_name === patient.full_name);
-  const dailyReports = useStore((s) => s.dailyReports).filter(r => r.patient_id === patient.id || r.patient_name === patient.full_name);
-  const storeVitals = useStore((s) => s.vitals).filter(v => v.patient_id === patient.id);
-  const storeMarMeds = useStore((s) => s.marMedications).filter(m => m.patient_id === patient.id && !m.is_discontinued);
-
-  const currentRole = useStore((s) => s.currentRole);
-  const deletePatient = useStore((s) => s.deletePatient);
-  const setSelectedPatient = useStore((s) => s.setSelectedPatient);
-  const [activeTab, setActiveTab] = useState('overview');
-  const [showNewReportModal, setShowNewReportModal] = useState(false);
-  const [showEditModal, setShowEditModal] = useState(false);
+  const bookings = allBookings.filter(b => b.patient_name === patient.full_name || b.patient?.id === patient.id);
+  const invoices = allInvoices.filter(i => i.patient_id === patient.id || i.patient_name === patient.full_name);
+  const dailyReports = allDailyReports.filter(r => r.patient_id === patient.id || r.patient_name === patient.full_name);
+  const storeVitals = allStoreVitals.filter(v => v.patient_id === patient.id);
+  const storeMarMeds = allStoreMarMeds.filter(m => m.patient_id === patient.id && !m.is_discontinued);
 
   const canDeletePatient = ['super_admin', 'admin'].includes(currentRole);
   const canEditPatient = ['super_admin', 'admin', 'branch_manager', 'care_manager'].includes(currentRole);
@@ -74,7 +81,7 @@ export default function Patient360() {
     return true;
   });
 
-  const assignedNurse = useStore((s) => s.staff).find(s => s.role === 'nurse') || {
+  const assignedNurse = staff.find(s => s.role === 'nurse') || {
     full_name: 'Sarah Mitchell',
     phone: '+92-300-1234567',
     role_display: 'Nurse',

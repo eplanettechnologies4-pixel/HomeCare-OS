@@ -688,14 +688,17 @@ function NewBookingModal({ onClose, onSubmit }) {
 
 // ── Booking Detail Drawer ──────────────────────────────────────────────────────
 function BookingDrawer({ booking, onClose }) {
-  if (!booking) return null;
   const staff = useStore((s) => s.staff);
   const fetchStaff = useStore((s) => s.fetchStaff);
   const assignNurseToBooking = useStore((s) => s.assignNurseToBooking);
 
   useEffect(() => {
-    fetchStaff();
-  }, [fetchStaff]);
+    if (booking) {
+      fetchStaff();
+    }
+  }, [fetchStaff, booking]);
+
+  if (!booking) return null;
 
   const bookingRef = booking.reference_code || `BK-2026-${String(booking.id).padStart(4, '0')}`;
 
