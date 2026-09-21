@@ -60,6 +60,15 @@ class Patient(models.Model):
     )
     is_active = models.BooleanField(default=True)
 
+    # ── Portal Login Account (optional) ──────────────────────────────────────
+    portal_user = models.OneToOneField(
+        'auth.User',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='patient_profile',
+        verbose_name='Portal Login User',
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

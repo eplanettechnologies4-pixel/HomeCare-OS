@@ -17,6 +17,8 @@ class PatientListSerializer(serializers.ModelSerializer):
     age = serializers.ReadOnlyField()
     care_manager_name = serializers.CharField(source='assigned_care_manager.full_name', read_only=True)
     gender_display = serializers.CharField(source='get_gender_display', read_only=True)
+    has_portal_account = serializers.SerializerMethodField()
+    portal_username = serializers.SerializerMethodField()
 
     class Meta:
         model = Patient
@@ -25,7 +27,14 @@ class PatientListSerializer(serializers.ModelSerializer):
             'age', 'date_of_birth', 'gender', 'gender_display',
             'primary_diagnosis', 'care_manager_name', 'phone',
             'address', 'latitude', 'longitude', 'is_active',
+            'has_portal_account', 'portal_username',
         ]
+
+    def get_has_portal_account(self, obj):
+        return obj.portal_user_id is not None
+
+    def get_portal_username(self, obj):
+        return obj.portal_user.username if obj.portal_user_id else None
 
 
 class PatientDetailSerializer(serializers.ModelSerializer):
@@ -36,6 +45,8 @@ class PatientDetailSerializer(serializers.ModelSerializer):
     care_manager_name = serializers.CharField(source='assigned_care_manager.full_name', read_only=True)
     active_prescriptions = serializers.SerializerMethodField()
     recent_vitals = serializers.SerializerMethodField()
+    has_portal_account = serializers.SerializerMethodField()
+    portal_username = serializers.SerializerMethodField()
 
     class Meta:
         model = Patient
@@ -60,6 +71,12 @@ class PatientDetailSerializer(serializers.ModelSerializer):
 
     def get_recent_vitals(self, obj):
         return VitalSignSerializer(obj.vitals.all()[:5], many=True).data
+
+    def get_has_portal_account(self, obj):
+        return obj.portal_user_id is not None
+
+    def get_portal_username(self, obj):
+        return obj.portal_user.username if obj.portal_user_id else None
 
 
 class PrescriptionSerializer(serializers.ModelSerializer):

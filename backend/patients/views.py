@@ -1,3 +1,8 @@
+import secrets
+import string
+
+from django.contrib.auth.models import User
+from django.db import transaction
 from django.utils import timezone
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
@@ -260,6 +265,106 @@ class PatientViewSet(viewsets.ModelViewSet):
         patient = self.get_object()
         notes = patient.nurse_notes.select_related('recorded_by').order_by('-recorded_at')
         return Response(NurseNoteSerializer(notes, many=True).data)
+
+    # ── Patient Portal Login Actions ──────────────────────────────────────────
+
+    @action(detail=True, methods=['post'], url_path='create_portal_user')
+    def create_portal_user(self, request, pk=None):
+        """
+        POST /api/patients/{id}/create_portal_user/
+        Body: {"username": "...", "password": "..."}
+
+        Creates a Django User account with role=patient_family and links it
+        to this Patient via Patient.portal_user.  Idempotent: if the patient
+        already has a portal account an error is returned so the caller can
+        handle the duplicate gracefully.
+        """
+        from accounts.models import UserProfile, UserRole
+
+        patient = self.get_object()
+
+        if patient.portal_user_id:
+            return Response(
+                {'error': 'This patient already has a portal login account.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        username = (request.data.get('username') or '').strip()
+        password = (request.data.get('password') or '').strip()
+
+        if not username:
+            return Response({'error': 'username is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not password or len(password) < 8:
+            return Response(
+                {'error': 'password must be at least 8 characters.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if User.objects.filter(username__iexact=username).exists():
+            return Response(
+                {'error': f'Username "{username}" is already taken. Please choose another.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        with transaction.atomic():
+            user = User.objects.create_user(
+                username=username,
+                password=password,
+                first_name=patient.first_name,
+                last_name=patient.last_name,
+                email=getattr(patient, 'email', '') or '',
+            )
+            UserProfile.objects.create(
+                user=user,
+                role=UserRole.PATIENT_FAMILY,
+                status='active',
+            )
+            patient.portal_user = user
+            patient.save(update_fields=['portal_user'])
+
+        return Response(
+            {
+                'detail': 'Portal account created successfully.',
+                'username': username,
+                'patient_id': patient.id,
+                'user_id': user.id,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(detail=True, methods=['post'], url_path='reset_portal_password')
+    def reset_portal_password(self, request, pk=None):
+        """
+        POST /api/patients/{id}/reset_portal_password/
+
+        Generates a new random 12-character password for the linked portal
+        user account and returns it in plaintext so the admin can share it
+        with the patient / family.  Mirrors the staff reset-password flow.
+        """
+        patient = self.get_object()
+
+        if not patient.portal_user_id:
+            return Response(
+                {'error': 'This patient does not have a portal account yet. Create one first.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Generate a secure random password (letters + digits + safe symbols)
+        alphabet = string.ascii_letters + string.digits + '@#!'
+        new_password = ''.join(secrets.choice(alphabet) for _ in range(12))
+
+        patient.portal_user.set_password(new_password)
+        patient.portal_user.save(update_fields=['password'])
+
+        return Response(
+            {
+                'detail': 'Password reset successfully.',
+                'username': patient.portal_user.username,
+                'new_password': new_password,
+                'patient_id': patient.id,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class PrescriptionViewSet(viewsets.ModelViewSet):

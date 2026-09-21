@@ -585,12 +585,35 @@ const useStore = create((set, get) => ({
         body: JSON.stringify({ username, password }),
       });
       const data = await res.json().catch(() => ({}));
-      if (res.ok) return { success: true, data };
+      if (res.ok) {
+        // Refresh patients list so has_portal_account badge updates immediately
+        await get().fetchPatients();
+        return { success: true, data };
+      }
       const errorMsg = data.detail || data.username?.[0] || data.error || JSON.stringify(data);
       return { success: false, error: errorMsg };
     } catch (err) {
       console.warn('[Store] createPatientPortalUser error:', err);
       return { success: false, error: err.message || 'Network error creating portal user.' };
+    }
+  },
+
+  /**
+   * Reset the portal password for a patient's linked family account.
+   * Returns { success, username, new_password } on success.
+   */
+  resetPatientPortalPassword: async (patientId) => {
+    try {
+      const res = await apiFetch(`/patients/${patientId}/reset_portal_password/`, {
+        method: 'POST',
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) return { success: true, username: data.username, new_password: data.new_password };
+      const errorMsg = data.error || data.detail || 'Failed to reset portal password.';
+      return { success: false, error: errorMsg };
+    } catch (err) {
+      console.warn('[Store] resetPatientPortalPassword error:', err);
+      return { success: false, error: err.message || 'Network error resetting portal password.' };
     }
   },
 

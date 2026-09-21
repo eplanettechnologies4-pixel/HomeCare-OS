@@ -50,8 +50,19 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
 
         user = self.user
         staff_member = getattr(user, 'staffmember', None)
-        role = staff_member.role if staff_member else ('super_admin' if user.is_superuser else 'admin')
-        platform_allowed = staff_member.platform_allowed if staff_member else 'web'
+
+        # For patient/family portal accounts: no StaffMember exists — check UserProfile
+        if staff_member:
+            role = staff_member.role
+            platform_allowed = staff_member.platform_allowed
+        else:
+            profile = getattr(user, 'profile', None)
+            if profile and profile.role:
+                role = profile.role
+                platform_allowed = 'both'  # patient portal is accessible on web + mobile
+            else:
+                role = 'super_admin' if user.is_superuser else 'admin'
+                platform_allowed = 'web'
 
         req = self.context.get('request')
         client_platform = None
@@ -78,7 +89,10 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
             'name': f'{user.first_name} {user.last_name}'.strip() or user.username,
             'full_name': f'{user.first_name} {user.last_name}'.strip() or user.username,
             'role': role,
-            'role_display': staff_member.get_role_display() if staff_member else role.replace('_', ' ').title(),
+            'role_display': (
+                staff_member.get_role_display() if staff_member
+                else role.replace('_', ' ').title()
+            ),
             'platform_allowed': platform_allowed,
             'staff_id': staff_member.id if staff_member else None,
             'employee_id': staff_member.employee_id if staff_member else None,

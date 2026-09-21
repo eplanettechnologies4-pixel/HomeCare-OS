@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, X, AlertCircle, CheckCircle, TrendingUp, Pill, Activity, FileText, FlaskConical, DollarSign, Clock, Plus, Eye, Edit3, Trash2 } from 'lucide-react';
+import { Search, X, AlertCircle, CheckCircle, TrendingUp, Pill, Activity, FileText, FlaskConical, DollarSign, Clock, Plus, Eye, Edit3, Trash2, Shield, RefreshCw, Copy, KeyRound, UserCheck } from 'lucide-react';
 import useStore from '../store/useStore';
 import AddPatientModal from '../components/AddPatientModal';
 import EditPatientModal from '../components/EditPatientModal';
@@ -14,11 +14,16 @@ export default function Patients() {
   const deletePatient      = useStore((s) => s.deletePatient);
   const setActivePage     = useStore((s) => s.setActivePage);
   const currentRole       = useStore((s) => s.currentRole);
+  const resetPatientPortalPassword = useStore((s) => s.resetPatientPortalPassword);
+  const createPatientPortalUser    = useStore((s) => s.createPatientPortalUser);
 
   const [selected, setSelected]             = useState(null);
   const [editingPatient, setEditingPatient] = useState(null);
   const [search, setSearch]                 = useState('');
   const [showAddModal, setShowAddModal]     = useState(false);
+  const [portalResetResult, setPortalResetResult] = useState(null); // { patientName, username, password }
+  const [portalCreating, setPortalCreating] = useState(null); // patientId being created
+  const [portalResetting, setPortalResetting] = useState(null); // patientId being reset
 
   useEffect(() => {
     fetchPatients();
@@ -28,6 +33,34 @@ export default function Patients() {
   const canAddPatient    = ['super_admin', 'admin', 'branch_manager', 'care_manager'].includes(currentRole);
   const canEditPatient   = ['super_admin', 'admin', 'branch_manager', 'care_manager'].includes(currentRole);
   const canDeletePatient = ['super_admin', 'admin'].includes(currentRole);
+  const canManagePortal  = ['super_admin', 'admin', 'branch_manager'].includes(currentRole);
+
+  const handleCreatePortalLogin = async (p, e) => {
+    e.stopPropagation();
+    const nameParts = (p.full_name || 'patient').split(' ');
+    const autoUsername = nameParts.slice(0, 2).join('.').toLowerCase().replace(/[^a-z0-9.]/g, '') || 'patient';
+    const autoPassword = Array.from({ length: 12 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789@#!'[Math.floor(Math.random() * 61)]).join('');
+    setPortalCreating(p.id);
+    const res = await createPatientPortalUser(p.id, autoUsername, autoPassword);
+    setPortalCreating(null);
+    if (res.success) {
+      setPortalResetResult({ patientName: p.full_name, username: autoUsername, password: autoPassword, isNew: true });
+    } else {
+      alert('Failed to create portal login: ' + (res.error || 'Unknown error'));
+    }
+  };
+
+  const handleResetPortalPassword = async (p, e) => {
+    e.stopPropagation();
+    setPortalResetting(p.id);
+    const res = await resetPatientPortalPassword(p.id);
+    setPortalResetting(null);
+    if (res.success) {
+      setPortalResetResult({ patientName: p.full_name, username: res.username, password: res.new_password, isNew: false });
+    } else {
+      alert('Failed to reset portal password: ' + (res.error || 'Unknown error'));
+    }
+  };
 
   const handlePatientClick = (p) => {
     setSelectedPatient(p);
@@ -82,7 +115,8 @@ export default function Patients() {
                 <th>Care Manager</th>
                 <th>Bookings</th>
                 <th>Status</th>
-                <th style={{ textAlign: 'center' }}>Actions (View / Edit / Delete)</th>
+                <th>Portal</th>
+                <th style={{ textAlign: 'center' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -119,37 +153,73 @@ export default function Patients() {
                       <td style={{ fontSize: '0.85rem' }}>{p.care_manager_name || 'Unassigned'}</td>
                       <td><span className="badge badge-teal" style={{fontSize:'0.7rem'}}>{pBookings.length}</span></td>
                       <td><span className={`badge ${p.is_active?'badge-green':'badge-grey'}`}>{p.is_active?'Active':'Inactive'}</span></td>
+                      {/* Portal Account Status */}
                       <td style={{ textAlign: 'center' }}>
-                        <div style={{ display: 'flex', justifyContent: 'center', gap: 6 }}>
-                          {/* View Button (V) */}
+                        {p.has_portal_account ? (
+                          <span className="badge badge-green" style={{ fontSize: '0.68rem', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                            <Shield size={10} /> Active
+                          </span>
+                        ) : (
+                          <span className="badge badge-grey" style={{ fontSize: '0.68rem' }}>None</span>
+                        )}
+                        {p.portal_username && (
+                          <div style={{ fontSize: '0.65rem', color: 'var(--status-grey)', marginTop: 2, fontFamily: 'var(--font-mono)' }}>{p.portal_username}</div>
+                        )}
+                      </td>
+                      <td style={{ textAlign: 'center' }}>
+                        <div style={{ display: 'flex', justifyContent: 'center', gap: 4, flexWrap: 'wrap' }}>
+                          {/* View Button */}
                           <button
                             className="btn btn-ghost btn-sm"
                             title="View Patient 360 Profile (V)"
                             onClick={() => handlePatientClick(p)}
                             style={{ padding: '4px 8px', fontSize: '0.75rem', gap: 4, color: '#611F8C', borderColor: '#e9d5ff' }}
                           >
-                            <Eye size={13} /> View (V)
+                            <Eye size={13} /> View
                           </button>
-                          {/* Edit Button (E) */}
+                          {/* Edit Button */}
                           {canEditPatient && (
                             <button
                               className="btn btn-ghost btn-sm"
-                              title="Edit Patient Record (E)"
+                              title="Edit Patient Record"
                               onClick={() => setEditingPatient(p)}
                               style={{ padding: '4px 8px', fontSize: '0.75rem', gap: 4, color: '#b87320', borderColor: '#fef3c7' }}
                             >
-                              <Edit3 size={13} /> Edit (E)
+                              <Edit3 size={13} /> Edit
                             </button>
                           )}
-                          {/* Delete Button (D) */}
+                          {/* Portal Buttons */}
+                          {canManagePortal && !p.has_portal_account && (
+                            <button
+                              className="btn btn-ghost btn-sm"
+                              title="Create Patient Portal Login"
+                              onClick={(e) => handleCreatePortalLogin(p, e)}
+                              disabled={portalCreating === p.id}
+                              style={{ padding: '4px 8px', fontSize: '0.72rem', gap: 3, color: '#0d9488', borderColor: '#ccfbf1', whiteSpace: 'nowrap' }}
+                            >
+                              <KeyRound size={12} /> {portalCreating === p.id ? '…' : 'Create Login'}
+                            </button>
+                          )}
+                          {canManagePortal && p.has_portal_account && (
+                            <button
+                              className="btn btn-ghost btn-sm"
+                              title="Reset Portal Password"
+                              onClick={(e) => handleResetPortalPassword(p, e)}
+                              disabled={portalResetting === p.id}
+                              style={{ padding: '4px 8px', fontSize: '0.72rem', gap: 3, color: '#7c3aed', borderColor: '#ede9fe', whiteSpace: 'nowrap' }}
+                            >
+                              <RefreshCw size={12} /> {portalResetting === p.id ? '…' : 'Reset Pwd'}
+                            </button>
+                          )}
+                          {/* Delete Button */}
                           {canDeletePatient && (
                             <button
                               className="btn btn-danger btn-sm"
-                              title="Delete Patient Record (D)"
+                              title="Delete Patient Record"
                               onClick={(e) => handleDeletePatient(p, e)}
                               style={{ padding: '4px 8px', fontSize: '0.75rem', gap: 4 }}
                             >
-                              <Trash2 size={13} /> Delete (D)
+                              <Trash2 size={13} /> Delete
                             </button>
                           )}
                         </div>
@@ -166,6 +236,54 @@ export default function Patients() {
       {selected && <PatientDetail patient={selected} bookings={bookings} onClose={() => setSelected(null)} />}
       {showAddModal && <AddPatientModal onClose={() => setShowAddModal(false)} />}
       {editingPatient && <EditPatientModal patient={editingPatient} onClose={() => setEditingPatient(null)} />}
+
+      {/* ── Portal Credentials Result Modal ─────────────────────────────── */}
+      {portalResetResult && (
+        <div className="modal-backdrop">
+          <div className="modal" style={{ width: 460 }}>
+            <div className="modal-header" style={{ background: portalResetResult.isNew ? 'linear-gradient(135deg,#0f766e,#115e59)' : 'linear-gradient(135deg,#6d28d9,#5b21b6)', color: 'white' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                {portalResetResult.isNew ? <UserCheck size={20} style={{ color: '#86efac' }} /> : <RefreshCw size={20} style={{ color: '#c4b5fd' }} />}
+                <div>
+                  <h3 style={{ margin: 0, color: 'white', fontFamily: 'var(--font-heading)', fontSize: '1rem' }}>
+                    {portalResetResult.isNew ? 'Portal Account Created' : 'Password Reset'}
+                  </h3>
+                  <div style={{ fontSize: '0.72rem', opacity: 0.8 }}>{portalResetResult.patientName}</div>
+                </div>
+              </div>
+            </div>
+            <div className="modal-body" style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <p style={{ margin: 0, fontSize: '0.85rem', color: '#374151' }}>
+                Share these credentials with the patient or their family for <strong>Family Portal</strong> access.
+              </p>
+              <div style={{ background: '#f0fdf4', border: '1.5px solid #86efac', borderRadius: 10, padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {[{ label: 'Username', val: portalResetResult.username }, { label: 'Password', val: portalResetResult.password }].map(({ label, val }) => (
+                  <div key={label}>
+                    <div style={{ fontSize: '0.68rem', fontWeight: 800, color: '#15803d', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 5 }}>{label}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{ flex: 1, fontFamily: 'var(--font-mono)', fontSize: '1.05rem', fontWeight: 800, color: '#065f46', background: 'white', padding: '7px 12px', borderRadius: 6, border: '1px solid #d1fae5' }}>
+                        {val}
+                      </div>
+                      <button className="btn btn-ghost btn-sm" onClick={() => navigator.clipboard.writeText(val)} title={`Copy ${label}`}>
+                        <Copy size={13} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ fontSize: '0.75rem', color: '#6b7280', display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+                <AlertCircle size={12} style={{ flexShrink: 0, color: '#f59e0b', marginTop: 1 }} />
+                These credentials are shown <strong>only once</strong>. Save or share them now.
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-primary" onClick={() => setPortalResetResult(null)}>
+                <CheckCircle size={14} /> Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
