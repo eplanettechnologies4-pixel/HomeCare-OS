@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, TextInput, StyleSheet, ScrollView,
   KeyboardAvoidingView, Platform, ActivityIndicator, TouchableOpacity,
@@ -26,7 +26,8 @@ const initialPastNotes = [
 ];
 
 export default function NursesNoteScreen({ route, navigation }) {
-  const { visit, patientId = 'pat-201', patientName = 'Patient' } = route.params || {};
+  const { visit, patientId = '1', patientName = 'Patient' } = route.params || {};
+  const resolvedPatientId = visit?.patient?.id || visit?.patient_id || patientId;
   const { showToast } = useToast();
 
   const currentUser = AuthService.getCurrentUser() || { name: 'Nurse Ayesha K.', role: 'Nurse' };
@@ -35,6 +36,23 @@ export default function NursesNoteScreen({ route, navigation }) {
   const [noteText, setNoteText] = useState('');
   const [pastNotes, setPastNotes] = useState(initialPastNotes);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    const fetchNotes = async () => {
+      const res = await PatientsService.getNurseNotes(resolvedPatientId);
+      if (mounted && res.success && Array.isArray(res.data) && res.data.length > 0) {
+        setPastNotes(res.data.map(n => ({
+          id: n.id,
+          author: `${n.recorded_by_name || 'Staff Nurse'} (${n.recorded_by_role || 'Nurse'})`,
+          timestamp: n.recorded_at ? new Date(n.recorded_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : 'Recent',
+          noteText: n.note,
+        })));
+      }
+    };
+    fetchNotes();
+    return () => { mounted = false; };
+  }, [resolvedPatientId]);
 
   const handleSaveNote = async () => {
     if (!noteText.trim()) {

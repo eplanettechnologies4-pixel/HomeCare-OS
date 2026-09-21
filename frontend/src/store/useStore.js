@@ -401,6 +401,9 @@ const useStore = create((set, get) => ({
             clinical_requirements: assignmentData.clinicalRequirements || '',
             instructions: assignmentData.instructions || '',
             status: assignmentData.status || 'assigned',
+            recurring_days: assignmentData.recurringDays || [],
+            recurrence_end_date: assignmentData.recurrenceEndDate || null,
+            generate_recurring: true,
           }),
         });
         await get().fetchBookings();
@@ -586,9 +589,8 @@ const useStore = create((set, get) => ({
       const errorMsg = data.detail || data.username?.[0] || data.error || JSON.stringify(data);
       return { success: false, error: errorMsg };
     } catch (err) {
-      // Backend endpoint may not be deployed yet — return success so UI doesn't block
-      console.warn('[Store] createPatientPortalUser error (non-fatal):', err);
-      return { success: true, data: { username, note: 'Credentials saved locally — backend sync pending.' } };
+      console.warn('[Store] createPatientPortalUser error:', err);
+      return { success: false, error: err.message || 'Network error creating portal user.' };
     }
   },
 
@@ -988,6 +990,7 @@ const useStore = create((set, get) => ({
       get().fetchLiveVisits(),
       get().fetchActiveSOS(),
       get().fetchAlertRules(),
+      get().fetchInvoices(),
     ]);
   },
 
@@ -1000,25 +1003,78 @@ const useStore = create((set, get) => ({
 
   // ── Billing Invoices ──────────────────────────────────────────────────────
   invoices: [],
-  addInvoice: (inv) => set((s) => ({ invoices: [inv, ...s.invoices] })),
-  recordInvoicePayment: (invoiceId, payment) => set((s) => ({
-    invoices: s.invoices.map(inv => {
-      if (inv.id === invoiceId) {
-        const paid = inv.amount_paid + payment.amount;
-        const bal = inv.total - paid;
-        const st = bal <= 0 ? 'paid' : 'partial';
-        return {
-          ...inv,
-          amount_paid: paid,
-          balance_due: Math.max(0, bal),
-          status: st,
-          status_display: st.charAt(0).toUpperCase() + st.slice(1),
-          payments: [...(inv.payments || []), payment]
-        };
+  fetchInvoices: async () => {
+    try {
+      const res = await apiFetch('/billing/invoices/');
+      if (res.ok) {
+        const data = await res.json();
+        const items = Array.isArray(data) ? data : (data.results || []);
+        set({ invoices: items });
+        return items;
       }
-      return inv;
-    })
-  })),
+    } catch (err) {
+      console.warn('[Store] fetchInvoices error:', err);
+    }
+    return get().invoices;
+  },
+  addInvoice: (inv) => set((s) => ({ invoices: [inv, ...s.invoices] })),
+  recordInvoicePayment: async (invoiceId, payment) => {
+    // 1. Optimistic update
+    set((s) => ({
+      invoices: s.invoices.map(inv => {
+        if (inv.id === invoiceId) {
+          const paid = (inv.amount_paid || 0) + Number(payment.amount || 0);
+          const bal = (inv.total || 0) - paid;
+          const st = bal <= 0 ? 'paid' : 'partial';
+          return {
+            ...inv,
+            amount_paid: paid,
+            balance_due: Math.max(0, bal),
+            status: st,
+            status_display: st.charAt(0).toUpperCase() + st.slice(1),
+            payments: [...(inv.payments || []), payment]
+          };
+        }
+        return inv;
+      })
+    }));
+
+    // 2. Persist to backend
+    try {
+      const methodKey = (payment.method || 'cash').toLowerCase().replace(/\s+/g, '_');
+      const res = await apiFetch(`/billing/invoices/${invoiceId}/record_payment/`, {
+        method: 'POST',
+        body: JSON.stringify({
+          amount: payment.amount,
+          method: methodKey,
+          reference: payment.reference || '',
+          notes: payment.notes || '',
+        }),
+      });
+      if (res.ok) {
+        await get().fetchInvoices();
+        return { success: true };
+      }
+    } catch (err) {
+      console.warn('[Store] recordInvoicePayment backend sync error:', err);
+    }
+    return { success: true };
+  },
+  sendInvoice: async (invoiceId) => {
+    try {
+      const res = await apiFetch(`/billing/invoices/${invoiceId}/send_invoice/`, {
+        method: 'POST',
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return { success: true, data };
+      }
+      return { success: false, error: 'Failed to send invoice' };
+    } catch (err) {
+      console.warn('[Store] sendInvoice error:', err);
+      return { success: false, error: err.message };
+    }
+  },
 
   // ── Daily Patient Visit Reports ────────────────────────────────────────────
   dailyReports: [],

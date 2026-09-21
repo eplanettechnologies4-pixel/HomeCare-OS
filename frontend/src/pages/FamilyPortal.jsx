@@ -149,6 +149,7 @@ export default function FamilyPortal() {
   const patients       = useStore((s) => s.patients);
   const allBookings    = useStore((s) => s.bookings);
   const allInvoices    = useStore((s) => s.invoices);
+  const fetchInvoices  = useStore((s) => s.fetchInvoices);
   const allReports     = useStore((s) => s.dailyReports);
   const allVitals      = useStore((s) => s.vitals);
   const allNurseNotes  = useStore((s) => s.nurseNotes);
@@ -158,6 +159,10 @@ export default function FamilyPortal() {
   const setCurrentRole = useStore((s) => s.setCurrentRole);
   const setActivePage  = useStore((s) => s.setActivePage);
 
+  useEffect(() => {
+    fetchInvoices();
+  }, [fetchInvoices]);
+
   // Resolve the current patient (family sees their own patient)
   const patient = useMemo(() => {
     if (currentUser?.patient_id) return patients.find((p) => p.id === currentUser.patient_id);
@@ -165,7 +170,7 @@ export default function FamilyPortal() {
   }, [patients, currentUser]);
 
   const bookings    = patient ? allBookings.filter((b) => b.patient_name === patient.full_name || b.patient?.id === patient.id) : [];
-  const invoices    = patient ? allInvoices.filter((i) => i.patient_id === patient.id) : [];
+  const invoices    = patient ? allInvoices.filter((i) => i.patient_id === patient.id || i.patient === patient.id || i.patient?.id === patient.id || i.patient_name === patient.full_name) : [];
   const reports     = patient ? allReports.filter((r) => r.patient_id === patient.id) : [];
   const vitals      = patient ? allVitals.filter((v) => v.patient_id === patient.id) : [];
   const nurseNotes  = patient ? allNurseNotes.filter((n) => n.patient_id === patient.id) : [];
@@ -909,16 +914,23 @@ export default function FamilyPortal() {
                           <tr><th>Invoice #</th><th>Date</th><th>Total</th><th>Paid</th><th>Balance</th><th>Status</th></tr>
                         </thead>
                         <tbody>
-                          {invoices.map((inv) => (
-                            <tr key={inv.id}>
-                              <td className="ts">{inv.invoice_number || inv.id}</td>
-                              <td className="ts">{inv.date || '—'}</td>
-                              <td className="ts">PKR {(inv.total_amount || inv.total || 0).toLocaleString()}</td>
-                              <td className="ts" style={{ color: 'var(--status-green)', fontWeight: 700 }}>PKR {(inv.amount_paid || 0).toLocaleString()}</td>
-                              <td className="ts" style={{ color: (inv.balance_due || 0) > 0 ? 'var(--status-red)' : 'var(--status-green)', fontWeight: 700 }}>PKR {(inv.balance_due || 0).toLocaleString()}</td>
-                              <td><span className={`badge ${inv.status === 'paid' ? 'badge-green' : 'badge-amber'}`}>{inv.status}</span></td>
-                            </tr>
-                          ))}
+                          {invoices.map((inv) => {
+                            const total = Number(inv.total_amount || inv.total || 0);
+                            const paid = Number(inv.amount_paid || 0);
+                            const bal = inv.balance_due !== undefined ? Number(inv.balance_due) : Math.max(0, total - paid);
+                            const st = (inv.status || 'pending').toLowerCase();
+                            const badgeCls = st === 'paid' ? 'badge-green' : (st === 'partial' ? 'badge-amber' : 'badge-red');
+                            return (
+                              <tr key={inv.id}>
+                                <td className="ts" style={{ fontWeight: 700, color: 'var(--teal-800)' }}>{inv.invoice_number || `INV-${inv.id}`}</td>
+                                <td className="ts">{inv.issued_date || inv.date || '—'}</td>
+                                <td className="ts" style={{ fontWeight: 600 }}>PKR {total.toLocaleString()}</td>
+                                <td className="ts" style={{ color: 'var(--status-green)', fontWeight: 700 }}>PKR {paid.toLocaleString()}</td>
+                                <td className="ts" style={{ color: bal > 0 ? 'var(--status-red)' : 'var(--status-green)', fontWeight: 700 }}>PKR {bal.toLocaleString()}</td>
+                                <td><span className={`badge ${badgeCls}`}>{inv.status_display || inv.status}</span></td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>

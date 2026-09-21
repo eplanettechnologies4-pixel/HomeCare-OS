@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
-  View, Text, StyleSheet, FlatList, TouchableOpacity, Image,
+  View, Text, StyleSheet, FlatList, TouchableOpacity, Image, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AuthService, PatientsService } from '../services/api';
@@ -10,18 +10,44 @@ import { useToast } from '../components/Toast';
 const PURPLE = '#6D28D9', WHITE = '#FFFFFF';
 
 const initialMeds = [
-  { id: 'm-101', drugName: 'Inj. Clexane (Enoxaparin)', dose: '40 mg / 0.4 ml S/C', scheduledTime: '08:00 AM', status: 'overdue' },
-  { id: 'm-102', drugName: 'Tab. Augmentin (Amoxicillin/Clavulanate)', dose: '1 gram P/O', scheduledTime: '10:00 AM', status: 'due' },
-  { id: 'm-103', drugName: 'Tab. Glucophage (Metformin)', dose: '500 mg P/O', scheduledTime: '02:00 PM', status: 'due' },
-  { id: 'm-104', drugName: 'Inj. Insulin Humulin R', dose: '8 Units S/C', scheduledTime: '08:00 PM', status: 'due' },
+  { id: 1, prescription_id: 1, drugName: 'Inj. Clexane (Enoxaparin)', dose: '40 mg / 0.4 ml S/C', scheduledTime: '08:00 AM', status: 'overdue' },
+  { id: 2, prescription_id: 2, drugName: 'Tab. Augmentin (Amoxicillin/Clavulanate)', dose: '1 gram P/O', scheduledTime: '10:00 AM', status: 'due' },
+  { id: 3, prescription_id: 3, drugName: 'Tab. Glucophage (Metformin)', dose: '500 mg P/O', scheduledTime: '02:00 PM', status: 'due' },
+  { id: 4, prescription_id: 4, drugName: 'Inj. Insulin Humulin R', dose: '8 Units S/C', scheduledTime: '08:00 PM', status: 'due' },
 ];
 
 export default function TodaysMedsScreen({ route, navigation }) {
-  const { visit, patientId = 'pat-201', patientName = 'Patient' } = route.params || {};
+  const { visit, patientId = '1', patientName = 'Patient' } = route.params || {};
+  const resolvedPatientId = visit?.patient?.id || visit?.patient_id || patientId;
   const { showToast } = useToast();
   const currentUser = AuthService.getCurrentUser() || { name: 'Nurse Ayesha K.' };
 
   const [meds, setMeds] = useState(initialMeds);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    const fetchMeds = async () => {
+      setLoading(true);
+      const res = await PatientsService.getDueMedications(resolvedPatientId);
+      if (mounted && res.success && Array.isArray(res.data) && res.data.length > 0) {
+        setMeds(res.data.map(rx => ({
+          id: rx.id,
+          prescription_id: rx.id,
+          drugName: rx.medication,
+          dose: `${rx.dosage} (${rx.frequency})`,
+          scheduledTime: rx.scheduled_time || 'Due Today',
+          status: rx.administered ? 'administered' : 'due',
+          administered: !!rx.administered,
+          instructions: rx.instructions || '',
+          day_number: rx.day_number,
+        })));
+      }
+      if (mounted) setLoading(false);
+    };
+    fetchMeds();
+    return () => { mounted = false; };
+  }, [resolvedPatientId]);
 
   const handleAdminister = async (item) => {
     if (item.administered) return;
@@ -29,9 +55,10 @@ export default function TodaysMedsScreen({ route, navigation }) {
     const currentTimestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
     // POST /api/patients/{id}/mar/administer/
-    const res = await PatientsService.administerMedication(patientId, item.id, 1);
+    const targetRxId = item.prescription_id || item.id;
+    const res = await PatientsService.administerMedication(resolvedPatientId, targetRxId, item.day_number);
 
-    if (res.success) {
+    if (res.success || res.status === 201) {
       setMeds(meds.map((m) => {
         if (m.id === item.id) {
           return {
@@ -45,7 +72,7 @@ export default function TodaysMedsScreen({ route, navigation }) {
       }));
       showToast(`${item.drugName} marked as Administered!`, 'success');
     } else {
-      showToast('Failed to record MAR administration', 'error');
+      showToast(res.error || 'Failed to record MAR administration', 'error');
     }
   };
 

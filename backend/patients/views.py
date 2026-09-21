@@ -255,6 +255,12 @@ class PatientViewSet(viewsets.ModelViewSet):
 
         return Response(result)
 
+    @action(detail=True, methods=['get'])
+    def notes(self, request, pk=None):
+        patient = self.get_object()
+        notes = patient.nurse_notes.select_related('recorded_by').order_by('-recorded_at')
+        return Response(NurseNoteSerializer(notes, many=True).data)
+
 
 class PrescriptionViewSet(viewsets.ModelViewSet):
     queryset = Prescription.objects.all()

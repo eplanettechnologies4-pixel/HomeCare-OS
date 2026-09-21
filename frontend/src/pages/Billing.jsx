@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { DollarSign, FileText, Printer, Plus, X, Search, Check, CreditCard } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { DollarSign, FileText, Printer, Plus, X, Search, Check, CreditCard, Send } from 'lucide-react';
 import useStore from '../store/useStore';
 import UniversalPrintButton from '../components/UniversalPrintButton';
 import { format } from 'date-fns';
@@ -12,9 +12,11 @@ const STATUS_BADGE = {
 };
 
 export default function Billing() {
-  const invoices     = useStore((s) => s.invoices);
+  const invoices      = useStore((s) => s.invoices);
+  const fetchInvoices = useStore((s) => s.fetchInvoices);
   const recordPayment = useStore((s) => s.recordInvoicePayment);
-  const patients     = useStore((s) => s.patients);
+  const sendInvoice   = useStore((s) => s.sendInvoice);
+  const patients      = useStore((s) => s.patients);
 
   const [selectedInvoice, setSelectedInvoice] = useState(null);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -23,28 +25,33 @@ export default function Billing() {
   const [payRef, setPayRef]       = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [search, setSearch]       = useState('');
+  const [sendingInvoice, setSendingInvoice] = useState(false);
+  const [sendSuccessMsg, setSendSuccessMsg] = useState('');
+
+  useEffect(() => {
+    fetchInvoices();
+  }, [fetchInvoices]);
 
   const filteredInvoices = invoices.filter(inv => {
     if (statusFilter && inv.status !== statusFilter) return false;
     if (search) {
       const q = search.toLowerCase();
-      return inv.invoice_number.toLowerCase().includes(q) || inv.patient_name.toLowerCase().includes(q);
+      return (inv.invoice_number || '').toLowerCase().includes(q) || (inv.patient_name || '').toLowerCase().includes(q);
     }
     return true;
   });
 
-  const totalInvoiced = invoices.reduce((sum, i) => sum + i.total, 0);
-  const totalCollected = invoices.reduce((sum, i) => sum + i.amount_paid, 0);
-  const totalPending = invoices.reduce((sum, i) => sum + i.balance_due, 0);
+  const totalInvoiced = invoices.reduce((sum, i) => sum + (Number(i.total) || 0), 0);
+  const totalCollected = invoices.reduce((sum, i) => sum + (Number(i.amount_paid) || 0), 0);
+  const totalPending = invoices.reduce((sum, i) => sum + (Number(i.balance_due) || 0), 0);
 
   const handlePrint = () => {
     window.print();
   };
 
-  const handleRecordPaymentSubmit = () => {
+  const handleRecordPaymentSubmit = async () => {
     if (!selectedInvoice || !payAmount) return;
-    recordPayment(selectedInvoice.id, {
-      id: Date.now(),
+    await recordPayment(selectedInvoice.id, {
       amount: Number(payAmount),
       method: payMethod,
       received_at: new Date().toISOString().split('T')[0],
@@ -56,6 +63,18 @@ export default function Billing() {
     // Refresh selected invoice view from store
     const updated = useStore.getState().invoices.find(i => i.id === selectedInvoice.id);
     if (updated) setSelectedInvoice(updated);
+  };
+
+  const handleSendInvoice = async () => {
+    if (!selectedInvoice) return;
+    setSendingInvoice(true);
+    setSendSuccessMsg('');
+    const res = await sendInvoice(selectedInvoice.id);
+    setSendingInvoice(false);
+    if (res.success) {
+      setSendSuccessMsg(`Invoice sent to ${selectedInvoice.patient_name}'s family portal!`);
+      setTimeout(() => setSendSuccessMsg(''), 4000);
+    }
   };
 
   return (
@@ -160,12 +179,25 @@ export default function Billing() {
                 <div style={{ fontSize: '0.78rem', color: 'var(--status-grey)' }}>{selectedInvoice.patient_name}</div>
               </div>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <button
+                  className="btn btn-ghost btn-sm"
+                  style={{ color: 'var(--teal-700)', display: 'flex', alignItems: 'center', gap: 4 }}
+                  onClick={handleSendInvoice}
+                  disabled={sendingInvoice}
+                >
+                  <Send size={13} /> {sendingInvoice ? 'Sending...' : 'Send Invoice'}
+                </button>
                 <UniversalPrintButton type="invoice" data={selectedInvoice} label="Print Invoice" variant="ghost" size="sm" />
                 <button className="btn btn-ghost btn-icon btn-sm" onClick={() => setSelectedInvoice(null)}><X size={14} /></button>
               </div>
             </div>
 
             <div className="drawer-body" id="printable-invoice">
+              {sendSuccessMsg && (
+                <div style={{ background: '#ecfdf5', color: '#065f46', border: '1px solid #a7f3d0', padding: '8px 12px', borderRadius: 6, fontSize: '0.8rem', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Check size={14} /> {sendSuccessMsg}
+                </div>
+              )}
               {/* Invoice Print Header */}
               <div style={{ borderBottom: '2px solid var(--teal-700)', paddingBottom: 12, marginBottom: 16 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>

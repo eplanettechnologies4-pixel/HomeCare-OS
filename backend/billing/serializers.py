@@ -27,7 +27,7 @@ class InvoiceListSerializer(serializers.ModelSerializer):
     class Meta:
         model  = Invoice
         fields = [
-            'id', 'invoice_number', 'patient_name', 'patient_mr',
+            'id', 'invoice_number', 'patient', 'patient_name', 'patient_mr',
             'billing_type', 'billing_type_display', 'status', 'status_display',
             'issued_date', 'due_date', 'total', 'amount_paid', 'balance_due',
         ]

@@ -59,13 +59,15 @@ class BookingViewSet(viewsets.ModelViewSet):
         booking.status = request.data.get('status', 'assigned')
         booking.assigned_on = timezone.now()
 
-        # Optional / required assignment fields
+        # Optional backup staff member
         backup_staff_id = request.data.get('backup_staff_id')
         if backup_staff_id:
             try:
                 booking.backup_staff = StaffMember.objects.get(pk=backup_staff_id)
             except StaffMember.DoesNotExist:
-                pass
+                booking.backup_staff = None
+        else:
+            booking.backup_staff = None
         
         if request.data.get('care_manager_name'):
             booking.care_manager_name = request.data.get('care_manager_name')
@@ -73,8 +75,23 @@ class BookingViewSet(viewsets.ModelViewSet):
             booking.clinical_requirements = request.data.get('clinical_requirements')
         if request.data.get('instructions'):
             booking.notes = request.data.get('instructions')
+        if 'recurring_days' in request.data:
+            booking.recurring_days = request.data.get('recurring_days') or []
+        if 'recurrence_end_date' in request.data:
+            booking.recurrence_end_date = request.data.get('recurrence_end_date') or None
 
         booking.save()
+
+        # Generate recurring bookings if recurrence specified
+        from .services import generate_recurring_bookings
+        should_recur = request.data.get('generate_recurring', True)
+        if should_recur and (booking.recurring_days or booking.shift_frequency != 'once'):
+            generate_recurring_bookings(
+                booking,
+                recurring_days=booking.recurring_days,
+                end_date=booking.recurrence_end_date,
+                occurrences=request.data.get('occurrences', 30)
+            )
 
         # Fire a notification to the assigned nurse/doctor's linked auth.User
         if staff.user:
@@ -91,7 +108,58 @@ class BookingViewSet(viewsets.ModelViewSet):
                 target_params={'booking_id': booking.pk},
             )
 
+        if booking.backup_staff and booking.backup_staff.user:
+            from notifications.views import create_notification
+            create_notification(
+                recipient_user=booking.backup_staff.user,
+                message=(
+                    f'🛡️ Clinical Backup Assigned ({booking.reference_code or f"#{booking.pk}"}): {booking.patient.full_name} — '
+                    f'{booking.get_service_type_display()} on '
+                    f'{booking.scheduled_time.strftime("%d %b %Y at %H:%M")}'
+                ),
+                icon_key='shield',
+                target_screen='Schedule',
+                target_params={'booking_id': booking.pk},
+            )
+
         return Response(BookingDetailSerializer(booking).data)
+
+    @action(detail=True, methods=['post'])
+    def generate_recurring(self, request, pk=None):
+        """Explicitly generate recurring visit bookings for a booking."""
+        booking = self.get_object()
+        from .services import generate_recurring_bookings
+        recurring_days = request.data.get('recurring_days', booking.recurring_days)
+        end_date = request.data.get('end_date', booking.recurrence_end_date)
+        occurrences = request.data.get('occurrences', 30)
+
+        if recurring_days:
+            booking.recurring_days = recurring_days
+        if end_date:
+            booking.recurrence_end_date = end_date
+        booking.save(update_fields=['recurring_days', 'recurrence_end_date'])
+
+        created = generate_recurring_bookings(
+            booking,
+            recurring_days=recurring_days,
+            end_date=end_date,
+            occurrences=occurrences
+        )
+        return Response({
+            'success': True,
+            'parent_booking_id': booking.pk,
+            'generated_count': len(created),
+            'bookings': BookingListSerializer(created, many=True).data
+        }, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post'])
+    def generate_invoice(self, request, pk=None):
+        """Generate a formal billing invoice for this booking."""
+        booking = self.get_object()
+        from billing.services import generate_invoice_for_booking
+        from billing.serializers import InvoiceDetailSerializer
+        invoice = generate_invoice_for_booking(booking)
+        return Response(InvoiceDetailSerializer(invoice).data, status=status.HTTP_201_CREATED)
 
     @action(detail=False, methods=['get'])
     def stats(self, request):

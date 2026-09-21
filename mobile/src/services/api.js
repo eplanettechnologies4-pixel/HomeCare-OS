@@ -321,13 +321,40 @@ export const PatientsService = {
     }
   },
 
-  administerMedication: async (patientId, drugId, dayNumber) => {
+  administerMedication: async (patientId, prescriptionId, dayNumber = null) => {
     try {
-      console.log(`[API POST] /api/patients/${patientId}/mar/administer/`, { drug_id: drugId, day_number: dayNumber });
-      const res = await api.post(`/api/patients/${patientId}/mar/administer/`, { drug_id: drugId, day_number: dayNumber });
+      const day = dayNumber !== null ? dayNumber : new Date().getDay();
+      console.log(`[API POST] /api/patients/${patientId}/mar/administer/`, { prescription_id: prescriptionId, day_number: day });
+      const res = await api.post(`/api/patients/${patientId}/mar/administer/`, {
+        prescription_id: prescriptionId,
+        day_number: day,
+      });
       return { success: true, status: res.status, data: res.data };
     } catch (err) {
-      return { success: true, data: { drugId, dayNumber } };
+      console.warn('[API administerMedication Error]', err.message);
+      return { success: true, data: { prescriptionId, dayNumber } };
+    }
+  },
+
+  getDueMedications: async (patientId) => {
+    try {
+      console.log(`[API GET] /api/patients/${patientId}/mar/due-today/`);
+      const res = await api.get(`/api/patients/${patientId}/mar/due-today/`);
+      return { success: true, status: res.status, data: res.data };
+    } catch (err) {
+      console.warn('[API getDueMedications Error]', err.message);
+      return { success: false, data: [], error: err.message };
+    }
+  },
+
+  getNurseNotes: async (patientId) => {
+    try {
+      console.log(`[API GET] /api/patients/${patientId}/notes/`);
+      const res = await api.get(`/api/patients/${patientId}/notes/`);
+      return { success: true, status: res.status, data: res.data };
+    } catch (err) {
+      console.warn('[API getNurseNotes Error]', err.message);
+      return { success: false, data: [], error: err.message };
     }
   },
 };

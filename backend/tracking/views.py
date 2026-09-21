@@ -453,6 +453,14 @@ class CheckOutView(APIView):
         booking.actual_end_time = now
         booking.save(update_fields=['status', 'actual_end_time'])
 
+        # Auto-generate billing invoice for the completed booking
+        try:
+            from billing.services import generate_invoice_for_booking
+            generate_invoice_for_booking(booking)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Could not auto-generate invoice for booking {booking.id}: {e}")
+
         # Remove LiveVisit snapshot — visit is over
         LiveVisit.objects.filter(booking=booking).delete()
 

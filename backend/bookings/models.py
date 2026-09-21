@@ -78,6 +78,9 @@ class Booking(models.Model):
     scheduled_time = models.DateTimeField()
     shift_duration = models.CharField(max_length=30, choices=ShiftDuration.choices, default=ShiftDuration.FOUR_HOURS)
     shift_frequency = models.CharField(max_length=30, choices=ShiftFrequency.choices, default=ShiftFrequency.ONCE)
+    recurring_days = models.JSONField(default=list, blank=True)
+    recurrence_end_date = models.DateField(null=True, blank=True)
+    parent_booking = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True, related_name='recurring_instances')
     actual_start_time = models.DateTimeField(null=True, blank=True)
     actual_end_time = models.DateTimeField(null=True, blank=True)
 

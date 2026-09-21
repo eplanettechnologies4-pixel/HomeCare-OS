@@ -56,6 +56,7 @@ class BookingListSerializer(serializers.ModelSerializer):
             'status', 'status_display',
             # Financials
             'amount', 'amount_paid', 'balance_due',
+            'recurring_days', 'recurrence_end_date', 'parent_booking',
             'created_at',
         ]
 

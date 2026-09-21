@@ -60,6 +60,9 @@ export default function NurseAssignPanel({ booking, staffList, onConfirmAssignme
   const [instructions, setInstructions]     = useState(booking?.nurse_instructions || booking?.notes || '');
   const [assignmentStatus, setAssignmentStatus] = useState(booking?.status === 'pending' ? 'assigned' : (booking?.status || 'assigned'));
   const [recurringDays, setRecurringDays]   = useState(booking?.recurring_days || ['Mon', 'Wed', 'Fri']);
+  const [recurrenceEndDate, setRecurrenceEndDate] = useState(
+    booking?.recurrence_end_date || format(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), 'yyyy-MM-dd')
+  );
   const [selectedSkills, setSelectedSkills] = useState([]);
   const [isAssigned, setIsAssigned]         = useState(!!booking?.assigned_staff);
   const [validationError, setValidationError] = useState('');
@@ -104,14 +107,6 @@ export default function NurseAssignPanel({ booking, staffList, onConfirmAssignme
       setValidationError('Assigned Primary Staff Member (Name, ID & Designation) is required.');
       return;
     }
-    if (!backupNurse) {
-      setValidationError('Designated Backup Staff Member is required for clinical safety coverage.');
-      return;
-    }
-    if (!backupStaffOk) {
-      setValidationError('Please check and verify that Backup Staff is OK for standby coverage.');
-      return;
-    }
     if (!careManagerName.trim()) {
       setValidationError('Clinic Care Manager name is required.');
       return;
@@ -127,13 +122,14 @@ export default function NurseAssignPanel({ booking, staffList, onConfirmAssignme
     if (onConfirmAssignment) {
       onConfirmAssignment({
         staff: primaryNurse,
-        backupStaff: backupNurse,
+        backupStaff: backupNurse || null,
         careManagerName: careManagerName.trim(),
         clinicalRequirements: selectedReqs.join('; '),
         instructions: instructions.trim(),
         status: assignmentStatus,
         assignedOn: assignedOnDate,
         recurringDays,
+        recurrenceEndDate,
       });
     }
   };
@@ -346,11 +342,11 @@ export default function NurseAssignPanel({ booking, staffList, onConfirmAssignme
             </select>
           </div>
 
-          {/* Backup Clinician (Required) with "check it is ok" */}
+          {/* Backup Clinician (Optional) */}
           <div className="form-group" style={{ marginBottom: 12 }}>
             <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span>2. Backup Staff Member (Name, ID & Designation) *</span>
-              <span style={{ fontSize: '0.7rem', color: 'var(--teal-600)', fontWeight: 600 }}>Required</span>
+              <span>2. Backup Staff Member (Name, ID & Designation)</span>
+              <span style={{ fontSize: '0.7rem', color: 'var(--status-grey)', fontWeight: 600 }}>Optional</span>
             </label>
             <select
               className="form-select"
@@ -358,10 +354,10 @@ export default function NurseAssignPanel({ booking, staffList, onConfirmAssignme
               onFocus={() => fetchStaff()}
               onChange={e => {
                 setBackupNurseId(e.target.value);
-                setBackupStaffOk(false);
+                setBackupStaffOk(!!e.target.value);
               }}
             >
-              <option value="">Choose Backup Clinician (Required for Coverage)...</option>
+              <option value="">None (Primary Staff Only)</option>
               {availableStaff.filter(s => String(s.id) !== String(primaryNurseId)).map(s => (
                 <option key={s.id} value={s.id}>
                   {s.full_name} (ID: {s.employee_id || `HC-B-${s.id}`}) — Designation: {s.role_display || s.role} {s.specialization ? `(${s.specialization})` : ''} — ★{s.rating || 5.0}
@@ -369,14 +365,14 @@ export default function NurseAssignPanel({ booking, staffList, onConfirmAssignme
               ))}
             </select>
 
-            {/* Dedicated "Backup Staff name check it is ok" Verification Box */}
+            {/* Optional Backup Staff Standby Verification Box */}
             {backupNurse && (
               <div style={{
                 marginTop: 8,
                 padding: '10px 14px',
                 borderRadius: 8,
-                border: `1.5px solid ${backupStaffOk ? '#86efac' : '#fcd34d'}`,
-                background: backupStaffOk ? '#f0fdf4' : '#fffbeb',
+                border: `1.5px solid ${backupStaffOk ? '#86efac' : '#cbd5e1'}`,
+                background: backupStaffOk ? '#f0fdf4' : '#f8fafc',
                 transition: 'all 0.2s',
               }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
@@ -394,8 +390,8 @@ export default function NurseAssignPanel({ booking, staffList, onConfirmAssignme
                     gap: 6,
                     cursor: 'pointer',
                     background: backupStaffOk ? 'var(--teal-700)' : 'white',
-                    color: backupStaffOk ? 'white' : '#92400e',
-                    border: `1px solid ${backupStaffOk ? 'var(--teal-700)' : '#d97706'}`,
+                    color: backupStaffOk ? 'white' : '#475569',
+                    border: `1px solid ${backupStaffOk ? 'var(--teal-700)' : '#cbd5e1'}`,
                     padding: '6px 12px',
                     borderRadius: 6,
                     fontSize: '0.76rem',
@@ -409,16 +405,12 @@ export default function NurseAssignPanel({ booking, staffList, onConfirmAssignme
                       onChange={e => setBackupStaffOk(e.target.checked)}
                       style={{ accentColor: 'var(--teal-700)', cursor: 'pointer' }}
                     />
-                    <span>{backupStaffOk ? '✓ Backup Staff Checked & OK' : 'Check Backup Staff is OK *'}</span>
+                    <span>{backupStaffOk ? '✓ Standby Verified' : 'Mark Standby Verified'}</span>
                   </label>
                 </div>
-                {backupStaffOk ? (
+                {backupStaffOk && (
                   <div style={{ fontSize: '0.72rem', color: '#15803d', marginTop: 6, display: 'flex', alignItems: 'center', gap: 4, fontWeight: 600 }}>
-                    <CheckCircle2 size={13} /> Standby availability confirmed & verified OK for emergency clinical backup.
-                  </div>
-                ) : (
-                  <div style={{ fontSize: '0.72rem', color: '#b45309', marginTop: 6, display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <AlertCircle size={13} /> Standby check required: verify that backup staff is available and check the box above.
+                    <CheckCircle2 size={13} /> Backup standby availability confirmed for clinical coverage.
                   </div>
                 )}
               </div>
@@ -514,6 +506,23 @@ export default function NurseAssignPanel({ booking, staffList, onConfirmAssignme
               </div>
             </div>
           </div>
+
+          {/* Recurrence End Date */}
+          {recurringDays.length > 0 && (
+            <div className="form-group" style={{ marginTop: 10, marginBottom: 14 }}>
+              <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>Repeat Schedule Until</span>
+                <span style={{ fontSize: '0.7rem', color: 'var(--teal-700)', fontWeight: 600 }}>Auto-generates visits</span>
+              </label>
+              <input
+                type="date"
+                className="form-input"
+                value={recurrenceEndDate}
+                onChange={e => setRecurrenceEndDate(e.target.value)}
+                min={format(new Date(), 'yyyy-MM-dd')}
+              />
+            </div>
+          )}
 
           <button
             type="button"
