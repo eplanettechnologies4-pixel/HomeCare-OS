@@ -32,7 +32,6 @@ function NewBookingModal({ onClose, onSubmit }) {
     fetchPatients();
   }, [fetchStaff, fetchPatients]);
 
-  const [mode, setMode] = useState('existing'); // 'existing' | 'new'
 
   // Full Intake State (Required & Optional fields)
   const [form, setForm] = useState({
@@ -202,48 +201,21 @@ function NewBookingModal({ onClose, onSubmit }) {
           <button className="btn btn-ghost btn-icon" onClick={onClose}><X size={16} /></button>
         </div>
 
-        {/* Mode Selector Tab */}
+        {/* New Patient Note */}
         <div style={{ padding: '0 24px', marginBottom: 12 }}>
-          <div style={{ display: 'inline-flex', background: 'var(--sage-100)', padding: 3, borderRadius: 8, gap: 4, width: '100%' }}>
-            <button
-              type="button"
-              style={{
-                flex: 1,
-                padding: '7px 0',
-                fontSize: '0.82rem',
-                fontWeight: mode === 'existing' ? 700 : 500,
-                borderRadius: 6,
-                border: 'none',
-                cursor: 'pointer',
-                background: mode === 'existing' ? 'var(--teal-700)' : 'transparent',
-                color: mode === 'existing' ? '#fff' : 'var(--teal-900)',
-                transition: 'all 0.15s',
-              }}
-              onClick={() => setMode('existing')}
-            >
-              Select Existing Patient
-            </button>
-            <button
-              type="button"
-              style={{
-                flex: 1,
-                padding: '7px 0',
-                fontSize: '0.82rem',
-                fontWeight: mode === 'new' ? 700 : 500,
-                borderRadius: 6,
-                border: 'none',
-                cursor: 'pointer',
-                background: mode === 'new' ? 'var(--teal-700)' : 'transparent',
-                color: mode === 'new' ? '#fff' : 'var(--teal-900)',
-                transition: 'all 0.15s',
-              }}
-              onClick={() => {
-                setMode('new');
-                set('patient_id', '');
-              }}
-            >
-              + Register New Patient for Booking
-            </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 8, padding: '8px 14px', fontSize: '0.8rem', color: '#166534' }}>
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            <span>
+              Need to register a new patient?{' '}
+              <button
+                type="button"
+                onClick={() => useStore.getState().setActivePage('patients')}
+                style={{ background: 'none', border: 'none', padding: 0, color: '#15803d', fontWeight: 700, textDecoration: 'underline', cursor: 'pointer', fontSize: 'inherit' }}
+              >
+                Go to Patients page
+              </button>
+              {' '}— then come back here to select them from the dropdown.
+            </span>
           </div>
         </div>
 
@@ -264,22 +236,20 @@ function NewBookingModal({ onClose, onSubmit }) {
               1. Patient Demographics & Location (Required)
             </div>
 
-            {mode === 'existing' && (
-              <div className="form-group" style={{ marginBottom: 12 }}>
-                <label className="form-label">Select Existing Patient *</label>
-                <select
-                  className="form-select"
-                  value={form.patient_id}
-                  onFocus={() => fetchPatients()}
-                  onChange={e => handleExistingPatientSelect(e.target.value)}
-                >
-                  <option value="">Choose patient profile…</option>
-                  {patients.map(p => (
-                    <option key={p.id} value={p.id}>{p.full_name} ({p.mr_number || `MR-${p.id}`}) — {p.phone}</option>
-                  ))}
-                </select>
-              </div>
-            )}
+            <div className="form-group" style={{ marginBottom: 12 }}>
+              <label className="form-label">Select Existing Patient *</label>
+              <select
+                className="form-select"
+                value={form.patient_id}
+                onFocus={() => fetchPatients()}
+                onChange={e => handleExistingPatientSelect(e.target.value)}
+              >
+                <option value="">Choose patient profile…</option>
+                {patients.map(p => (
+                  <option key={p.id} value={p.id}>{p.full_name} ({p.mr_number || `MR-${p.id}`}) — {p.phone}</option>
+                ))}
+              </select>
+            </div>
 
             <div className="grid-3" style={{ gap: 10, marginBottom: 10 }}>
               <div className="form-group" style={{ marginBottom: 0 }}>
