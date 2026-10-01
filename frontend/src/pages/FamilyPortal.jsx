@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   LayoutDashboard, Activity, Pill, Heart, Stethoscope, Calendar,
   FileText, Bell, User, Users, LogOut, Star, ChevronRight,

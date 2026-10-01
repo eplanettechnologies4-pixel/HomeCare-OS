@@ -13,6 +13,8 @@ import DailyReportForm from '../components/DailyReportForm';
 import NursesNotesFormA from '../components/NursesNotesFormA';
 import VitalsRecordFormB from '../components/VitalsRecordFormB';
 import MarSheetFormC from '../components/MarSheetFormC';
+import VisitFeedbackTab from '../components/VisitFeedbackTab';
+import ManagerChecklistTab from '../components/ManagerChecklistTab';
 
 export default function Patient360() {
   const selectedPatient = useStore((s) => s.selectedPatient);
@@ -69,6 +71,8 @@ export default function Patient360() {
     { id: 'history',      label: 'Medical History' },
     { id: 'careplan',     label: 'Care Plan' },
     { id: 'reports',      label: 'Visit Reports' },
+    { id: 'feedback',     label: 'Feedback History' },
+    { id: 'quality',      label: 'Quality Checks' },
     { id: 'invoices',     label: 'Invoices' },
     { id: 'payments',     label: 'Payments' },
     { id: 'documents',    label: 'Documents' },
@@ -293,6 +297,16 @@ export default function Patient360() {
         {/* 4. FORM C: MAR SHEET TAB */}
         {activeTab === 'mar' && (
           <MarSheetFormC patient={patient} />
+        )}
+
+        {/* FEEDBACK HISTORY TAB */}
+        {activeTab === 'feedback' && (
+          <VisitFeedbackTab patientId={patient.id} currentRole={currentRole} />
+        )}
+
+        {/* QUALITY CHECKS TAB */}
+        {activeTab === 'quality' && (
+          <ManagerChecklistTab patientId={patient.id} />
         )}
 
         {/* 5. MEDICAL HISTORY TAB */}

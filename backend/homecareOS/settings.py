@@ -57,6 +57,7 @@ INSTALLED_APPS = [
     'portal',
     'notifications',
     'lms',
+    'quality',
 ]
 
 MIDDLEWARE = [

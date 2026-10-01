@@ -9,6 +9,8 @@ import StaffIdCard from '../components/StaffIdCard';
 import VideoPlayerModal from '../components/VideoPlayerModal';
 import CertificateHistoryTable from '../components/CertificateHistoryTable';
 import EditStaffModal from '../components/EditStaffModal';
+import VisitFeedbackTab from '../components/VisitFeedbackTab';
+import ManagerChecklistTab from '../components/ManagerChecklistTab';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay } from 'date-fns';
 
 const STATUS_BADGE = {
@@ -780,7 +782,7 @@ export default function Staff() {
             </div>
 
             {/* Profile Modal Tabs */}
-            <div style={{ display: 'flex', gap: 6, padding: '10px 24px 0', borderBottom: '1px solid var(--sage-200)' }}>
+            <div style={{ display: 'flex', gap: 6, padding: '10px 24px 0', borderBottom: '1px solid var(--sage-200)', flexWrap: 'wrap' }}>
               <button
                 type="button"
                 className={`tab-item${profileModalTab === 'card' ? ' active' : ''}`}
@@ -797,11 +799,31 @@ export default function Staff() {
               >
                 <Award size={14} /> Training &amp; Certificates ({ (staffCertificatesData[selectedStaff.id] || []).length })
               </button>
+              <button
+                type="button"
+                className={`tab-item${profileModalTab === 'feedback' ? ' active' : ''}`}
+                onClick={() => setProfileModalTab('feedback')}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '8px 14px', fontSize: '0.84rem', display: 'flex', alignItems: 'center', gap: 6 }}
+              >
+                <Star size={14} /> Feedback Received
+              </button>
+              <button
+                type="button"
+                className={`tab-item${profileModalTab === 'quality' ? ' active' : ''}`}
+                onClick={() => setProfileModalTab('quality')}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '8px 14px', fontSize: '0.84rem', display: 'flex', alignItems: 'center', gap: 6 }}
+              >
+                <FileCheck size={14} /> Quality Checks
+              </button>
             </div>
 
             <div className="modal-body" style={{ padding: 24, maxHeight: '72vh', overflowY: 'auto' }}>
               {profileModalTab === 'card' ? (
                 <StaffIdCard staffMember={selectedStaff} />
+              ) : profileModalTab === 'feedback' ? (
+                <VisitFeedbackTab staffId={selectedStaff.id} currentRole={currentRole} />
+              ) : profileModalTab === 'quality' ? (
+                <ManagerChecklistTab staffId={selectedStaff.id} />
               ) : (
                 <div>
                   {/* Certificate History Table */}

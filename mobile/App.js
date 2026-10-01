@@ -29,6 +29,8 @@ import NursesNoteScreen from './src/screens/NursesNoteScreen';
 import TodaysMedsScreen from './src/screens/TodaysMedsScreen';
 import NotificationsScreen from './src/screens/NotificationsScreen';
 import ManagerViewScreen from './src/screens/ManagerViewScreen';
+import FeedbackScreen from './src/screens/FeedbackScreen';
+import ManagerChecklistScreen from './src/screens/ManagerChecklistScreen';
 
 // Item 31: Family Portal Screens
 import FamilyHomeScreen from './src/screens/family/FamilyHomeScreen';
@@ -137,6 +139,8 @@ export default function App() {
             <Stack.Screen name="VitalsEntry" component={VitalsEntryScreen} />
             <Stack.Screen name="DailyReport" component={DailyReportScreen} />
             <Stack.Screen name="Checkout" component={CheckoutScreen} />
+            <Stack.Screen name="Feedback" component={FeedbackScreen} />
+            <Stack.Screen name="ManagerChecklist" component={ManagerChecklistScreen} />
             <Stack.Screen name="LeaveRequest" component={LeaveRequestScreen} />
             <Stack.Screen name="NursesNote" component={NursesNoteScreen} />
             <Stack.Screen name="TodaysMeds" component={TodaysMedsScreen} />

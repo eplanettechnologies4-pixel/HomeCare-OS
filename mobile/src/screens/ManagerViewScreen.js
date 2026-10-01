@@ -82,11 +82,33 @@ export default function ManagerViewScreen({ navigation }) {
           </View>
         ))}
 
-        <Text style={styles.sectionTitle}>System Notices & Compliance</Text>
+        <Text style={styles.sectionTitle}>Quality Checks & Manager Actions</Text>
+
+        {/* New: Manager Checklist CTA */}
+        <TouchableOpacity
+          style={styles.actionCard}
+          onPress={() => navigation.navigate('ManagerChecklist', {
+            patient_name: 'Select Patient',
+            patient_id: null,
+          })}
+          activeOpacity={0.85}
+        >
+          <View style={styles.actionIconBox}>
+            <Text style={styles.actionIcon}>📋</Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.actionTitle}>Manager Home Visit Checklist</Text>
+            <Text style={styles.actionSub}>Fill the quality-check form during a spot visit · all sections + 3 signatures</Text>
+          </View>
+          <Text style={{ color: PURPLE, fontSize: 18 }}>›</Text>
+        </TouchableOpacity>
+
         <View style={styles.noticeCard}>
-          <Text style={styles.noticeTitle}>ℹ️ Read-Only Manager Access</Text>
+          <Text style={styles.noticeTitle}>ℹ️ Manager Mobile Access</Text>
           <Text style={styles.noticeText}>
-            This view is configured strictly for Care Managers and Branch Managers. Action buttons, check-in, vitals logging, and report forms are restricted to field clinical staff.
+            You can now fill Manager Home Visit Checklists on-site from this phone.
+            All check-in, vitals logging, and clinical report forms remain restricted to field clinical staff.
+            Dashboard monitoring and analytics are available on the web portal.
           </Text>
         </View>
         <View style={{ height: 40 }} />
@@ -124,4 +146,14 @@ const styles = StyleSheet.create({
   noticeCard: { backgroundColor: '#FFFBEB', borderWidth: 1, borderColor: '#FDE68A', borderRadius: 14, padding: 16, marginTop: 10 },
   noticeTitle: { fontSize: 13, fontWeight: '800', color: '#92400E', marginBottom: 4 },
   noticeText: { fontSize: 12, color: '#B45309', lineHeight: 18 },
+  actionCard: {
+    backgroundColor: WHITE, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: '#EEE9FA',
+    marginBottom: 12, flexDirection: 'row', alignItems: 'center', gap: 14,
+    shadowColor: PURPLE, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2,
+  },
+  actionIconBox: { width: 44, height: 44, borderRadius: 12, backgroundColor: '#F5F3FF', alignItems: 'center', justifyContent: 'center' },
+  actionIcon: { fontSize: 22 },
+  actionTitle: { fontSize: 14, fontWeight: '800', color: '#111827', marginBottom: 2 },
+  actionSub: { fontSize: 11, color: '#6B7280', lineHeight: 15 },
 });
+

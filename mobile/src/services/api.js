@@ -1,10 +1,10 @@
 // eHealth Hospital At Home - Real Mobile API Service Client
-// Connected to Django REST Framework VPS backend at http://179.198.198.179:8000
+// Connected to Django REST Framework backend at https://portal.ehealthpk.com
 
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-export const BASE_URL = 'http://179.198.198.179:8000';
+export const BASE_URL = 'https://portal.ehealthpk.com';
 export const API_BASE_URL = `${BASE_URL}/api`;
 
 // Axios instance with real base URL and headers
@@ -508,4 +508,108 @@ export const SubmissionService = {
   submitDailyReport: (visitId, reportData) => PatientsService.submitDailyReport('pat-201', visitId, reportData),
   submitMARLog: (visitId, marData) => PatientsService.administerMedication('pat-201', marData.medicationId, marData.dayNumber || 1),
   submitLeaveRequest: (leaveData) => StaffService.submitLeaveRequest(leaveData),
+};
+
+// ==========================================
+// 9. QUALITY FORMS SERVICE
+// ==========================================
+export const QualityService = {
+  // POST /api/patients/{patientId}/feedback/
+  submitVisitFeedback: async (patientId, feedbackData) => {
+    try {
+      console.log(`[API POST] /api/patients/${patientId}/feedback/`, feedbackData);
+      // Use multipart/form-data to support signature file uploads
+      const formData = new FormData();
+      Object.entries(feedbackData).forEach(([key, value]) => {
+        if (value !== null && value !== undefined) {
+          formData.append(key, typeof value === 'object' && !(value instanceof File) ? JSON.stringify(value) : value);
+        }
+      });
+      const res = await api.post(`/api/patients/${patientId}/feedback/`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      console.log(`[API POST /api/patients/${patientId}/feedback/ Response]`, res.data);
+      return { success: true, data: res.data };
+    } catch (err) {
+      console.warn('[QualityService.submitVisitFeedback Error]', err.response?.data || err.message);
+      return { success: false, error: err.response?.data?.error || err.message };
+    }
+  },
+
+  // GET /api/patients/{patientId}/feedback/
+  getPatientFeedback: async (patientId) => {
+    try {
+      const res = await api.get(`/api/patients/${patientId}/feedback/`);
+      return { success: true, data: res.data };
+    } catch (err) {
+      return { success: false, data: [], error: err.message };
+    }
+  },
+
+  // PATCH /api/feedback/{id}/manager_sign/
+  addManagerSignature: async (feedbackId, signatureDataUri) => {
+    try {
+      console.log(`[API PATCH] /api/feedback/${feedbackId}/manager_sign/`);
+      const formData = new FormData();
+      formData.append('manager_quality_signature', signatureDataUri);
+      const res = await api.patch(`/api/feedback/${feedbackId}/manager_sign/`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      return { success: true, data: res.data };
+    } catch (err) {
+      console.warn('[QualityService.addManagerSignature Error]', err.response?.data || err.message);
+      return { success: false, error: err.response?.data?.error || err.message };
+    }
+  },
+
+  // POST /api/patients/{patientId}/manager-checklist/
+  submitManagerChecklist: async (patientId, checklistData) => {
+    try {
+      console.log(`[API POST] /api/patients/${patientId}/manager-checklist/`, checklistData);
+      const formData = new FormData();
+      Object.entries(checklistData).forEach(([key, value]) => {
+        if (value !== null && value !== undefined) {
+          formData.append(key, typeof value === 'object' && !(value instanceof File) ? JSON.stringify(value) : value);
+        }
+      });
+      const res = await api.post(`/api/patients/${patientId}/manager-checklist/`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      console.log(`[API POST /api/patients/${patientId}/manager-checklist/ Response]`, res.data);
+      return { success: true, data: res.data };
+    } catch (err) {
+      console.warn('[QualityService.submitManagerChecklist Error]', err.response?.data || err.message);
+      return { success: false, error: err.response?.data?.error || err.message };
+    }
+  },
+
+  // GET /api/patients/{patientId}/manager-checklist/
+  getPatientManagerChecklists: async (patientId) => {
+    try {
+      const res = await api.get(`/api/patients/${patientId}/manager-checklist/`);
+      return { success: true, data: res.data };
+    } catch (err) {
+      return { success: false, data: [], error: err.message };
+    }
+  },
+
+  // GET /api/staff/{staffId}/feedback/
+  getStaffFeedback: async (staffId) => {
+    try {
+      const res = await api.get(`/api/staff/members/${staffId}/feedback/`);
+      return { success: true, data: res.data };
+    } catch (err) {
+      return { success: false, data: [], error: err.message };
+    }
+  },
+
+  // GET /api/staff/{staffId}/manager-checklist/
+  getStaffManagerChecklists: async (staffId) => {
+    try {
+      const res = await api.get(`/api/staff/members/${staffId}/manager-checklist/`);
+      return { success: true, data: res.data };
+    } catch (err) {
+      return { success: false, data: [], error: err.message };
+    }
+  },
 };

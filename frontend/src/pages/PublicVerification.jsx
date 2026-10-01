@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   ShieldCheck, ShieldAlert, CheckCircle, AlertTriangle, Phone, MapPin,
-  Award, User, Heart, ArrowLeft, GraduationCap, Search, Check, FileCheck
+  Award, User, Heart, ArrowLeft, GraduationCap, Search, Check, FileCheck, Download
 } from 'lucide-react';
 import useStore from '../store/useStore';
 import { API_BASE } from '../services/api';
