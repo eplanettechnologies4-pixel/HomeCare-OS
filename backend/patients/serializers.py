@@ -19,6 +19,7 @@ class PatientListSerializer(serializers.ModelSerializer):
     gender_display = serializers.CharField(source='get_gender_display', read_only=True)
     has_portal_account = serializers.SerializerMethodField()
     portal_username = serializers.SerializerMethodField()
+    source_display = serializers.CharField(source='get_source_display', read_only=True)
 
     class Meta:
         model = Patient
@@ -27,6 +28,7 @@ class PatientListSerializer(serializers.ModelSerializer):
             'age', 'date_of_birth', 'gender', 'gender_display',
             'primary_diagnosis', 'care_manager_name', 'phone',
             'address', 'latitude', 'longitude', 'is_active',
+            'source', 'source_display',
             'has_portal_account', 'portal_username',
         ]
 

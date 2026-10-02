@@ -26,6 +26,11 @@ class Patient(models.Model):
         FEMALE = 'F', 'Female'
         OTHER = 'O', 'Other'
 
+    class Source(models.TextChoices):
+        ADMIN_DASHBOARD = 'admin_dashboard', 'Admin Dashboard'
+        PUBLIC_WEBSITE = 'public_website', 'Public Website'
+        PUBLIC_MOBILE_APP = 'public_mobile_app', 'Public Mobile App'
+
     # ── Identifiers (unencrypted — used for lookup/filtering) ─────────────────
     mr_number = models.CharField(max_length=20, unique=True, verbose_name='MR Number')
     first_name = models.CharField(max_length=100)
@@ -33,6 +38,11 @@ class Patient(models.Model):
     date_of_birth = models.DateField()
     gender = models.CharField(max_length=1, choices=Gender.choices)
     national_id = models.CharField(max_length=30, blank=True)
+    source = models.CharField(
+        max_length=30,
+        choices=Source.choices,
+        default=Source.ADMIN_DASHBOARD,
+    )
 
     # ── Contact (ENCRYPTED PHI) ───────────────────────────────────────────────
     phone = encrypt(models.CharField(max_length=20, blank=True))
