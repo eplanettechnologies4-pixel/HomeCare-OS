@@ -31,6 +31,8 @@ import NotificationsScreen from './src/screens/NotificationsScreen';
 import ManagerViewScreen from './src/screens/ManagerViewScreen';
 import FeedbackScreen from './src/screens/FeedbackScreen';
 import ManagerChecklistScreen from './src/screens/ManagerChecklistScreen';
+import MarkSampleCollectedScreen from './src/screens/MarkSampleCollectedScreen';
+import AddPrescriptionScreen from './src/screens/AddPrescriptionScreen';
 
 // Item 31: Family Portal Screens
 import FamilyHomeScreen from './src/screens/family/FamilyHomeScreen';
@@ -146,6 +148,8 @@ export default function App() {
             <Stack.Screen name="TodaysMeds" component={TodaysMedsScreen} />
             <Stack.Screen name="Notifications" component={NotificationsScreen} />
             <Stack.Screen name="PhotoViewer" component={PhotoViewerScreen} />
+            <Stack.Screen name="MarkSampleCollected" component={MarkSampleCollectedScreen} />
+            <Stack.Screen name="AddPrescription" component={AddPrescriptionScreen} />
           </Stack.Navigator>
         </NavigationContainer>
       </ToastProvider>

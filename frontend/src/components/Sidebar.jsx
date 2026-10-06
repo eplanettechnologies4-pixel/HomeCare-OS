@@ -1,10 +1,11 @@
-import React from 'react';
+import React, { useState } from 'react';
 import useStore from '../store/useStore';
 import { ROLE_CONFIG } from '../data/mockData';
 import {
   LayoutDashboard, Calendar, MapPin, Users, UserCog,
   Heart, Settings, DollarSign, BarChart2, Menu, X,
-  Activity, Receipt, Kanban, PieChart, Shield, GraduationCap
+  Activity, Receipt, Kanban, PieChart, Shield, GraduationCap,
+  Pill, Truck, FlaskConical
 } from 'lucide-react';
 
 const NAV = [
@@ -20,6 +21,11 @@ const NAV = [
   { section: 'Clinical', items: [
     { id: 'therapy',  label: 'Therapy Services', icon: Activity },
   ]},
+  { section: 'Services', items: [
+    { id: 'pharmacy',   label: 'Pharmacy Orders',   icon: Pill },
+    { id: 'equipment',  label: 'Equipment Rentals', icon: Truck },
+    { id: 'lab-orders', label: 'Lab Orders',        icon: FlaskConical },
+  ]},
   { section: 'Operations', items: [
     { id: 'crm',       label: 'CRM Leads',   icon: Kanban },
     { id: 'billing',   label: 'Billing',     icon: Receipt },
@@ -33,6 +39,7 @@ const NAV = [
 ];
 
 export default function Sidebar() {
+  const [isHovered, setIsHovered] = useState(false);
   const activePage    = useStore((s) => s.activePage);
   const setActivePage  = useStore((s) => s.setActivePage);
   const sidebarOpen   = useStore((s) => s.sidebarOpen);
@@ -49,35 +56,32 @@ export default function Sidebar() {
         <div className="drawer-backdrop" style={{ zIndex: 45 }} onClick={toggleSidebar} />
       )}
 
-      <aside className={`sidebar${sidebarOpen ? ' open' : ''}`}>
+      <aside
+        className={`sidebar${sidebarOpen ? ' open' : ''}${isHovered ? ' is-hovered' : ''}`}
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
+      >
         {/* Logo */}
         <div className="sidebar-logo">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div className="sidebar-logo-inner">
             <img
               src="/ehealth-logo.png"
               alt="eHealth Logo"
-              style={{
-                width: 44,
-                height: 44,
-                borderRadius: '50%',
-                objectFit: 'cover',
-                boxShadow: '0 2px 10px rgba(0,0,0,0.3)',
-                border: '2px solid rgba(255,255,255,0.25)',
-                flexShrink: 0
-              }}
+              className="sidebar-logo-img"
             />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <h1 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'white', margin: 0, lineHeight: 1.15, display: 'flex', alignItems: 'center', gap: 1 }}>
-                e<span style={{ color: '#FDE047' }}>Health</span>
+            <div className="sidebar-brand-text">
+              <h1 className="sidebar-brand-title">
+                e<span>Health</span>
               </h1>
-              <p className="sidebar-tagline" style={{ margin: 0, marginTop: 2, fontSize: '0.65rem', fontWeight: 600, letterSpacing: '0.06em', color: 'rgba(255,255,255,0.7)' }}>
+              <p className="sidebar-tagline">
                 HOSPITAL AT HOME
               </p>
             </div>
             <button
               onClick={toggleSidebar}
-              style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.5)', cursor: 'pointer', display: 'none' }}
               className="sidebar-close-btn"
+              title="Close Menu"
+              aria-label="Close menu"
             >
               <X size={18} />
             </button>
@@ -91,24 +95,31 @@ export default function Sidebar() {
             if (filteredItems.length === 0) return null;
 
             return (
-              <div key={section.section}>
+              <div key={section.section} className="nav-section">
                 <p className="nav-section-label">{section.section}</p>
-                {filteredItems.map(({ id, label, icon: Icon, live }) => (
-                  <button
-                    key={id}
-                    className={`nav-item${activePage === id ? ' active' : ''}`}
-                    onClick={() => { setActivePage(id); if (sidebarOpen) toggleSidebar(); }}
-                    style={{ width: '100%', background: 'none', border: 'none', textAlign: 'left', cursor: 'pointer' }}
-                  >
-                    <Icon size={16} className="nav-icon" />
-                    {label}
-                    {live && (
-                      <span style={{ marginLeft: 'auto' }}>
-                        <span className="live-dot" style={{ width: 6, height: 6 }} />
-                      </span>
-                    )}
-                  </button>
-                ))}
+                {filteredItems.map(({ id, label, icon: Icon, live }) => {
+                  const isActive = activePage === id;
+                  return (
+                    <button
+                      key={id}
+                      className={`nav-item${isActive ? ' active' : ''}`}
+                      onClick={() => { setActivePage(id); if (sidebarOpen) toggleSidebar(); }}
+                      title={label}
+                      aria-label={label}
+                    >
+                      <div className="nav-icon-wrap">
+                        <Icon size={17} className="nav-icon" />
+                        {live && <span className="live-dot-badge" />}
+                      </div>
+                      <span className="nav-label">{label}</span>
+                      {live && (
+                        <span className="nav-live-indicator">
+                          <span className="live-dot" style={{ width: 6, height: 6 }} />
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             );
           })}
@@ -116,15 +127,15 @@ export default function Sidebar() {
 
         {/* Footer */}
         <div className="sidebar-footer">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div className="avatar" style={{ background: 'rgba(255,255,255,0.15)', color: 'white' }}>
+          <div className="sidebar-footer-inner">
+            <div className="avatar sidebar-avatar" title={currentUser?.full_name || 'Staff Member'}>
               {currentUser?.full_name ? currentUser.full_name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase() : 'HC'}
             </div>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ color: 'white', fontSize: '0.8rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <div className="sidebar-user-details">
+              <div className="sidebar-user-name">
                 {currentUser?.full_name || 'Staff Member'}
               </div>
-              <div style={{ color: 'var(--amber-400)', fontSize: '0.7rem', textTransform: 'capitalize' }}>
+              <div className="sidebar-user-role">
                 {currentUser?.role_display || ROLE_CONFIG[currentRole]?.label || currentRole}
               </div>
             </div>

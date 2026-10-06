@@ -936,9 +936,9 @@ function CertificateGeneratorModal({ onClose, onGenerated, prefilledStaff = null
                   <span style={{ color: "#5B1A4A", fontWeight: 600 }}>IHRA &amp; SECP Registered</span>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
-                  <span style={{ color: "var(--status-grey)" }}>Live Verification URL:</span>
-                  <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.74rem", color: "var(--teal-800)" }}>
-                    /verify-certificate/{generatedCert.certificate_id}
+                  <span style={{ color: "var(--status-grey)" }}>Certificate ID:</span>
+                  <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.74rem", color: "var(--teal-800)", fontWeight: 700 }}>
+                    {generatedCert.certificate_id}
                   </span>
                 </div>
               </div>
@@ -963,14 +963,6 @@ function CertificateGeneratorModal({ onClose, onGenerated, prefilledStaff = null
                   >
                     <FileCheck size={14} /> View PDF Inline
                   </a>
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    style={{ flex: 1, justifyContent: "center" }}
-                    onClick={() => window.open(`/verify-certificate/${generatedCert.certificate_id}`, "_blank")}
-                  >
-                    <ShieldCheck size={14} color="var(--status-green)" /> Test Public Verification
-                  </button>
                 </div>
               </div>
             </div>

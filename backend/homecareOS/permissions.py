@@ -103,3 +103,27 @@ class IsCRMAllowed(BasePermission):
     def has_permission(self, request, view):
         return get_user_role(request.user) in ('super_admin', 'admin', 'crm_executive')
 
+
+class IsPrescriptionManagementAllowed(BasePermission):
+    """
+    RBAC for Prescriptions:
+    - SAFE_METHODS (GET, HEAD, OPTIONS): all authenticated users (including patient/family portal).
+    - POST (create): Doctors, Nurses, Care Managers, Branch Managers, and Admins.
+    - PATCH / PUT / DELETE: Admins, Super Admins, Branch Managers only.
+    - Family portal users are strictly read-only.
+    """
+    message = "You do not have permission to modify or add prescriptions."
+
+    def has_permission(self, request, view):
+        if not request.user or not request.user.is_authenticated:
+            return False
+        if request.method in SAFE_METHODS:
+            return True
+        role = get_user_role(request.user)
+        if request.method == 'POST':
+            return role in ('super_admin', 'admin', 'branch_manager', 'doctor', 'nurse', 'care_manager')
+        if request.method in ('PATCH', 'PUT', 'DELETE'):
+            return role in ('super_admin', 'admin', 'branch_manager')
+        return False
+
+

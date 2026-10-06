@@ -25,6 +25,16 @@ def setup_periodic_tasks(sender, **kwargs):
         calculate_monthly_payroll.s(),
         name='monthly-payroll',
     )
+    # Check for expired equipment rentals daily
+    try:
+        from equipment.tasks import check_expired_equipment_rentals
+        sender.add_periodic_task(
+            crontab(hour=0, minute=0),
+            check_expired_equipment_rentals.s(),
+            name='daily-equipment-rental-check',
+        )
+    except Exception:
+        pass
 
 
 @app.task

@@ -248,15 +248,32 @@ export default function VisitDetailScreen({ route, navigation }) {
         {/* Quick Actions */}
         <FadeInView delay={150}>
           <View style={styles.quickBar}>
-            <TouchableOpacity style={styles.quickBtn} onPress={() => navigation.navigate('TodaysMeds', { visit: booking })}>
-              <Text style={styles.quickIcon}>💊</Text>
-              <Text style={styles.quickText}>MAR Meds</Text>
-            </TouchableOpacity>
+            {booking.service_category === 'lab' || booking.service_type === 'lab_collection' || (booking.service_type && booking.service_type.toLowerCase().includes('lab')) ? (
+              <TouchableOpacity
+                style={[styles.quickBtn, { backgroundColor: '#EDE9FE', borderColor: PURPLE, borderWidth: 1 }]}
+                onPress={() => navigation.navigate('MarkSampleCollected', { booking, orderId: booking.source_id || booking.id, patientName: patientDisplayName })}
+              >
+                <Text style={styles.quickIcon}>🧪</Text>
+                <Text style={styles.quickText}>Collect Sample</Text>
+              </TouchableOpacity>
+            ) : (
+              <>
+                <TouchableOpacity style={styles.quickBtn} onPress={() => navigation.navigate('TodaysMeds', { visit: booking })}>
+                  <Text style={styles.quickIcon}>💊</Text>
+                  <Text style={styles.quickText}>MAR Meds</Text>
+                </TouchableOpacity>
 
-            <TouchableOpacity style={styles.quickBtn} onPress={() => navigation.navigate('NursesNote', { visit: booking })}>
-              <Text style={styles.quickIcon}>📝</Text>
-              <Text style={styles.quickText}>Nurse Note</Text>
-            </TouchableOpacity>
+                <TouchableOpacity style={styles.quickBtn} onPress={() => navigation.navigate('AddPrescription', { visit: booking })}>
+                  <Text style={styles.quickIcon}>📋</Text>
+                  <Text style={styles.quickText}>+ Rx Order</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.quickBtn} onPress={() => navigation.navigate('NursesNote', { visit: booking })}>
+                  <Text style={styles.quickIcon}>📝</Text>
+                  <Text style={styles.quickText}>Nurse Note</Text>
+                </TouchableOpacity>
+              </>
+            )}
           </View>
         </FadeInView>
 

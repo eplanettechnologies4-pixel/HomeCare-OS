@@ -1,16 +1,13 @@
 import React, { useState } from 'react';
-import { Heart, RefreshCw, Printer, ShieldCheck, Phone, QrCode, Award, CheckCircle } from 'lucide-react';
+import { Heart, Printer, ShieldCheck, Phone, Award, CheckCircle, FileText } from 'lucide-react';
 import useStore from '../store/useStore';
 import UniversalPrintButton from './UniversalPrintButton';
 
 export default function StaffIdCard({ staffMember }) {
   const staff = useStore((s) => s.staff);
-  const currentRole = useStore((s) => s.currentRole);
   const targetStaff = staffMember || staff[0];
 
   const [side, setSide] = useState('front'); // 'front' | 'back'
-  const [token, setToken] = useState(() => `TOK-${Math.random().toString(36).substring(2, 8).toUpperCase()}`);
-  const [rotatedMsg, setRotatedMsg] = useState(false);
 
   if (!targetStaff) {
     return (
@@ -19,20 +16,6 @@ export default function StaffIdCard({ staffMember }) {
       </div>
     );
   }
-
-  const isAdmin = ['super_admin', 'admin'].includes(currentRole);
-  const verifyUrl = `http://localhost:5173/verify/${targetStaff.employee_id || targetStaff.id}`;
-
-  const handleRegenerateToken = () => {
-    if (!isAdmin) {
-      alert('Only Super Admin or Admin can regenerate verification QR tokens.');
-      return;
-    }
-    const newToken = `TOK-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
-    setToken(newToken);
-    setRotatedMsg(true);
-    setTimeout(() => setRotatedMsg(false), 3000);
-  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
@@ -51,21 +34,10 @@ export default function StaffIdCard({ staffMember }) {
           onClick={() => setSide('back')}
           style={{ fontSize: '0.8rem' }}
         >
-          Back Side (QR Verification)
+          Back Side
         </button>
-        {isAdmin && (
-          <button className="btn btn-ghost btn-sm" style={{ color: 'var(--amber-600)' }} onClick={handleRegenerateToken}>
-            <RefreshCw size={13} /> Rotate Token
-          </button>
-        )}
         <UniversalPrintButton type="id_card" data={targetStaff} label="Print ID Card" variant="ghost" size="sm" />
       </div>
-
-      {rotatedMsg && (
-        <div style={{ fontSize: '0.75rem', color: 'var(--status-green)', fontWeight: 600 }}>
-          ✓ Verification QR Token regenerated! Previous cards invalidated.
-        </div>
-      )}
 
       {/* ── DIGITAL ID CARD CONTAINER (CR-80 Standard Credit Card Aspect Ratio) ── */}
       <div style={{
@@ -130,32 +102,39 @@ export default function StaffIdCard({ staffMember }) {
             </div>
           </>
         ) : (
-          /* ── BACK SIDE DESIGN (LARGE QR VERIFICATION) ─────────────────── */
+          /* ── BACK SIDE DESIGN ─────────────────────────────────────────── */
           <>
-            <div style={{ display: 'flex', gap: 16, alignItems: 'center', height: '100%' }}>
-              {/* QR Code Container */}
-              <div style={{ background: 'white', padding: 8, borderRadius: 8, textAlign: 'center', color: '#123832', flexShrink: 0 }}>
-                {/* SVG Simulated QR Code */}
-                <div style={{ width: 100, height: 100, background: '#123832', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 4, color: 'white' }}>
-                  <QrCode size={70} />
+            <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', height: '100%', fontSize: '0.72rem', lineHeight: 1.45 }}>
+              <div>
+                <div style={{ fontWeight: 700, color: 'var(--amber-400)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <ShieldCheck size={14} /> Official Medical Staff Credential
                 </div>
-                <div style={{ fontSize: '0.6rem', fontWeight: 700, marginTop: 4, fontFamily: 'var(--font-mono)' }}>
-                  SCAN TO VERIFY
+                <div style={{ fontSize: '0.67rem', color: 'rgba(255,255,255,0.85)', marginBottom: 8, lineHeight: 1.35 }}>
+                  This card certifies that the cardholder is an authorized clinical staff member of eHealth Hospital at Home. If found, please return to Islamabad Operations Center.
                 </div>
               </div>
 
-              {/* Back Info */}
-              <div style={{ fontSize: '0.72rem', lineHeight: 1.5, flex: 1 }}>
-                <div style={{ fontWeight: 700, color: 'var(--amber-400)', marginBottom: 4 }}>
-                  Real-time Identity Verification
+              <div style={{ background: 'rgba(0,0,0,0.2)', padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.1)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+                  <span style={{ color: 'rgba(255,255,255,0.7)' }}>Emergency Helpline:</span>
+                  <strong style={{ color: 'white' }}>+92-21-111-CARE-OS</strong>
                 </div>
-                <div style={{ fontSize: '0.68rem', color: 'rgba(255,255,255,0.8)', marginBottom: 8 }}>
-                  Scan QR code to verify live PMDC license, active deployment status & current visit location.
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+                  <span style={{ color: 'rgba(255,255,255,0.7)' }}>Department:</span>
+                  <strong style={{ color: 'white' }}>Clinical Field Care</strong>
                 </div>
-                <div><strong>Skills:</strong> BSN Nursing, BLS, Wound SOP</div>
-                <div><strong>Helpline:</strong> +92-21-111-CARE-OS</div>
-                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.65rem', color: 'rgba(255,255,255,0.5)', marginTop: 6 }}>
-                  Barcode: *{targetStaff.employee_id}*
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: 'rgba(255,255,255,0.7)' }}>Employee ID:</span>
+                  <strong style={{ color: 'var(--amber-400)', fontFamily: 'var(--font-mono)' }}>{targetStaff.employee_id}</strong>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid rgba(255,255,255,0.15)', paddingTop: 6, marginTop: 4 }}>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.68rem', letterSpacing: '2px', color: 'rgba(255,255,255,0.6)' }}>
+                  *{targetStaff.employee_id}*
+                </div>
+                <div style={{ fontSize: '0.62rem', color: 'rgba(255,255,255,0.6)', textAlign: 'right' }}>
+                  Authorized Signatory
                 </div>
               </div>
             </div>

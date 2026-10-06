@@ -42,16 +42,6 @@ export default function Topbar({ pageTitle, pageSubtitle }) {
       {/* Role Switcher Demo Widget — strictly restricted to genuine Super Admins */}
       {currentUser?.role === 'super_admin' && <RoleSelector />}
 
-      {/* Public Site Switcher Button */}
-      <button
-        className="btn btn-ghost btn-sm"
-        style={{ fontSize: '0.78rem', gap: 4, color: 'var(--teal-700)', border: '1px solid var(--sage-300)' }}
-        onClick={() => useStore.getState().setActivePage('public-site')}
-        title="View Public Marketing & Booking Website"
-      >
-        🌐 View Public Site
-      </button>
-
       {/* Search */}
       <div className="search-input-wrap" style={{ flex: '0 1 240px' }}>
         <Search size={14} />

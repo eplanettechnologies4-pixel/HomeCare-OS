@@ -434,24 +434,6 @@ export default function CertificateHistoryTable({
                           >
                             <Download size={12} /> Download
                           </button>
-
-                          {/* Public QR Verification Link */}
-                          <a
-                            href={`/verify-certificate/${certId}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="btn btn-ghost btn-sm"
-                            style={{
-                              fontSize: "0.74rem",
-                              padding: "4px 8px",
-                              gap: 4,
-                              color: "var(--status-green)",
-                              borderColor: "rgba(16, 185, 129, 0.2)",
-                            }}
-                            title="Test public QR verification"
-                          >
-                            <ShieldCheck size={13} /> Verify
-                          </a>
                         </div>
                       </td>
                     </tr>

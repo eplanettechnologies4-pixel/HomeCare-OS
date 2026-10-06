@@ -36,16 +36,119 @@ class BookingViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'])
     def today(self, request):
-        """Return all bookings scheduled for today."""
+        """Return all bookings, deliveries, pickups, and lab collections scheduled for today."""
         today = timezone.now().date()
         qs = self.get_queryset().filter(scheduled_time__date=today)
         staff_id = request.query_params.get('staff_id') or request.query_params.get('staff')
+        
+        target_staff_id = None
         if staff_id:
-            qs = qs.filter(assigned_staff_id=staff_id)
+            try:
+                target_staff_id = int(staff_id)
+                qs = qs.filter(assigned_staff_id=target_staff_id)
+            except ValueError:
+                pass
         elif hasattr(request.user, 'staffmember'):
-            qs = qs.filter(assigned_staff=request.user.staffmember)
-        serializer = BookingListSerializer(qs, many=True)
-        return Response(serializer.data)
+            target_staff_id = request.user.staffmember.id
+            qs = qs.filter(assigned_staff_id=target_staff_id)
+
+        items = list(BookingListSerializer(qs, many=True).data)
+
+        # Include Short Services (Medicine Delivery, Equipment Rental Delivery/Pickup, Lab Sample Collection)
+        from pharmacy.models import MedicineOrder
+        from equipment.models import EquipmentRental
+        from lab.models import LabOrder
+        from django.db.models import Q
+
+        # 1. Medicine Deliveries
+        med_qs = MedicineOrder.objects.filter(status__in=['confirmed', 'out_for_delivery'])
+        if target_staff_id:
+            med_qs = med_qs.filter(delivery_staff_id=target_staff_id)
+        for order in med_qs:
+            items.append({
+                'id': f"pharmacy-{order.id}",
+                'order_id': order.id,
+                'reference_code': f"MED-{order.id:04d}",
+                'patient': order.patient.full_name,
+                'patient_name': order.patient.full_name,
+                'patient_mr': order.patient.mr_number,
+                'patient_phone': str(order.patient.phone or ''),
+                'service': 'Medicine Delivery',
+                'service_type': 'medicine_delivery',
+                'service_type_display': 'Medicine Delivery',
+                'service_category': 'pharmacy',
+                'status': order.status,
+                'status_display': order.get_status_display(),
+                'scheduled_time': order.created_at.isoformat(),
+                'time': f"Today · {order.created_at:%H:%M}",
+                'address': order.delivery_address,
+                'latitude': float(order.delivery_latitude) if order.delivery_latitude else float(order.patient.latitude or 0),
+                'longitude': float(order.delivery_longitude) if order.delivery_longitude else float(order.patient.longitude or 0),
+                'staff_name': order.delivery_staff.full_name if order.delivery_staff else '',
+                'amount': float(order.total_amount),
+                'notes': f"Items: {order.items.count()} medications. Address: {order.delivery_address}",
+            })
+
+        # 2. Equipment Deliveries & Pickups
+        eq_qs = EquipmentRental.objects.filter(status__in=['requested', 'active', 'pickup_pending'])
+        if target_staff_id:
+            eq_qs = eq_qs.filter(Q(delivery_staff_id=target_staff_id) | Q(pickup_staff_id=target_staff_id))
+        for rental in eq_qs:
+            is_pickup = rental.status in ('active', 'pickup_pending')
+            items.append({
+                'id': f"equipment-{rental.id}",
+                'order_id': rental.id,
+                'reference_code': f"EQ-{'RET' if is_pickup else 'DEL'}-{rental.id:04d}",
+                'patient': rental.patient.full_name,
+                'patient_name': rental.patient.full_name,
+                'patient_mr': rental.patient.mr_number,
+                'patient_phone': str(rental.patient.phone or ''),
+                'service': f"Equipment {'Pickup' if is_pickup else 'Delivery'}: {rental.equipment.name}",
+                'service_type': 'equipment_pickup' if is_pickup else 'equipment_delivery',
+                'service_type_display': f"Equipment {'Pickup' if is_pickup else 'Delivery'}",
+                'service_category': 'equipment',
+                'status': rental.status,
+                'status_display': rental.get_status_display(),
+                'scheduled_time': rental.rental_end.isoformat() if is_pickup else rental.rental_start.isoformat(),
+                'time': f"Today · {'Return Collection' if is_pickup else 'Deployment'}",
+                'address': rental.delivery_address or str(rental.patient.address or ''),
+                'latitude': float(rental.delivery_latitude or rental.patient.latitude or 0),
+                'longitude': float(rental.delivery_longitude or rental.patient.longitude or 0),
+                'staff_name': (rental.pickup_staff.full_name if is_pickup and rental.pickup_staff else (rental.delivery_staff.full_name if rental.delivery_staff else '')),
+                'amount': float(rental.total_rental_fee),
+                'notes': f"{rental.equipment.name} (Deposit: PKR {rental.deposit_amount})",
+            })
+
+        # 3. Lab Collections
+        lab_qs = LabOrder.objects.filter(status__in=['collector_assigned', 'sample_collected'])
+        if target_staff_id:
+            lab_qs = lab_qs.filter(collection_staff_id=target_staff_id)
+        for lab in lab_qs:
+            items.append({
+                'id': f"lab-{lab.id}",
+                'order_id': lab.id,
+                'reference_code': f"LAB-{lab.id:04d}",
+                'patient': lab.patient.full_name,
+                'patient_name': lab.patient.full_name,
+                'patient_mr': lab.patient.mr_number,
+                'patient_phone': str(lab.patient.phone or ''),
+                'service': f"Lab Sample Collection: {lab.tests_summary or 'Diagnostic Panel'}",
+                'service_type': 'lab_collection',
+                'service_type_display': 'Lab Sample Collection',
+                'service_category': 'lab',
+                'status': lab.status,
+                'status_display': lab.get_status_display(),
+                'scheduled_time': lab.scheduled_collection_time.isoformat(),
+                'time': f"Today · {lab.scheduled_collection_time:%H:%M}",
+                'address': lab.collection_address or str(lab.patient.address or ''),
+                'latitude': float(lab.collection_latitude or lab.patient.latitude or 0),
+                'longitude': float(lab.collection_longitude or lab.patient.longitude or 0),
+                'staff_name': lab.collection_staff.full_name if lab.collection_staff else '',
+                'amount': float(lab.total_price),
+                'notes': f"{'Fasting required. ' if lab.fasting_required else ''}Tests: {lab.tests_summary}",
+            })
+
+        return Response(items)
 
     @action(detail=False, methods=['get'])
     def active(self, request):

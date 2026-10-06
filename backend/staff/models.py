@@ -14,6 +14,8 @@ class StaffRole(models.TextChoices):
     ADMIN = 'admin', 'Admin'
     ACCOUNTANT = 'accountant', 'Accountant'
     CRM_EXECUTIVE = 'crm_executive', 'CRM Executive'
+    LAB_TECH = 'lab_tech', 'Lab Technician'
+    DELIVERY_RIDER = 'delivery_rider', 'Delivery Staff / Rider'
 
 
 class StaffStatus(models.TextChoices):

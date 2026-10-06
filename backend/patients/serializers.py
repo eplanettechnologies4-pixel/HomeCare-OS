@@ -1,3 +1,4 @@
+from django.utils import timezone
 from rest_framework import serializers
 from .models import Patient, Prescription, VitalSign, NurseNote, LabResult, DailyReport, ReportPhoto, MARAdministration
 
@@ -82,9 +83,87 @@ class PatientDetailSerializer(serializers.ModelSerializer):
 
 
 class PrescriptionSerializer(serializers.ModelSerializer):
+    # Aliased read/write fields
+    drug_name = serializers.CharField(source='medication', required=False)
+    start_date = serializers.DateField(source='date', required=False)
+    days_prescribed = serializers.IntegerField(source='duration_days', required=False, allow_null=True)
+    duration = serializers.IntegerField(source='duration_days', required=False, allow_null=True, write_only=True)
+    prescription_file = serializers.FileField(source='document', required=False, allow_null=True)
+
+    # Extra metadata
+    uploaded_by_name = serializers.CharField(source='uploaded_by.full_name', read_only=True)
+    patient_name = serializers.CharField(source='patient.full_name', read_only=True)
+    file_url = serializers.SerializerMethodField()
+    is_active = serializers.SerializerMethodField()
+
     class Meta:
         model = Prescription
-        fields = '__all__'
+        fields = [
+            'id', 'patient', 'patient_name', 'booking', 'prescribed_by',
+            'medication', 'drug_name', 'dosage', 'frequency', 'route',
+            'duration_days', 'days_prescribed', 'duration', 'date', 'start_date',
+            'notes', 'document', 'prescription_file', 'file_url',
+            'uploaded_by', 'uploaded_by_name', 'created_at', 'is_active',
+        ]
+        read_only_fields = ['id', 'created_at', 'uploaded_by_name', 'patient_name', 'file_url', 'is_active']
+        extra_kwargs = {
+            'patient': {'required': False},
+            'medication': {'required': False},
+            'date': {'required': False},
+            'prescribed_by': {'required': False},
+            'dosage': {'required': False},
+            'frequency': {'required': False},
+        }
+
+    def to_internal_value(self, data):
+        # Convert QueryDict (from multipart) to mutable dict if necessary
+        if hasattr(data, 'dict'):
+            parsed = data.dict()
+        else:
+            parsed = dict(data)
+
+        # Normalize aliased inputs
+        if 'drug_name' in parsed and 'medication' not in parsed:
+            parsed['medication'] = parsed['drug_name']
+        if 'start_date' in parsed and 'date' not in parsed:
+            parsed['date'] = parsed['start_date']
+        if 'days_prescribed' in parsed and 'duration_days' not in parsed:
+            parsed['duration_days'] = parsed['days_prescribed']
+        elif 'duration' in parsed and 'duration_days' not in parsed:
+            parsed['duration_days'] = parsed['duration']
+        if 'prescription_file' in parsed and 'document' not in parsed:
+            parsed['document'] = parsed['prescription_file']
+
+        # Ensure date and clinician fallbacks
+        if not parsed.get('date'):
+            parsed['date'] = timezone.now().date().isoformat()
+        if not parsed.get('prescribed_by'):
+            parsed['prescribed_by'] = 'Attending Physician'
+        if not parsed.get('medication'):
+            parsed['medication'] = 'Prescription Document' if (parsed.get('document') or parsed.get('prescription_file')) else 'Unspecified Medication'
+        if not parsed.get('dosage'):
+            parsed['dosage'] = 'As Prescribed'
+        if not parsed.get('frequency'):
+            parsed['frequency'] = 'As Directed'
+
+        return super().to_internal_value(parsed)
+
+    def get_file_url(self, obj):
+        if obj.document:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.document.url)
+            return obj.document.url
+        return None
+
+    def get_is_active(self, obj):
+        if not obj.date:
+            return True
+        if not obj.duration_days:
+            return True
+        from datetime import timedelta
+        expiry = obj.date + timedelta(days=obj.duration_days)
+        return timezone.now().date() <= expiry
 
 
 class VitalSignSerializer(serializers.ModelSerializer):

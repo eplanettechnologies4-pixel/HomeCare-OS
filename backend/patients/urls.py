@@ -1,6 +1,9 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import PatientViewSet, PrescriptionViewSet, VitalSignViewSet, NurseNoteViewSet, LabResultViewSet
+from .views import (
+    PatientViewSet, PrescriptionViewSet, VitalSignViewSet,
+    NurseNoteViewSet, LabResultViewSet, PatientPrescriptionDetailView
+)
 from quality.views import PatientFeedbackView, PatientManagerChecklistView
 
 router = DefaultRouter()
@@ -11,6 +14,8 @@ router.register(r'notes', NurseNoteViewSet, basename='nurse-note')
 router.register(r'labs', LabResultViewSet, basename='lab')
 
 urlpatterns = [
+    # Nested prescription detail: /api/patients/{id}/prescriptions/{prescription_id}/
+    path('<int:patient_pk>/prescriptions/<int:prescription_pk>/', PatientPrescriptionDetailView.as_view(), name='patient-prescription-detail'),
     path('', include(router.urls)),
     # Quality forms — nested under patient
     path('<int:patient_pk>/feedback/', PatientFeedbackView.as_view(), name='patient-feedback'),

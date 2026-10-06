@@ -116,7 +116,9 @@ const useStore = create((set, get) => ({
   },
 
   // ── Active Page ──────────────────────────────────────────────────────────
-  activePage: typeof window !== 'undefined' ? (localStorage.getItem('activePage') || 'overview') : 'overview',
+  activePage: typeof window !== 'undefined'
+    ? ((['public-site', 'public-website', 'verify-staff', 'verify-cert'].includes(localStorage.getItem('activePage')) ? 'overview' : localStorage.getItem('activePage')) || 'overview')
+    : 'overview',
   setActivePage: (page) => {
     try { localStorage.setItem('activePage', page); } catch (e) { }
     set({ activePage: page });
@@ -1304,116 +1306,6 @@ const useStore = create((set, get) => ({
   // ── CMS Content & Blog ────────────────────────────────────────────────────
   blogPosts: [],
   addBlogPost: (post) => set((s) => ({ blogPosts: [post, ...s.blogPosts] })),
-
-  // ── Public Self-Service 6-Step Booking Integration (Requirement 13) ────────
-  submitPublicBooking: (data) => {
-    const state = get();
-    const count = state.patients.length + 1;
-    const pId = count;
-    const mrNum = `MR-2024-${String(count).padStart(3, '0')}`;
-    const bkRef = `BK-2026-${String(state.bookings.length + 1).padStart(4, '0')}`;
-
-    // 1. Auto-create Patient Record
-    const newPatient = {
-      id: pId,
-      mr_number: mrNum,
-      full_name: data.patient_name,
-      first_name: data.patient_name.split(' ')[0],
-      last_name: data.patient_name.split(' ').slice(1).join(' ') || '',
-      age: Number(data.age) || 60,
-      date_of_birth: data.date_of_birth || `${2026 - (Number(data.age) || 60)}-01-01`,
-      gender: data.gender || 'M',
-      gender_display: data.gender === 'F' ? 'Female' : 'Male',
-      blood_type: data.blood_type || 'O+',
-      primary_diagnosis: data.diagnosis || data.service_title || 'Home Medical Visit',
-      phone: data.phone,
-      email: data.email || '',
-      address: data.address,
-      latitude: data.lat || 33.57,
-      longitude: data.lng || 73.15,
-      care_manager_name: 'Hina Malik (Care Coordinator)',
-      is_active: true,
-      allergies: data.allergies || 'NKDA',
-      emergency_contact: `${data.emergency_contact_name || data.contact_person || data.patient_name} (${data.emergency_contact_phone || data.phone})`,
-      emergency_contact_name: data.emergency_contact_name || data.contact_person || '',
-      emergency_contact_phone: data.emergency_contact_phone || '',
-      service_package: {
-        type: data.service_id,
-        plan: data.payment_method === 'advance' ? 'Prepaid Online' : 'Pay on Service',
-        start_date: data.preferred_date,
-      },
-    };
-
-    // 2. Auto-create Booking Record
-    const newBooking = {
-      id: state.bookings.length + 1,
-      reference_code: bkRef,
-      patient: newPatient,
-      patient_name: newPatient.full_name,
-      patient_mr: mrNum,
-      service_type: data.service_id,
-      service_type_display: data.service_title,
-      scheduled_time: `${data.preferred_date} ${data.preferred_slot === 'morning' ? '09:00' : '15:00'}`,
-      shift_duration: data.shift_duration || '4_hours',
-      shift_duration_display: data.shift_duration === '8_hours' ? '8 Hours (Full Day/Night)' : data.shift_duration === '12_hours' ? '12 Hours (Extended Shift)' : data.shift_duration === '24_hours' ? '24 Hours (Full Bedside)' : '4 Hours (Half Day)',
-      shift_frequency: data.shift_frequency || 'once',
-      shift_frequency_display: data.shift_frequency === 'daily' ? 'Daily' : data.shift_frequency === 'alternate_days' ? 'Alternate Days' : 'Once (Single Visit)',
-      status: 'pending',
-      status_display: 'Pending Nurse Assignment',
-      assigned_staff: null,
-      backup_staff: null,
-      care_manager_name: 'Hina Malik (Care Coordinator)',
-      clinical_requirements: data.clinical_requirements || '',
-      address: data.address,
-      latitude: data.lat || 33.57,
-      longitude: data.lng || 73.15,
-      patient_lat: data.lat || 33.57,
-      patient_lng: data.lng || 73.15,
-      patient_dob: newPatient.date_of_birth,
-      patient_age: newPatient.age,
-      emergency_contact_name: newPatient.emergency_contact_name,
-      emergency_contact_phone: newPatient.emergency_contact_phone,
-      diagnosis: data.diagnosis || data.service_title || 'Home Care Admission',
-      allergies: data.allergies || 'NKDA',
-      has_prescription: !!data.has_prescription,
-      consult_doctor_needed: !!data.consult_doctor_needed,
-      prescription_attachment: data.prescription_name || null,
-      gender_preference: data.gender_preference || 'any',
-      consultant_name: data.consultant_name || '',
-      consultant_details: data.consultant_details || '',
-      notes: data.notes || '',
-      amount: data.amount || 2500,
-      amount_paid: data.payment_method === 'advance' ? (data.amount || 2500) : 0,
-      payment_method: data.payment_method || 'pay_on_service',
-      payment_status: data.payment_method === 'advance' ? 'advance' : 'pending',
-      payment_status_display: data.payment_method === 'advance' ? 'Advance Paid' : 'Payment Pending',
-      created_at: new Date().toISOString(),
-    };
-
-    // 3. Auto-create Lead in CRM Pipeline
-    const newLead = {
-      id: state.leads.length + 1,
-      lead_name: data.patient_name,
-      phone: data.phone,
-      email: data.email || 'online.booking@homecareos.com',
-      service_type: data.service_title,
-      stage: 'converted',
-      stage_display: 'Converted to Booking',
-      assigned_to: 'Usman Chaudhry',
-      value: 5000,
-      notes: `Public Website Self-Service Booking ref ${bkRef}`,
-      created_at: new Date().toISOString().substring(0, 10),
-    };
-
-    // Save to store
-    set((s) => ({
-      patients: [newPatient, ...s.patients],
-      bookings: [newBooking, ...s.bookings],
-      leads: [newLead, ...s.leads],
-    }));
-
-    return { patient: newPatient, booking: newBooking, reference: bkRef };
-  },
 
   // ── Sidebar ───────────────────────────────────────────────────────────────
   sidebarOpen: false,

@@ -4,12 +4,14 @@ import string
 from django.contrib.auth.models import User
 from django.db import transaction
 from django.utils import timezone
+from django.shortcuts import get_object_or_404
 from rest_framework import viewsets, status
+from rest_framework.views import APIView
 from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from homecareOS.permissions import CanDeletePatient
+from homecareOS.permissions import CanDeletePatient, IsPrescriptionManagementAllowed
 from .models import (
     Patient, Prescription, VitalSign, NurseNote, LabResult,
     DailyReport, ReportPhoto, MARAdministration,
@@ -52,12 +54,73 @@ class PatientViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'])
     def labs(self, request, pk=None):
         patient = self.get_object()
-        return Response(LabResultSerializer(patient.lab_results.all(), many=True).data)
+        data = list(LabResultSerializer(patient.lab_results.all(), many=True).data)
+        try:
+            from lab.models import LabReport
+            reports = LabReport.objects.filter(lab_order__patient=patient).select_related('lab_order')
+            for rep in reports:
+                for test in rep.lab_order.tests.all():
+                    # If not already present
+                    val = str(rep.result_data.get(test.name, 'Completed'))
+                    data.append({
+                        'id': f"rep-{rep.id}-{test.id}",
+                        'patient': patient.id,
+                        'test_name': test.name,
+                        'result_value': val,
+                        'unit': '',
+                        'reference_range': '',
+                        'is_abnormal': rep.flagged_abnormal,
+                        'collected_at': rep.lab_order.collected_at.isoformat() if rep.lab_order.collected_at else rep.uploaded_at.isoformat(),
+                        'reported_at': rep.uploaded_at.isoformat(),
+                        'document': rep.result_file.url if rep.result_file else None,
+                    })
+        except Exception:
+            pass
+        return Response(data)
 
-    @action(detail=True, methods=['get'])
+    @action(
+        detail=True,
+        methods=['get', 'post'],
+        parser_classes=[MultiPartParser, FormParser, JSONParser],
+        permission_classes=[IsPrescriptionManagementAllowed],
+    )
     def prescriptions(self, request, pk=None):
         patient = self.get_object()
-        return Response(PrescriptionSerializer(patient.prescriptions.all(), many=True).data)
+        if request.method == 'GET':
+            return Response(
+                PrescriptionSerializer(
+                    patient.prescriptions.all(),
+                    many=True,
+                    context={'request': request}
+                ).data
+            )
+
+        # POST /api/patients/{id}/prescriptions/
+        serializer = PrescriptionSerializer(data=request.data, context={'request': request})
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        # Attach staff member if available from authenticated user
+        staff = None
+        if hasattr(request.user, 'staffmember'):
+            staff = request.user.staffmember
+
+        # Check if booking is provided in request
+        booking_id = request.data.get('booking') or request.data.get('booking_id')
+        booking = None
+        if booking_id:
+            from bookings.models import Booking
+            booking = Booking.objects.filter(pk=booking_id, patient=patient).first()
+
+        prescription = serializer.save(
+            patient=patient,
+            uploaded_by=staff,
+            booking=booking or serializer.validated_data.get('booking')
+        )
+        return Response(
+            PrescriptionSerializer(prescription, context={'request': request}).data,
+            status=status.HTTP_201_CREATED
+        )
 
     # ── Mobile actions ────────────────────────────────────────────────────────
 
@@ -370,6 +433,46 @@ class PatientViewSet(viewsets.ModelViewSet):
 class PrescriptionViewSet(viewsets.ModelViewSet):
     queryset = Prescription.objects.all()
     serializer_class = PrescriptionSerializer
+    permission_classes = [IsPrescriptionManagementAllowed]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+
+class PatientPrescriptionDetailView(APIView):
+    """
+    Endpoint for /api/patients/{patient_pk}/prescriptions/{prescription_pk}/
+    Supports:
+    - GET: view prescription details and file URL
+    - PATCH / PUT: update prescription (Admins only)
+    - DELETE: delete prescription (Admins only)
+    """
+    permission_classes = [IsPrescriptionManagementAllowed]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def get_object(self, patient_pk, prescription_pk):
+        return get_object_or_404(Prescription, pk=prescription_pk, patient_id=patient_pk)
+
+    def get(self, request, patient_pk, prescription_pk):
+        prescription = self.get_object(patient_pk, prescription_pk)
+        return Response(PrescriptionSerializer(prescription, context={'request': request}).data)
+
+    def patch(self, request, patient_pk, prescription_pk):
+        prescription = self.get_object(patient_pk, prescription_pk)
+        serializer = PrescriptionSerializer(
+            prescription, data=request.data, partial=True, context={'request': request}
+        )
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def put(self, request, patient_pk, prescription_pk):
+        return self.patch(request, patient_pk, prescription_pk)
+
+    def delete(self, request, patient_pk, prescription_pk):
+        prescription = self.get_object(patient_pk, prescription_pk)
+        prescription.delete()
+        return Response({'detail': 'Prescription deleted successfully.'}, status=status.HTTP_204_NO_CONTENT)
+
 
 
 class VitalSignViewSet(viewsets.ModelViewSet):

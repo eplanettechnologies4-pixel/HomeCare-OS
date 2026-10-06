@@ -103,6 +103,9 @@ class Patient(models.Model):
 
 class Prescription(models.Model):
     patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name='prescriptions')
+    booking = models.ForeignKey(
+        'bookings.Booking', on_delete=models.SET_NULL, null=True, blank=True, related_name='prescriptions'
+    )
     prescribed_by = models.CharField(max_length=200)
     date = models.DateField()
     medication = models.CharField(max_length=200)
@@ -112,7 +115,49 @@ class Prescription(models.Model):
     duration_days = models.IntegerField(null=True, blank=True)
     notes = models.TextField(blank=True)
     document = models.FileField(upload_to='prescriptions/', null=True, blank=True)
+    uploaded_by = models.ForeignKey(
+        'staff.StaffMember', on_delete=models.SET_NULL, null=True, blank=True, related_name='uploaded_prescriptions'
+    )
     created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-date', '-created_at']
+
+    def __str__(self):
+        return f"{self.medication} ({self.dosage}) for {self.patient}"
+
+    # Ergonomic property aliases
+    @property
+    def drug_name(self):
+        return self.medication
+
+    @drug_name.setter
+    def drug_name(self, value):
+        self.medication = value
+
+    @property
+    def start_date(self):
+        return self.date
+
+    @start_date.setter
+    def start_date(self, value):
+        self.date = value
+
+    @property
+    def days_prescribed(self):
+        return self.duration_days
+
+    @days_prescribed.setter
+    def days_prescribed(self, value):
+        self.duration_days = value
+
+    @property
+    def prescription_file(self):
+        return self.document
+
+    @prescription_file.setter
+    def prescription_file(self, value):
+        self.document = value
 
 
 class VitalSign(models.Model):

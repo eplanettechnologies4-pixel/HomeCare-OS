@@ -58,6 +58,9 @@ INSTALLED_APPS = [
     'notifications',
     'lms',
     'quality',
+    'pharmacy',
+    'equipment',
+    'lab',
 ]
 
 MIDDLEWARE = [

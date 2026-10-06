@@ -15,6 +15,7 @@ import VitalsRecordFormB from '../components/VitalsRecordFormB';
 import MarSheetFormC from '../components/MarSheetFormC';
 import VisitFeedbackTab from '../components/VisitFeedbackTab';
 import ManagerChecklistTab from '../components/ManagerChecklistTab';
+import PrescriptionsTab from '../components/PrescriptionsTab';
 
 export default function Patient360() {
   const selectedPatient = useStore((s) => s.selectedPatient);
@@ -64,10 +65,11 @@ export default function Patient360() {
   };
 
   const allTabs = [
-    { id: 'overview',     label: 'Overview' },
-    { id: 'notes',        label: 'Nurses Notes (Form A)' },
-    { id: 'vitals',       label: 'Vitals History (Form B)' },
-    { id: 'mar',          label: 'MAR Sheet / PRN Meds (Form C)' },
+    { id: 'overview',      label: 'Overview' },
+    { id: 'prescriptions', label: 'Prescriptions' },
+    { id: 'notes',         label: 'Nurses Notes (Form A)' },
+    { id: 'vitals',        label: 'Vitals History (Form B)' },
+    { id: 'mar',           label: 'MAR Sheet / PRN Meds (Form C)' },
     { id: 'history',      label: 'Medical History' },
     { id: 'careplan',     label: 'Care Plan' },
     { id: 'reports',      label: 'Visit Reports' },
@@ -282,6 +284,11 @@ export default function Patient360() {
               )}
             </div>
           </div>
+        )}
+
+        {/* PRESCRIPTIONS TAB */}
+        {activeTab === 'prescriptions' && (
+          <PrescriptionsTab patient={patient} />
         )}
 
         {/* 2. FORM A: NURSES NOTES TAB */}

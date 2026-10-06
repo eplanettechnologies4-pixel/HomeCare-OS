@@ -35,16 +35,42 @@ export default function TodayScheduleScreen({ navigation }) {
     setRefreshing(false);
   };
 
+  const getServiceMeta = (item) => {
+    const type = item.service_type || (item.service || '').toLowerCase();
+    const cat = item.service_category;
+    if (cat === 'pharmacy' || type.includes('medicine')) {
+      return { icon: '💊', color: '#10B981', label: 'Medicine Delivery' };
+    }
+    if (cat === 'equipment' || type.includes('equipment')) {
+      return { icon: '🦽', color: '#F59E0B', label: type.includes('pickup') ? 'Equipment Pickup' : 'Equipment Delivery' };
+    }
+    if (cat === 'lab' || type.includes('lab')) {
+      return { icon: '🧪', color: '#6366F1', label: 'Lab Sample Collection' };
+    }
+    return { icon: '🩺', color: colors.primary, label: item.service || 'Clinical Visit' };
+  };
+
   const renderItem = ({ item, index }) => {
+    const meta = getServiceMeta(item);
     return (
       <FadeInView delay={index * 100}>
         <TouchableOpacity style={styles.card} activeOpacity={0.85} onPress={() => navigation.navigate('VisitDetail', { visit: item })}>
           <View style={styles.cardTop}>
-            <Text style={styles.patientName}>{item.patient}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Text style={{ fontSize: 18 }}>{meta.icon}</Text>
+              <Text style={styles.patientName}>{item.patient || item.patient_name}</Text>
+            </View>
             <StatusBadge status={item.status} />
           </View>
-          <Text style={styles.service}>{item.service}</Text>
-          <Text style={styles.time}>{item.time} · {item.address}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginVertical: 4 }}>
+            <View style={{ backgroundColor: `${meta.color}15`, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}>
+              <Text style={{ fontSize: 11, fontWeight: '700', color: meta.color }}>
+                {meta.label}
+              </Text>
+            </View>
+            <Text style={[styles.service, { marginTop: 0 }]}>{item.service}</Text>
+          </View>
+          <Text style={styles.time}>{item.time || item.scheduled_time} · {item.address}</Text>
         </TouchableOpacity>
       </FadeInView>
     );

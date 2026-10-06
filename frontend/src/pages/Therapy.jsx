@@ -1071,7 +1071,7 @@ export default function Therapy() {
   };
 
   return (
-    <div style={{ maxWidth: 1440, margin: '0 auto', paddingBottom: 40 }}>
+    <div style={{ width: '100%', boxSizing: 'border-box', paddingBottom: 40 }}>
       
       {/* ── 1. HERO HEADER WITH REAL-TIME STATUS BADGE ─────────────────────── */}
       <div style={{

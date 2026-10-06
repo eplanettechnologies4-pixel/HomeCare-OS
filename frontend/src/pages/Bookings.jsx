@@ -929,14 +929,14 @@ export default function Bookings() {
           <table className="data-table">
             <thead>
               <tr>
-                <th style={{ width: 110 }}>Ref #</th>
-                <th>Patient & Demographics</th>
-                <th>Service & Shift</th>
-                <th>Status</th>
-                <th>Assigned Clinical Team</th>
-                <th>Scheduled Time</th>
-                <th>Payment</th>
-                <th>Amount</th>
+                <th style={{ width: '9%' }}>Ref #</th>
+                <th style={{ width: '18%' }}>Patient & Demographics</th>
+                <th style={{ width: '17%' }}>Service & Shift</th>
+                <th style={{ width: '11%' }}>Status</th>
+                <th style={{ width: '17%' }}>Assigned Clinical Team</th>
+                <th style={{ width: '12%' }}>Scheduled Time</th>
+                <th style={{ width: '9%' }}>Payment</th>
+                <th style={{ width: '7%', textAlign: 'right' }}>Amount</th>
               </tr>
             </thead>
             <tbody>
@@ -1009,7 +1009,7 @@ export default function Bookings() {
                         {b.payment_status_display || b.payment_status}
                       </span>
                     </td>
-                    <td className="ts" style={{ fontWeight: 700 }}>
+                    <td className="ts" style={{ fontWeight: 700, textAlign: 'right', whiteSpace: 'nowrap' }}>
                       PKR {Number(b.amount || 2500).toLocaleString()}
                     </td>
                   </tr>

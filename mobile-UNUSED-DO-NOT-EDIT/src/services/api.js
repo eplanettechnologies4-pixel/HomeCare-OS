@@ -357,6 +357,36 @@ export const PatientsService = {
       return { success: false, data: [], error: err.message };
     }
   },
+
+  addPrescription: async (patientId, formData) => {
+    try {
+      console.log(`[API POST] /api/patients/${patientId}/prescriptions/`);
+      const res = await api.post(`/api/patients/${patientId}/prescriptions/`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+      return { success: true, status: res.status, data: res.data };
+    } catch (err) {
+      console.warn('[API addPrescription Error]', err.response?.data || err.message);
+      return {
+        success: false,
+        status: err.response?.status,
+        error: err.response?.data?.error || err.response?.data?.detail || err.message,
+      };
+    }
+  },
+
+  getPrescriptions: async (patientId) => {
+    try {
+      console.log(`[API GET] /api/patients/${patientId}/prescriptions/`);
+      const res = await api.get(`/api/patients/${patientId}/prescriptions/`);
+      return { success: true, status: res.status, data: res.data };
+    } catch (err) {
+      console.warn('[API getPrescriptions Error]', err.message);
+      return { success: false, data: [], error: err.message };
+    }
+  },
 };
 
 // ==========================================

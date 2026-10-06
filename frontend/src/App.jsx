@@ -20,9 +20,10 @@ import Analytics     from './pages/Analytics';
 import UserManagement from './pages/UserManagement';
 import FamilyPortal  from './pages/FamilyPortal';
 import Login         from './pages/Login';
-import PublicWebsite from './pages/PublicWebsite';
-import PublicVerification from './pages/PublicVerification';
 import LMS            from './pages/LMS';
+import Pharmacy       from './pages/Pharmacy';
+import Equipment      from './pages/Equipment';
+import LabOrders      from './pages/LabOrders';
 
 const PAGE_META = {
   'overview':       { title: 'Overview',            subtitle: 'Live operations at a glance' },
@@ -32,8 +33,11 @@ const PAGE_META = {
   'patients':       { title: 'Patients (EMR)',      subtitle: 'Electronic medical records' },
   'patient-360':    { title: 'Patient 360° Profile',subtitle: 'Comprehensive medical record & history' },
   'therapy':        { title: 'Therapy Services',    subtitle: 'Physio, Speech, Psychology, Dietetics' },
-  'admin-hr':       { title: 'Admin / HR',          subtitle: 'Announcements, docs, training \u0026 payroll' },
-  'lms':            { title: 'Training / LMS',       subtitle: 'Course library, staff assignments \u0026 certificates' },
+  'pharmacy':       { title: 'Pharmacy Orders',     subtitle: 'Medicine ordering, Rx verification & delivery tracking' },
+  'equipment':      { title: 'Equipment Rentals',   subtitle: 'Hospital equipment leasing, delivery & deposit refunds' },
+  'lab-orders':     { title: 'Diagnostic Lab Orders',subtitle: 'At-home sample collection, phlebotomy & digital reports' },
+  'admin-hr':       { title: 'Admin / HR',          subtitle: 'Announcements, docs, training & payroll' },
+  'lms':            { title: 'Training / LMS',       subtitle: 'Course library, staff assignments & certificates' },
   'accounts':       { title: 'Accounts',            subtitle: 'Payments, invoices and revenue' },
   'billing':        { title: 'Billing & Invoicing', subtitle: 'Patient billing packages, invoices & ledger' },
   'crm':            { title: 'CRM / Leads Pipeline',subtitle: 'Inquiries, follow-ups, and lead conversion' },
@@ -50,6 +54,9 @@ const PAGE_COMPONENTS = {
   'patients':       Patients,
   'patient-360':    Patient360,
   'therapy':        Therapy,
+  'pharmacy':       Pharmacy,
+  'equipment':      Equipment,
+  'lab-orders':     LabOrders,
   'admin-hr':       AdminHR,
   'lms':            LMS,
   'accounts':       Accounts,
@@ -73,47 +80,7 @@ export default function App() {
     }
   }, [isAuthenticated, fetchAllData]);
 
-  // Detect public verification routes from URL pathname or search (no login required)
-  const pathname = typeof window !== 'undefined' ? window.location.pathname : '';
-  const search = typeof window !== 'undefined' ? window.location.search : '';
-  const urlParams = new URLSearchParams(search);
-
-  const isCertRoute = pathname.startsWith('/verify-certificate') || pathname.startsWith('/verify-cert') || activePage === 'verify-cert';
-  const isStaffRoute = pathname.startsWith('/verify-staff') || activePage === 'verify-staff';
-
-  if (isCertRoute || isStaffRoute) {
-    let certId = '';
-    if (pathname.startsWith('/verify-certificate/')) {
-      certId = decodeURIComponent(pathname.replace('/verify-certificate/', '').trim());
-    } else if (pathname.startsWith('/verify-cert/')) {
-      certId = decodeURIComponent(pathname.replace('/verify-cert/', '').trim());
-    }
-    if (!certId) {
-      certId = urlParams.get('id') || urlParams.get('cert') || urlParams.get('cert_id') || '';
-    }
-
-    let empId = 'HC-N-000123';
-    if (pathname.startsWith('/verify-staff/')) {
-      empId = decodeURIComponent(pathname.replace('/verify-staff/', '').trim()) || empId;
-    } else if (urlParams.get('empId')) {
-      empId = urlParams.get('empId');
-    }
-
-    return (
-      <PublicVerification
-        empId={empId}
-        initialCertId={certId}
-        initialMode={isCertRoute ? 'certificate' : 'staff'}
-      />
-    );
-  }
-
-  // Public Website mode (no login required to browse)
-  if (activePage === 'public-site') {
-    return <PublicWebsite />;
-  }
-
-  // Unauthenticated → Login Screen
+  // Unauthenticated → Login Screen directly (no public website)
   if (!isAuthenticated) {
     return <Login />;
   }
