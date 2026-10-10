@@ -39,7 +39,15 @@ class LiveVisitSerializer(serializers.ModelSerializer):
     patient_address = serializers.CharField(source='booking.address', read_only=True)
     patient_lat = serializers.DecimalField(source='booking.latitude', max_digits=9, decimal_places=6, read_only=True)
     patient_lng = serializers.DecimalField(source='booking.longitude', max_digits=9, decimal_places=6, read_only=True)
+    is_stale = serializers.SerializerMethodField()
 
     class Meta:
         model = LiveVisit
         fields = '__all__'
+
+    def get_is_stale(self, obj):
+        from django.utils import timezone
+        ping_time = obj.last_ping_at or obj.last_update
+        if not ping_time:
+            return True
+        return (timezone.now() - ping_time).total_seconds() > 120

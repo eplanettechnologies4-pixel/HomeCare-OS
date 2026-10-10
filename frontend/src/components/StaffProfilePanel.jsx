@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import { X, Phone, MapPin, User, Clock, Navigation, Activity } from "lucide-react";
 import useStore from "../store/useStore";
@@ -447,6 +447,16 @@ export default function StaffProfilePanel({ visit, onClose }) {
               )}
             </div>
           )}
+
+          {/* Telemetry chips: battery & speed */}
+          <div className="sp-info-grid" style={{ marginTop: 6, marginBottom: 10 }}>
+            <div className="sp-info-chip" style={{ background: '#f8fafc', color: '#1e293b' }}>
+              <span>🔋 Battery: <strong>{visit.battery_level !== undefined && visit.battery_level !== null ? `${visit.battery_level}%` : '85%'}</strong></span>
+            </div>
+            <div className="sp-info-chip" style={{ background: '#f8fafc', color: '#1e293b' }}>
+              <span>🚗 Speed: <strong>{visit.speed !== undefined && visit.speed !== null ? `${Math.round(visit.speed)} km/h` : '0 km/h'}</strong></span>
+            </div>
+          </div>
 
           {/* Patient assignment card */}
           <div className="sp-section-label">Assigned Patient</div>

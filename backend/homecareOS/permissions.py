@@ -12,20 +12,39 @@ def get_user_role(user):
     Safely resolve the effective role of a user.
     Order of precedence:
       1. is_superuser -> 'super_admin'
-      2. linked StaffMember.role
-      3. is_staff -> 'admin'
-      4. fallback None
+      2. linked UserProfile.role (e.g. 'patient_family')
+      3. linked StaffMember.role (e.g. 'nurse', 'care_manager', 'branch_manager', 'admin')
+      4. is_staff -> 'admin'
+      5. fallback None
     """
     if not user or not user.is_authenticated:
         return None
     if user.is_superuser:
         return 'super_admin'
+    profile = getattr(user, 'profile', None)
+    if profile and getattr(profile, 'role', None):
+        return profile.role
     staff = getattr(user, 'staffmember', None)
-    if staff and staff.role:
+    if staff and getattr(staff, 'role', None):
         return staff.role
     if user.is_staff:
         return 'admin'
     return None
+
+
+class CanManagePatientPortal(BasePermission):
+    """
+    Restricts creating portal user logins and resetting portal passwords
+    strictly to: admin, super_admin, branch_manager, and care_manager roles.
+    Nurses, patients, and family users are forbidden.
+    """
+    message = "Managing patient portal logins requires Administrator, Branch Manager, or Care Manager privileges."
+
+    def has_permission(self, request, view):
+        if not request.user or not request.user.is_authenticated:
+            return False
+        role = get_user_role(request.user)
+        return role in ('super_admin', 'admin', 'branch_manager', 'care_manager')
 
 
 class IsSuperAdmin(BasePermission):

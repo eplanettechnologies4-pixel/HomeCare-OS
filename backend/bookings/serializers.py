@@ -8,6 +8,8 @@ class BookingListSerializer(serializers.ModelSerializer):
     patient_name = serializers.CharField(source='patient.full_name', read_only=True)
     patient_mr = serializers.CharField(source='patient.mr_number', read_only=True)
     patient_phone = serializers.CharField(source='patient.phone', read_only=True)
+    patient_source = serializers.CharField(source='patient.source', read_only=True)
+    patient_source_display = serializers.CharField(source='patient.get_source_display', read_only=True)
     staff_name = serializers.CharField(source='assigned_staff.full_name', read_only=True)
     staff_employee_id = serializers.CharField(source='assigned_staff.employee_id', read_only=True)
     staff_designation = serializers.SerializerMethodField()
@@ -39,7 +41,8 @@ class BookingListSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'reference_code',
             # Patient Intake Required & Optional
-            'patient_name', 'patient_mr', 'patient_phone', 'patient_age', 'patient_dob',
+            'patient_name', 'patient_mr', 'patient_phone', 'patient_source', 'patient_source_display',
+            'patient_age', 'patient_dob',
             'emergency_contact_name', 'emergency_contact_phone', 'email',
             'address', 'latitude', 'longitude',
             'diagnosis', 'allergies', 'has_prescription', 'consult_doctor_needed',

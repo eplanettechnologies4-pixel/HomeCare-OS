@@ -11,7 +11,9 @@ from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from homecareOS.permissions import CanDeletePatient, IsPrescriptionManagementAllowed
+from homecareOS.permissions import (
+    CanDeletePatient, IsPrescriptionManagementAllowed, CanManagePatientPortal
+)
 from .models import (
     Patient, Prescription, VitalSign, NurseNote, LabResult,
     DailyReport, ReportPhoto, MARAdministration,
@@ -27,6 +29,11 @@ from .serializers import (
 class PatientViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, CanDeletePatient]
     queryset = Patient.objects.select_related('assigned_care_manager').all().order_by('-created_at')
+
+    def get_permissions(self):
+        if self.action in ['create_portal_user', 'reset_portal_password']:
+            return [IsAuthenticated(), CanManagePatientPortal()]
+        return super().get_permissions()
 
     def get_serializer_class(self):
         if self.action in ['list']:
@@ -331,7 +338,12 @@ class PatientViewSet(viewsets.ModelViewSet):
 
     # ── Patient Portal Login Actions ──────────────────────────────────────────
 
-    @action(detail=True, methods=['post'], url_path='create_portal_user')
+    @action(
+        detail=True,
+        methods=['post'],
+        permission_classes=[IsAuthenticated, CanManagePatientPortal],
+        url_path='create_portal_user'
+    )
     def create_portal_user(self, request, pk=None):
         """
         POST /api/patients/{id}/create_portal_user/
@@ -356,8 +368,21 @@ class PatientViewSet(viewsets.ModelViewSet):
         password = (request.data.get('password') or '').strip()
 
         if not username:
-            return Response({'error': 'username is required.'}, status=status.HTTP_400_BAD_REQUEST)
-        if not password or len(password) < 8:
+            import re
+            base = f"{patient.first_name.strip().lower()}.{patient.last_name.strip().lower()}"
+            base = re.sub(r'[^a-z0-9.]', '', base).strip('.') or 'patient'
+            username = base
+            suffix = 1
+            while User.objects.filter(username__iexact=username).exists():
+                username = f"{base}{suffix}"
+                suffix += 1
+
+        if not password:
+            import secrets, string
+            alphabet = string.ascii_letters + string.digits + "@#!"
+            password = ''.join(secrets.choice(alphabet) for _ in range(12))
+
+        if len(password) < 8:
             return Response(
                 {'error': 'password must be at least 8 characters.'},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -389,13 +414,19 @@ class PatientViewSet(viewsets.ModelViewSet):
             {
                 'detail': 'Portal account created successfully.',
                 'username': username,
+                'password': password,
                 'patient_id': patient.id,
                 'user_id': user.id,
             },
             status=status.HTTP_201_CREATED,
         )
 
-    @action(detail=True, methods=['post'], url_path='reset_portal_password')
+    @action(
+        detail=True,
+        methods=['post'],
+        permission_classes=[IsAuthenticated, CanManagePatientPortal],
+        url_path='reset_portal_password'
+    )
     def reset_portal_password(self, request, pk=None):
         """
         POST /api/patients/{id}/reset_portal_password/

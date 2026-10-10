@@ -65,6 +65,7 @@ export function useWebSocketTracking(token) {
 
         socket.onopen = () => {
           console.log('[TrackingWS] Connected to live field tracking channel.');
+          useStore.getState().setWsConnected?.(true);
         };
 
         socket.onmessage = (event) => {
@@ -78,6 +79,7 @@ export function useWebSocketTracking(token) {
 
         socket.onclose = (e) => {
           console.warn('[TrackingWS] Disconnected. Reconnecting in 3 seconds...', e.reason);
+          useStore.getState().setWsConnected?.(false);
           if (isSubscribed) {
             reconnectTimeout = setTimeout(connect, 3000);
           }
@@ -85,10 +87,12 @@ export function useWebSocketTracking(token) {
 
         socket.onerror = (err) => {
           console.error('[TrackingWS] Socket encountered error:', err);
+          useStore.getState().setWsConnected?.(false);
           socket.close();
         };
       } catch (e) {
         console.error('[TrackingWS] Connection initialization error:', e);
+        useStore.getState().setWsConnected?.(false);
       }
     };
 
@@ -97,6 +101,7 @@ export function useWebSocketTracking(token) {
     return () => {
       isSubscribed = false;
       if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      useStore.getState().setWsConnected?.(false);
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         wsRef.current.close();
       }
@@ -114,6 +119,7 @@ function handleWebSocketMessage(msg) {
     case 'location_update': {
       const lat = parseFloat(msg.lat);
       const lng = parseFloat(msg.lng);
+      const nowIso = msg.last_ping_at || new Date().toISOString();
       useStore.setState((prev) => ({
         liveVisits: (prev.liveVisits || []).map((v) => {
           const staffId = v.assigned_staff?.id || v.staff?.id || v.staff_id || v.staff;
@@ -125,16 +131,27 @@ function handleWebSocketMessage(msg) {
               current_latitude: lat,
               current_longitude: lng,
               eta_minutes: msg.eta_minutes ?? v.eta_minutes,
-              last_ping: new Date().toISOString(),
+              last_ping: nowIso,
+              last_ping_at: nowIso,
+              last_update: nowIso,
+              is_stale: false,
+              heading: msg.heading !== undefined ? msg.heading : v.heading,
+              speed: msg.speed !== undefined ? msg.speed : v.speed,
+              accuracy_meters: msg.accuracy_meters !== undefined ? msg.accuracy_meters : v.accuracy_meters,
+              battery_level: msg.battery_level !== undefined ? msg.battery_level : v.battery_level,
             };
           }
           return v;
         }),
       }));
-      // Append to the per-staff trail ring buffer (max 30 pings) so the
-      // StaffProfilePanel polyline grows in real time via the existing WS feed.
+      // Append to the per-staff trail ring buffer so the
+      // StaffProfilePanel & MiniMap polyline grows in real time via WS feed.
       if (msg.staff_id) {
-        useStore.getState().appendStaffPing(msg.staff_id, lat, lng);
+        useStore.getState().appendStaffPing(msg.staff_id, lat, lng, {
+          speed: msg.speed,
+          heading: msg.heading,
+          battery_level: msg.battery_level,
+        });
       }
       break;
     }

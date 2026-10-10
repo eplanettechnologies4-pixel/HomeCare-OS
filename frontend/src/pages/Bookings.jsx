@@ -6,6 +6,8 @@ import {
 } from 'lucide-react';
 import useStore from '../store/useStore';
 import NurseAssignPanel from '../components/NurseAssignPanel';
+import PatientSourceBadge from '../components/PatientSourceBadge';
+import LocationPicker from '../components/LocationPicker';
 import { format } from 'date-fns';
 
 const STATUS_BADGE = {
@@ -313,52 +315,23 @@ function NewBookingModal({ onClose, onSubmit }) {
               </div>
             </div>
 
-            {/* Address & Location Coordinates */}
-            <div className="form-group" style={{ marginBottom: 10 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                <label className="form-label" style={{ marginBottom: 0 }}>Home Address Written *</label>
-                <button
-                  type="button"
-                  onClick={handleUseCurrentGps}
-                  style={{ background: 'none', border: 'none', color: 'var(--teal-700)', fontSize: '0.74rem', cursor: 'pointer', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}
-                >
-                  <MapPin size={12} /> Auto-Fill Coordinates (Islamabad GPS)
-                </button>
-              </div>
-              <input
-                type="text"
-                className="form-input"
-                placeholder="House #, Street #, Block/Sector, Area (PWD / Soan Garden, Islamabad)"
-                value={form.address}
-                onChange={e => set('address', e.target.value)}
-                required
-              />
-            </div>
-
-            <div className="grid-2" style={{ gap: 10, marginBottom: 10 }}>
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label">Location Latitude (GPS) *</label>
-                <input
-                  type="number"
-                  step="0.0001"
-                  className="form-input"
-                  value={form.latitude}
-                  onChange={e => set('latitude', parseFloat(e.target.value) || 33.57)}
-                  required
-                />
-              </div>
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label">Location Longitude (GPS) *</label>
-                <input
-                  type="number"
-                  step="0.0001"
-                  className="form-input"
-                  value={form.longitude}
-                  onChange={e => set('longitude', parseFloat(e.target.value) || 73.15)}
-                  required
-                />
-              </div>
-            </div>
+            {/* Reusable Interactive Location Picker */}
+            <LocationPicker
+              latitude={form.latitude}
+              longitude={form.longitude}
+              address={form.address}
+              onChange={({ latitude, longitude, address }) => {
+                setForm(prev => ({
+                  ...prev,
+                  latitude,
+                  longitude,
+                  address,
+                }));
+              }}
+              height={230}
+              label="Visit Address & Location Pin"
+              required
+            />
 
             {/* Emergency Contact */}
             <div className="grid-2" style={{ gap: 10 }}>
@@ -678,13 +651,14 @@ function BookingDrawer({ booking, onClose }) {
       <div className="drawer" style={{ width: 540 }}>
         <div className="drawer-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
               <h2 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.15rem', margin: 0, color: 'var(--teal-800)' }}>
                 {bookingRef}
               </h2>
               <span className={`badge ${STATUS_BADGE[booking.status] || 'badge-teal'}`}>
                 {booking.status_display || booking.status}
               </span>
+              <PatientSourceBadge source={booking.patient_source || booking.patient?.source} />
             </div>
             <div style={{ fontSize: '0.8rem', color: 'var(--status-grey)', marginTop: 2 }}>
               {booking.service_type_display} · {booking.shift_duration_display || '4 Hours Shift'}
@@ -702,6 +676,12 @@ function BookingDrawer({ booking, onClose }) {
               <span style={{ fontWeight: 800, fontSize: '0.88rem', color: 'var(--teal-900)' }}>Patient Dossier</span>
             </div>
             <div className="info-row"><span className="info-label">Name</span><span className="info-value" style={{ fontWeight: 700 }}>{booking.patient_name}</span></div>
+            <div className="info-row">
+              <span className="info-label">Source</span>
+              <span className="info-value">
+                <PatientSourceBadge source={booking.patient_source || booking.patient?.source} />
+              </span>
+            </div>
             <div className="info-row"><span className="info-label">MR Number</span><span className="info-value ts">{booking.patient?.mr_number || booking.patient_mr || 'MR-2026-N/A'}</span></div>
             <div className="info-row"><span className="info-label">Age & DOB</span><span className="info-value">{booking.patient_age || booking.patient?.age || '—'} yrs {booking.patient_dob ? `(${booking.patient_dob})` : ''}</span></div>
             <div className="info-row"><span className="info-label">Contact</span><span className="info-value">{booking.patient?.phone || booking.phone || '—'}</span></div>

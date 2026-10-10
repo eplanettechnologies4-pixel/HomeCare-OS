@@ -1,3 +1,5 @@
+import os
+from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import viewsets, status
@@ -5,6 +7,7 @@ from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.response import Response
+from rest_framework.throttling import AnonRateThrottle
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django.contrib.auth.models import User
@@ -14,6 +17,51 @@ from notifications.views import create_notification
 from .models import Booking
 from .serializers import BookingListSerializer, BookingDetailSerializer
 from .filters import BookingFilter
+
+
+def is_valid_file_signature(file_obj):
+    """
+    Validates uploaded file content using magic byte signatures:
+    - JPEG: \\xff\\xd8\\xff
+    - PNG:  \\x89PNG\\r\\n\\x1a\\n
+    - PDF:  %PDF-
+    - WEBP: RIFF + 4 bytes + WEBP
+    """
+    try:
+        pos = file_obj.tell() if hasattr(file_obj, 'tell') else 0
+        file_obj.seek(0)
+        header = file_obj.read(16)
+        file_obj.seek(pos)
+    except Exception:
+        return False
+
+    if not header or len(header) < 4:
+        return False
+
+    if header.startswith(b'\xff\xd8\xff'):
+        return True
+    if header.startswith(b'\x89PNG\r\n\x1a\n'):
+        return True
+    if header.startswith(b'%PDF-'):
+        return True
+    if len(header) >= 12 and header.startswith(b'RIFF') and header[8:12] == b'WEBP':
+        return True
+
+    return False
+
+
+class PublicBookingRateThrottle(AnonRateThrottle):
+    """
+    Limits public booking submissions per IP.
+    Defaults to 10/hour, configurable via PUBLIC_BOOKING_THROTTLE_RATE env var.
+    Applies to both web and mobile intake endpoints.
+    """
+    scope = 'public_booking'
+
+    def get_rate(self):
+        env_rate = os.environ.get('PUBLIC_BOOKING_THROTTLE_RATE') or getattr(settings, 'PUBLIC_BOOKING_THROTTLE_RATE', '10/hour')
+        return (env_rate or '10/hour').strip()
+
 
 
 class BookingViewSet(viewsets.ModelViewSet):
@@ -33,6 +81,11 @@ class BookingViewSet(viewsets.ModelViewSet):
         if self.action in ['public_booking']:
             return [AllowAny()]
         return super().get_permissions()
+
+    def get_throttles(self):
+        if self.action in ['public_booking']:
+            return [PublicBookingRateThrottle()]
+        return super().get_throttles()
 
     @action(detail=False, methods=['get'])
     def today(self, request):
@@ -296,22 +349,92 @@ class BookingViewSet(viewsets.ModelViewSet):
         detail=False,
         methods=['post'],
         permission_classes=[AllowAny],
+        throttle_classes=[PublicBookingRateThrottle],
         parser_classes=[MultiPartParser, FormParser, JSONParser],
         url_path='public'
     )
     def public_booking(self, request):
         """
-        Public self-service booking intake endpoint for mobile app and client portal.
+        Public self-service booking intake endpoint for mobile app and client website.
         Unauthenticated: executes inside a single transaction.atomic() block:
-          1. Creates Patient with source='public_mobile_app'
-          2. Creates Booking with status='pending', payment_status='pending'
-          3. Creates CRM Lead (stage='new_lead')
-          4. Creates in-app Notification for super_admin, admin, and crm_executive users
-          5. Returns { booking_reference, patient_mr_number, status }
+          1. Checks hidden honeypot field — silently returns fake success if triggered
+          2. Validates source ('public_website' or 'public_mobile_app', default 'public_mobile_app')
+          3. Validates shared X-Public-Key header if PUBLIC_BOOKING_API_KEY is configured
+          4. Validates uploaded prescription files (images and PDF only, max 5 MB)
+          5. Creates Patient with the validated source
+          6. Creates Booking with status='pending', payment_status='pending'
+          7. Creates CRM Lead (stage='new_lead') with corresponding source
+          8. Creates in-app Notification for super_admin, admin, and crm_executive users
+          9. Returns { booking_reference, patient_mr_number, status, patient_id, booking_id }
         """
         data = request.data
 
-        # ── 1. Validate Core Inputs ──────────────────────────────────────────
+        # ── 0. Anti-Bot Honeypot Field ───────────────────────────────────────
+        honeypot = (data.get('honeypot') or data.get('hp_field') or data.get('website_url') or '').strip()
+        if honeypot:
+            return Response(
+                {
+                    "booking_reference": "BK-2026-0000",
+                    "patient_mr_number": "MR-2026-0000",
+                    "status": "pending",
+                    "patient_id": 0,
+                    "booking_id": 0,
+                    "message": "Booking request received successfully."
+                },
+                status=status.HTTP_201_CREATED
+            )
+
+        # ── 1. Resolve and Validate Source ───────────────────────────────────
+        raw_source = data.get('source')
+        if raw_source:
+            source = str(raw_source).strip().lower()
+            if source not in [Patient.Source.PUBLIC_WEBSITE, Patient.Source.PUBLIC_MOBILE_APP]:
+                return Response(
+                    {'error': f'Invalid source "{raw_source}". Allowed values: public_website, public_mobile_app.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        else:
+            source = Patient.Source.PUBLIC_MOBILE_APP
+
+        # ── 2. Shared API Key Check (source-specific) ────────────────────────
+        if source == Patient.Source.PUBLIC_WEBSITE:
+            expected_key = os.environ.get('PUBLIC_BOOKING_API_KEY') or getattr(settings, 'PUBLIC_BOOKING_API_KEY', '')
+        elif source == Patient.Source.PUBLIC_MOBILE_APP:
+            expected_key = os.environ.get('MOBILE_PUBLIC_API_KEY') or getattr(settings, 'MOBILE_PUBLIC_API_KEY', '')
+        else:
+            expected_key = ''
+
+        if expected_key and expected_key.strip():
+            client_key = request.headers.get('X-Public-Key') or request.META.get('HTTP_X_PUBLIC_KEY', '')
+            if not client_key or client_key.strip() != expected_key.strip():
+                return Response(
+                    {'error': 'Forbidden: Invalid or missing API key in X-Public-Key header.'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+        # ── 3. Validate File Uploads (Images and PDF only, max 5 MB) ─────────
+        prescription_file = request.FILES.get('prescription_file') or request.FILES.get('prescription_attachment')
+        if prescription_file:
+            # 5 MB = 5 * 1024 * 1024 bytes
+            if prescription_file.size > 5 * 1024 * 1024:
+                return Response(
+                    {'error': 'Uploaded file exceeds the maximum allowed size of 5 MB.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            name_lower = prescription_file.name.lower()
+            allowed_extensions = ('.pdf', '.jpg', '.jpeg', '.png', '.webp')
+            if not name_lower.endswith(allowed_extensions):
+                return Response(
+                    {'error': 'Invalid file format. Uploads are strictly limited to images (JPG, PNG, WEBP) and PDF files.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            if not is_valid_file_signature(prescription_file):
+                return Response(
+                    {'error': 'Invalid file content. File header does not match a valid JPEG, PNG, WEBP, or PDF signature.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+        # ── 4. Validate Core Inputs ──────────────────────────────────────────
         raw_name = (data.get('patient_name') or data.get('name') or '').strip()
         first_name = (data.get('first_name') or '').strip()
         last_name = (data.get('last_name') or '').strip()
@@ -332,7 +455,7 @@ class BookingViewSet(viewsets.ModelViewSet):
             )
 
         with transaction.atomic():
-            # ── 2. Resolve Demographics ──────────────────────────────────────
+            # ── 5. Resolve Demographics ──────────────────────────────────────
             dob_str = data.get('date_of_birth') or data.get('patient_dob')
             raw_age = data.get('patient_age') or data.get('age')
             current_year = timezone.now().year
@@ -361,15 +484,28 @@ class BookingViewSet(viewsets.ModelViewSet):
 
             address = (data.get('address') or 'Islamabad, Pakistan').strip()
 
-            try:
-                lat = float(data.get('latitude') or data.get('lat') or 33.5700)
-            except (ValueError, TypeError):
-                lat = 33.5700
+            location_link = (data.get('location_link') or data.get('google_maps_link') or '').strip()
+            raw_lat = data.get('latitude') or data.get('lat')
+            raw_lng = data.get('longitude') or data.get('lng')
 
-            try:
-                lng = float(data.get('longitude') or data.get('lng') or 73.1500)
-            except (ValueError, TypeError):
-                lng = 73.1500
+            if location_link and (raw_lat is None or raw_lng is None):
+                try:
+                    from homecareOS.location_resolver import resolve_location_link
+                    resolved = resolve_location_link(location_link)
+                    lat = resolved['latitude']
+                    lng = resolved['longitude']
+                except Exception:
+                    lat, lng = 33.5700, 73.1500
+            else:
+                try:
+                    lat = float(raw_lat) if raw_lat is not None else 33.5700
+                except (ValueError, TypeError):
+                    lat = 33.5700
+
+                try:
+                    lng = float(raw_lng) if raw_lng is not None else 73.1500
+                except (ValueError, TypeError):
+                    lng = 73.1500
 
             ec_name = (data.get('emergency_contact_name') or 'Family').strip()
             ec_phone = (data.get('emergency_contact_phone') or phone).strip()
@@ -385,7 +521,7 @@ class BookingViewSet(viewsets.ModelViewSet):
                 count += 1
                 candidate_mr = f"MR-{current_year}-{count:04d}"
 
-            # ── 3. Create Patient Record (source='public_mobile_app') ────────
+            # ── 6. Create Patient Record (source dynamically set) ────────────
             patient = Patient.objects.create(
                 mr_number=candidate_mr,
                 first_name=first_name,
@@ -402,11 +538,11 @@ class BookingViewSet(viewsets.ModelViewSet):
                 emergency_contact_name=ec_name,
                 emergency_contact_phone=ec_phone,
                 emergency_contact_relation=data.get('emergency_contact_relation') or 'Emergency Contact',
-                source=Patient.Source.PUBLIC_MOBILE_APP,
+                source=source,
                 is_active=True,
             )
 
-            # ── 4. Resolve Booking Scheduling & Options ──────────────────────
+            # ── 7. Resolve Booking Scheduling & Options ──────────────────────
             service_type = data.get('service_type') or data.get('service_id') or 'short_service'
             valid_services = [c[0] for c in Booking._meta.get_field('service_type').choices]
             if service_type not in valid_services:
@@ -465,9 +601,7 @@ class BookingViewSet(viewsets.ModelViewSet):
             else:
                 consult_doctor_needed = bool(raw_consult)
 
-            prescription_file = request.FILES.get('prescription_file') or request.FILES.get('prescription_attachment')
-
-            # ── 5. Create Booking Record (status='pending', payment_status='pending')
+            # ── 8. Create Booking Record (status='pending', payment_status='pending')
             booking = Booking(
                 patient=patient,
                 service_type=service_type,
@@ -504,20 +638,21 @@ class BookingViewSet(viewsets.ModelViewSet):
             if not booking.reference_code:
                 booking.refresh_from_db(fields=['reference_code'])
 
-            # ── 6. Create CRM Lead (stage='new_lead') ────────────────────────
+            # ── 9. Create CRM Lead (stage='new_lead') ────────────────────────
+            source_title = 'Public Website' if source == Patient.Source.PUBLIC_WEBSITE else 'Public Mobile App'
             Lead.objects.create(
                 name=f"{patient.first_name} {patient.last_name}".strip(),
                 phone=patient.phone,
                 email=email,
-                source='public_mobile_app',
+                source=source,
                 stage=LeadStage.NEW_LEAD,
-                notes=f"Received via Public Mobile App. Ref: {booking.reference_code}. Notes: {booking.notes}".strip(),
+                notes=f"Received via {source_title}. Ref: {booking.reference_code}. Notes: {booking.notes}".strip(),
                 service_needed=booking.get_service_type_display(),
                 converted_patient=patient,
                 converted_booking=booking,
             )
 
-            # ── 7. Create Notification for admin, super_admin, crm_executive ─
+            # ── 10. Create Notification for admin, super_admin, crm_executive 
             target_users = set(User.objects.filter(is_superuser=True))
             target_users.update(User.objects.filter(is_staff=True))
             target_users.update(User.objects.filter(profile__role__in=['super_admin', 'admin', 'crm_executive']))
@@ -525,7 +660,7 @@ class BookingViewSet(viewsets.ModelViewSet):
 
             notification_msg = (
                 f"New Public Booking Received: {patient.first_name} {patient.last_name} "
-                f"for {booking.get_service_type_display()} (Ref: {booking.reference_code})"
+                f"for {booking.get_service_type_display()} (Ref: {booking.reference_code}, Source: {source_title})"
             )
             for u in target_users:
                 create_notification(
@@ -536,7 +671,7 @@ class BookingViewSet(viewsets.ModelViewSet):
                     target_params={'booking_id': booking.id, 'reference_code': booking.reference_code}
                 )
 
-        # ── 8. Return Confirmation Response ──────────────────────────────────
+        # ── 11. Return Confirmation Response ─────────────────────────────────
         return Response({
             "booking_reference": booking.reference_code,
             "patient_mr_number": patient.mr_number,

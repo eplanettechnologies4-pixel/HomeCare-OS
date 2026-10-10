@@ -2,11 +2,13 @@ import React, { useState } from 'react';
 import {
   User, Activity, Pill, FileText, FlaskConical, DollarSign, Clock,
   Calendar, Phone, MapPin, Heart, Shield, Edit, Edit3, Trash2, MoreVertical, Download,
-  CheckCircle, ChevronRight, File, Plus, AlertTriangle
+  CheckCircle, ChevronRight, File, Plus, AlertTriangle, UserCheck, RefreshCw
 } from 'lucide-react';
 import useStore from '../store/useStore';
 import UniversalPrintButton from '../components/UniversalPrintButton';
 import EditPatientModal from '../components/EditPatientModal';
+import PatientSourceBadge from '../components/PatientSourceBadge';
+import PermanentPatientModal from '../components/PermanentPatientModal';
 import { format } from 'date-fns';
 import DailyReportForm from '../components/DailyReportForm';
 
@@ -33,9 +35,14 @@ export default function Patient360() {
   const currentRole        = useStore((s) => s.currentRole);
   const deletePatient      = useStore((s) => s.deletePatient);
   const setSelectedPatient = useStore((s) => s.setSelectedPatient);
+  const createPatientPortalUser    = useStore((s) => s.createPatientPortalUser);
+  const resetPatientPortalPassword = useStore((s) => s.resetPatientPortalPassword);
+
   const [activeTab, setActiveTab] = useState('overview');
   const [showNewReportModal, setShowNewReportModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [portalResult, setPortalResult]   = useState(null);
+  const [portalLoading, setPortalLoading] = useState(false);
 
   if (!patient) {
     return (
@@ -56,6 +63,41 @@ export default function Patient360() {
 
   const canDeletePatient = ['super_admin', 'admin'].includes(currentRole);
   const canEditPatient = ['super_admin', 'admin', 'branch_manager', 'care_manager'].includes(currentRole);
+
+  const handleMakePermanent = async () => {
+    const nameParts = (patient.full_name || 'patient').split(' ');
+    const autoUsername = nameParts.slice(0, 2).join('.').toLowerCase().replace(/[^a-z0-9.]/g, '') || 'patient';
+    const autoPassword = Array.from({ length: 12 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789@#!'[Math.floor(Math.random() * 61)]).join('');
+    setPortalLoading(true);
+    const res = await createPatientPortalUser(patient.id, autoUsername, autoPassword);
+    setPortalLoading(false);
+    if (res.success) {
+      setPortalResult({
+        patientName: patient.full_name,
+        username: res.data?.username || autoUsername,
+        password: res.data?.password || autoPassword,
+        isNew: true,
+      });
+    } else {
+      alert('Failed to create portal user: ' + (res.error || 'Unknown error'));
+    }
+  };
+
+  const handleResetPassword = async () => {
+    setPortalLoading(true);
+    const res = await resetPatientPortalPassword(patient.id);
+    setPortalLoading(false);
+    if (res.success) {
+      setPortalResult({
+        patientName: patient.full_name,
+        username: res.username,
+        password: res.new_password,
+        isNew: false,
+      });
+    } else {
+      alert('Failed to reset password: ' + (res.error || 'Unknown error'));
+    }
+  };
 
   const handleDeletePatient = () => {
     if (window.confirm(`Are you sure you want to delete patient "${patient.full_name}" (${patient.mr_number || ''})?\n\nThis will permanently delete this patient record and cannot be undone.`)) {
@@ -127,6 +169,7 @@ export default function Patient360() {
               <span className={`badge ${patient.is_active ? 'badge-green' : 'badge-grey'}`}>
                 {patient.is_active ? 'Active Patient' : 'Inactive'}
               </span>
+              <PatientSourceBadge source={patient.source} />
             </div>
 
             <div style={{ display: 'flex', gap: 16, marginTop: 8, fontSize: '0.85rem', color: '#4b5563', flexWrap: 'wrap' }}>
@@ -145,6 +188,32 @@ export default function Patient360() {
           {/* Quick Actions & Universal Print Button */}
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <UniversalPrintButton type="patient_summary" data={patient} label="Print Summary" variant="ghost" size="sm" />
+            
+            {/* Make Permanent Patient (for patients without portal login) or Reset Password */}
+            {!patient.has_portal_account ? (
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleMakePermanent}
+                disabled={portalLoading}
+                style={{ background: '#0f766e', borderColor: '#0f766e', gap: 6 }}
+                title="Make Permanent Patient (Create Portal Account)"
+              >
+                <UserCheck size={14} /> {portalLoading ? 'Creating…' : 'Make Permanent Patient'}
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={handleResetPassword}
+                disabled={portalLoading}
+                style={{ color: '#7c3aed', borderColor: '#ede9fe', gap: 6 }}
+                title="Reset Portal Password"
+              >
+                <RefreshCw size={14} /> {portalLoading ? 'Resetting…' : 'Reset Password'}
+              </button>
+            )}
+
             {canEditPatient && (
               <button
                 type="button"
@@ -453,6 +522,14 @@ export default function Patient360() {
           onUpdated={(updated) => {
             setSelectedPatient(updated);
           }}
+        />
+      )}
+
+      {/* Permanent Patient / Portal Credentials Result Modal */}
+      {portalResult && (
+        <PermanentPatientModal
+          data={portalResult}
+          onClose={() => setPortalResult(null)}
         />
       )}
     </div>

@@ -61,8 +61,15 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
                 role = profile.role
                 platform_allowed = 'both'  # patient portal is accessible on web + mobile
             else:
-                role = 'super_admin' if user.is_superuser else 'admin'
-                platform_allowed = 'web'
+                # Also check Patient.portal_user link (set for public-signup family accounts
+                # that may have no UserProfile row yet)
+                linked_patient = getattr(user, 'patient_profile', None)
+                if linked_patient is not None:
+                    role = 'patient_family'
+                    platform_allowed = 'mobile'
+                else:
+                    role = 'super_admin' if user.is_superuser else 'admin'
+                    platform_allowed = 'web'
 
         req = self.context.get('request')
         client_platform = None
@@ -175,8 +182,33 @@ class MeView(APIView):
                 'rating': float(staff_member.rating),
             })
         else:
-            # Superuser / Django admin with no StaffMember profile
-            payload['platform_allowed'] = 'web'
+            # ── No StaffMember: check for patient/family portal account ──────
+            # Patient model: portal_user = OneToOneField(User, related_name='patient_profile')
+            linked_patient = getattr(user, 'patient_profile', None)
+
+            # Determine role: prefer UserProfile.role; fall back to 'patient_family'
+            # if the user has a Patient portal link, otherwise treat as web-only admin.
+            profile = getattr(user, 'profile', None)
+            profile_role = getattr(profile, 'role', None) if profile else None
+
+            if profile_role == 'patient_family' or linked_patient is not None:
+                # Family / patient portal account — mobile access is permitted
+                role = profile_role or 'patient_family'
+                payload.update({
+                    'role': role,
+                    'role_display': role.replace('_', ' ').title(),
+                    'platform_allowed': 'mobile',
+                    'linked_patient_id': linked_patient.id if linked_patient else None,
+                    'linked_patient_name': linked_patient.full_name if linked_patient else None,
+                })
+            else:
+                # Superuser / Django admin with no StaffMember profile — web only
+                role = 'super_admin' if user.is_superuser else 'admin'
+                payload.update({
+                    'role': role,
+                    'role_display': role.replace('_', ' ').title(),
+                    'platform_allowed': 'web',
+                })
 
         return Response(payload)
 

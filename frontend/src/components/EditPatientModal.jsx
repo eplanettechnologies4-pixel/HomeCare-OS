@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X, CheckCircle, AlertCircle } from 'lucide-react';
 import useStore from '../store/useStore';
+import LocationPicker from './LocationPicker';
 
 export default function EditPatientModal({ patient, onClose, onUpdated }) {
   const updatePatient = useStore((s) => s.updatePatient);
@@ -13,6 +14,8 @@ export default function EditPatientModal({ patient, onClose, onUpdated }) {
     primary_diagnosis: patient.primary_diagnosis || '',
     allergies: patient.allergies || '',
     address: patient.address || '',
+    latitude: patient.latitude || 33.6844,
+    longitude: patient.longitude || 73.0479,
     is_active: patient.is_active !== undefined ? patient.is_active : true,
   });
 
@@ -40,6 +43,8 @@ export default function EditPatientModal({ patient, onClose, onUpdated }) {
       primary_diagnosis: form.primary_diagnosis,
       allergies: form.allergies,
       address: form.address,
+      latitude: form.latitude,
+      longitude: form.longitude,
       is_active: form.is_active,
     };
 
@@ -56,7 +61,7 @@ export default function EditPatientModal({ patient, onClose, onUpdated }) {
 
   return (
     <div className="modal-backdrop" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal" style={{ width: 520, maxWidth: '95vw' }}>
+      <div className="modal" style={{ width: 560, maxWidth: '95vw', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
         <div className="modal-header" style={{ background: '#611F8C', color: 'white' }}>
           <div>
             <h3 style={{ margin: 0, color: 'white', fontFamily: 'var(--font-heading)' }}>
@@ -76,8 +81,8 @@ export default function EditPatientModal({ patient, onClose, onUpdated }) {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit}>
-          <div className="modal-body" style={{ padding: 22 }}>
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+          <div className="modal-body" style={{ padding: 22, overflowY: 'auto', flex: 1 }}>
             {error && (
               <div style={{ background: '#fef2f2', border: '1px solid #fca5a5', color: '#b91c1c', padding: 10, borderRadius: 6, marginBottom: 16, fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: 8 }}>
                 <AlertCircle size={16} />
@@ -168,16 +173,23 @@ export default function EditPatientModal({ patient, onClose, onUpdated }) {
               />
             </div>
 
-            <div className="form-group">
-              <label className="form-label" style={{ fontWeight: 600 }}>Residential Address</label>
-              <textarea
-                className="form-textarea"
-                rows={2}
-                value={form.address}
-                onChange={(e) => setForm({ ...form, address: e.target.value })}
-                required
-              />
-            </div>
+            {/* Reusable Interactive Location Picker */}
+            <LocationPicker
+              latitude={form.latitude}
+              longitude={form.longitude}
+              address={form.address}
+              onChange={({ latitude, longitude, address }) => {
+                setForm((prev) => ({
+                  ...prev,
+                  latitude,
+                  longitude,
+                  address,
+                }));
+              }}
+              height={220}
+              label="Residential Address & GPS Pin"
+              required
+            />
 
             <div className="form-group" style={{ marginBottom: 0 }}>
               <label className="form-label" style={{ fontWeight: 600 }}>Patient Status</label>

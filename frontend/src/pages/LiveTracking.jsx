@@ -121,18 +121,42 @@ function AlertRulesPanel({ rules, onSave, onClose }) {
   );
 }
 
+function getLastSeenInfo(visit) {
+  if (!visit) return { secondsAgo: null, isStale: false, text: 'Unknown' };
+  const lastPingTs = visit.last_ping_at
+    ? new Date(visit.last_ping_at).getTime()
+    : visit.last_update
+    ? new Date(visit.last_update).getTime()
+    : null;
+  const secondsAgo = lastPingTs ? Math.max(0, Math.floor((Date.now() - lastPingTs) / 1000)) : null;
+  const isStale = Boolean(visit.is_stale) || (secondsAgo !== null && secondsAgo > 120);
+  const text = secondsAgo !== null
+    ? (secondsAgo < 60 ? `${secondsAgo}s ago` : `${Math.floor(secondsAgo / 60)}m ago`)
+    : 'Unknown';
+  return { secondsAgo, isStale, text };
+}
+
 // ── Visit Detail Card ─────────────────────────────────────────────────────────
 function VisitCard({ visit, onClose }) {
   const { display: eta, urgent } = useCountdown(visit.status === 'en_route' ? visit.scheduled_time : null);
   if (!visit) return null;
+  const { isStale, text: lastSeenText } = getLastSeenInfo(visit);
+
   return (
-    <div className="card" style={{ width: 320, position: 'absolute', top: 16, right: 16, zIndex: 500, boxShadow: 'var(--shadow-modal)' }}>
+    <div className="card" style={{ width: 330, position: 'absolute', top: 16, right: 16, zIndex: 500, boxShadow: 'var(--shadow-modal)' }}>
       <div className="drawer-header" style={{ padding: '14px 16px', position: 'relative' }}>
-        <div className="avatar" style={{ background: 'var(--teal-200)' }}>
+        <div className="avatar" style={{ background: isStale ? '#9ca3af' : 'var(--teal-200)' }}>
           {(visit.staff_name || '?').split(' ').map(n=>n[0]).join('')}
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--teal-800)' }}>{visit.staff_name || '—'}</div>
+          <div style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--teal-800)', display: 'flex', alignItems: 'center', gap: 6 }}>
+            {visit.staff_name || '—'}
+            {isStale && (
+              <span style={{ fontSize: '0.65rem', background: '#4b5563', color: 'white', padding: '1px 5px', borderRadius: 4, fontWeight: 700 }}>
+                Signal lost
+              </span>
+            )}
+          </div>
           <div style={{ fontSize: '0.75rem', color: 'var(--status-grey)' }}>{visit.assigned_staff?.role_display || visit.staff_role || 'Staff'}</div>
         </div>
         <button className="btn btn-ghost btn-icon btn-sm" onClick={onClose}><X size={14} /></button>
@@ -143,9 +167,29 @@ function VisitCard({ visit, onClose }) {
           <span style={{ fontWeight: 600, fontSize: '0.875rem' }}>{visit.patient_name}</span>
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-          <span style={{ fontSize: '0.8rem', color: 'var(--status-grey)' }}>Service</span>
-          <span className="badge badge-teal" style={{ fontSize: '0.7rem' }}>{visit.service_type_display}</span>
+          <span style={{ fontSize: '0.8rem', color: 'var(--status-grey)' }}>Status</span>
+          <span className={`badge badge-${isStale ? 'grey' : visit.status === 'in_progress' ? 'green' : visit.status === 'en_route' ? 'amber' : 'grey'}`} style={{ fontSize: '0.7rem' }}>
+            {isStale ? 'Signal lost' : visit.status_display}
+          </span>
         </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <span style={{ fontSize: '0.8rem', color: 'var(--status-grey)' }}>Last seen</span>
+          <span style={{ fontSize: '0.8rem', fontWeight: 600, color: isStale ? '#dc2626' : '#111827' }}>
+            {lastSeenText}
+          </span>
+        </div>
+        {visit.battery_level !== undefined && visit.battery_level !== null && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <span style={{ fontSize: '0.8rem', color: 'var(--status-grey)' }}>Battery</span>
+            <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>🔋 {visit.battery_level}%</span>
+          </div>
+        )}
+        {visit.speed !== undefined && visit.speed !== null && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <span style={{ fontSize: '0.8rem', color: 'var(--status-grey)' }}>Speed</span>
+            <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>⚡ {Math.round(visit.speed)} km/h</span>
+          </div>
+        )}
         {visit.status === 'en_route' && (
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
             <span style={{ fontSize: '0.8rem', color: 'var(--status-grey)' }}>Arrives in</span>
@@ -183,6 +227,8 @@ function VisitCard({ visit, onClose }) {
 // ── List Row ──────────────────────────────────────────────────────────────────
 function LiveVisitRow({ visit, isSelected, onClick }) {
   const { display: cd, urgent } = useCountdown(visit.status === 'en_route' ? visit.scheduled_time : null);
+  const { isStale, text: lastSeenText } = getLastSeenInfo(visit);
+
   return (
     <div
       onClick={onClick}
@@ -194,14 +240,32 @@ function LiveVisitRow({ visit, isSelected, onClick }) {
         transition: 'background 0.15s',
       }}
     >
-      <div className="avatar">{(visit.staff_name||'?').split(' ').map(n=>n[0]).join('')}</div>
+      <div className="avatar" style={{ background: isStale ? '#9ca3af' : undefined }}>
+        {(visit.staff_name||'?').split(' ').map(n=>n[0]).join('')}
+      </div>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontWeight: 600, fontSize: '0.875rem', color: '#1a2e2b' }}>{visit.staff_name}</div>
+        <div style={{ fontWeight: 600, fontSize: '0.875rem', color: '#1a2e2b', display: 'flex', alignItems: 'center', gap: 6 }}>
+          {visit.staff_name}
+          {isStale && (
+            <span style={{ fontSize: '0.62rem', background: '#4b5563', color: 'white', padding: '1px 5px', borderRadius: 4, fontWeight: 700 }}>
+              Signal lost
+            </span>
+          )}
+        </div>
         <div style={{ fontSize: '0.78rem', color: 'var(--status-grey)' }}>{visit.patient_name}</div>
+        <div style={{ fontSize: '0.72rem', color: isStale ? '#dc2626' : 'var(--status-grey)', marginTop: 2, display: 'flex', gap: 8 }}>
+          <span>Last seen: {lastSeenText}</span>
+          {visit.battery_level !== undefined && visit.battery_level !== null && (
+            <span>🔋 {visit.battery_level}%</span>
+          )}
+          {visit.speed !== undefined && visit.speed !== null && (
+            <span>⚡ {Math.round(visit.speed)} km/h</span>
+          )}
+        </div>
       </div>
       <div style={{ textAlign: 'right', flexShrink: 0 }}>
-        <span className={`badge badge-${visit.status==='in_progress'?'green':visit.status==='en_route'?'amber':'grey'}`} style={{ fontSize: '0.68rem' }}>
-          {visit.status_display}
+        <span className={`badge badge-${isStale ? 'grey' : visit.status==='in_progress'?'green':visit.status==='en_route'?'amber':'grey'}`} style={{ fontSize: '0.68rem' }}>
+          {isStale ? 'Signal lost' : visit.status_display}
         </span>
         {visit.status === 'en_route' && (
           <div className={`countdown${urgent?' urgent':''}`} style={{ marginTop: 3, fontSize: '0.75rem' }}>{cd}</div>
@@ -226,6 +290,9 @@ export default function LiveTracking() {
 
   const liveVisits      = useStore((s) => s.liveVisits);
   const fetchLiveVisits = useStore((s) => s.fetchLiveVisits);
+  const staffTrails     = useStore((s) => s.staffTrails);
+  const fetchStaffRoute = useStore((s) => s.fetchStaffRoute);
+  const wsConnected     = useStore((s) => s.wsConnected);
   const sosEvents       = useStore((s) => s.sosEvents);
   const activeSosAlerts = useStore((s) => s.activeSosAlerts);
   const fetchActiveSOS  = useStore((s) => s.fetchActiveSOS);
@@ -252,6 +319,24 @@ export default function LiveTracking() {
     fetchAlertRules();
     fetchActiveSOS();
   }, [fetchLiveVisits, fetchAlertRules, fetchActiveSOS]);
+
+  // Keep updating through the existing WebSocket and fall back to polling every 15 seconds if the socket is down
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (!wsConnected) {
+        fetchLiveVisits();
+      }
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [wsConnected, fetchLiveVisits]);
+
+  // When a staff is selected, fetch the last 30 minutes of route pings
+  const selectedStaffId = selectedStaff?.assigned_staff?.id || selectedStaff?.staff_id;
+  useEffect(() => {
+    if (selectedStaffId) {
+      fetchStaffRoute(selectedStaffId, 50, 30);
+    }
+  }, [selectedStaffId, fetchStaffRoute]);
 
   // Combine active alerts from store
   const activeSOS = (activeSosAlerts && activeSosAlerts.length > 0)
@@ -299,7 +384,7 @@ export default function LiveTracking() {
           <h1 className="page-title" style={{ margin: 0 }}>Live Tracking</h1>
           <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--status-grey)' }}>
             <span className="live-dot" style={{ display: 'inline-block', marginRight: 6 }} />
-            {liveVisits.length} active visits · {simulationMode ? 'Simulated GPS feed active' : 'Real-time WebSocket & REST sync active'}
+            {liveVisits.length} active visits · {simulationMode ? 'Simulated GPS feed active' : wsConnected ? 'Real-time WebSocket sync active' : '15s polling sync active'}
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -340,7 +425,9 @@ export default function LiveTracking() {
                 visits={liveVisits}
                 height="100%"
                 fullScreen
-                selectedStaffId={selectedStaff?.assigned_staff?.id || selectedStaff?.staff_id || null}
+                selectedStaffId={selectedStaffId || null}
+                staffTrails={staffTrails}
+                onSelectVisit={handleSelectStaff}
               />
               {selectedVisit && (
                 <VisitCard visit={selectedVisit} onClose={() => setSelectedVisit(null)} />
@@ -410,6 +497,8 @@ export default function LiveTracking() {
               {activeTab === 'visits' && liveVisits.map((v) => {
                 const isActive = selectedStaff?.id === v.id;
                 const staffId  = v.assigned_staff?.id || v.staff_id;
+                const { isStale, text: lastSeenText } = getLastSeenInfo(v);
+
                 return (
                   <div
                     key={v.id}
@@ -426,6 +515,11 @@ export default function LiveTracking() {
                       <div>
                         <div style={{ fontWeight: 600, fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: 6 }}>
                           {v.staff_name}
+                          {isStale && (
+                            <span style={{ fontSize: '0.62rem', background: '#4b5563', color: 'white', borderRadius: 4, padding: '1px 5px', fontWeight: 700 }}>
+                              Signal lost
+                            </span>
+                          )}
                           {isActive && (
                             <span style={{ fontSize: '0.62rem', background: 'var(--teal-500)', color: 'white', borderRadius: 4, padding: '1px 5px', fontWeight: 700 }}>
                               LIVE VIEW
@@ -435,13 +529,22 @@ export default function LiveTracking() {
                         <div style={{ fontSize: '0.75rem', color: 'var(--status-grey)' }}>→ {v.patient_name}</div>
                       </div>
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-                        <span className={`badge badge-${v.status==='in_progress'?'green':v.status==='en_route'?'amber':'grey'}`} style={{ fontSize: '0.67rem' }}>
-                          {v.status_display}
+                        <span className={`badge badge-${isStale ? 'grey' : v.status==='in_progress'?'green':v.status==='en_route'?'amber':'grey'}`} style={{ fontSize: '0.67rem' }}>
+                          {isStale ? 'Signal lost' : v.status_display}
                         </span>
                         <span style={{ fontSize: '0.67rem', color: 'var(--teal-600)', fontWeight: 600 }}>
                           {isActive ? '✕ Close' : '👤 Profile'}
                         </span>
                       </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, marginTop: 4, fontSize: '0.72rem', color: isStale ? '#dc2626' : 'var(--status-grey)' }}>
+                      <span>Last seen: {lastSeenText}</span>
+                      {v.battery_level !== undefined && v.battery_level !== null && (
+                        <span>🔋 {v.battery_level}%</span>
+                      )}
+                      {v.speed !== undefined && v.speed !== null && (
+                        <span>⚡ {Math.round(v.speed)} km/h</span>
+                      )}
                     </div>
                     <StatusPipeline currentStatus={v.status} />
                   </div>

@@ -79,6 +79,11 @@ class LiveVisit(models.Model):
     current_latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     current_longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     eta_minutes = models.IntegerField(null=True, blank=True)
+    heading = models.FloatField(null=True, blank=True)
+    speed = models.FloatField(null=True, blank=True)
+    accuracy_meters = models.FloatField(null=True, blank=True)
+    battery_level = models.IntegerField(null=True, blank=True)
+    last_ping_at = models.DateTimeField(null=True, blank=True)
     last_update = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -109,6 +114,10 @@ class LocationPing(models.Model):
     )
     latitude  = models.DecimalField(max_digits=9, decimal_places=6)
     longitude = models.DecimalField(max_digits=9, decimal_places=6)
+    heading = models.FloatField(null=True, blank=True)
+    speed = models.FloatField(null=True, blank=True)
+    accuracy_meters = models.FloatField(null=True, blank=True)
+    battery_level = models.IntegerField(null=True, blank=True)
     timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
 
     class Meta:

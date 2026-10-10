@@ -5,6 +5,7 @@ import {
   Eye, EyeOff, RefreshCw, KeyRound, Copy, UserCheck
 } from 'lucide-react';
 import useStore from '../store/useStore';
+import LocationPicker from './LocationPicker';
 
 // ── Utility: generate a slug username from a full name ────────────────────
 function slugUsername(name) {
@@ -616,52 +617,23 @@ export default function AddPatientModal({ onClose }) {
               </div>
             </div>
 
-            {/* Address & Location Coordinates */}
-            <div className="form-group" style={{ marginBottom: 10 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                <label className="form-label" style={{ marginBottom: 0 }}>Home Address Written *</label>
-                <button
-                  type="button"
-                  onClick={handleUseCurrentGps}
-                  style={{ background: 'none', border: 'none', color: 'var(--teal-700)', fontSize: '0.74rem', cursor: 'pointer', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}
-                >
-                  <MapPin size={12} /> Auto-Fill Coordinates (Islamabad GPS)
-                </button>
-              </div>
-              <input
-                type="text"
-                className="form-input"
-                placeholder="House #, Street #, Block/Sector, Area (PWD / Soan Garden, Islamabad)"
-                value={form.address}
-                onChange={e => set('address', e.target.value)}
-                required
-              />
-            </div>
-
-            <div className="grid-2" style={{ gap: 10, marginBottom: 10 }}>
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label">Location Latitude (GPS) *</label>
-                <input
-                  type="number"
-                  step="0.0001"
-                  className="form-input"
-                  value={form.latitude}
-                  onChange={e => set('latitude', parseFloat(e.target.value) || 33.57)}
-                  required
-                />
-              </div>
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label">Location Longitude (GPS) *</label>
-                <input
-                  type="number"
-                  step="0.0001"
-                  className="form-input"
-                  value={form.longitude}
-                  onChange={e => set('longitude', parseFloat(e.target.value) || 73.15)}
-                  required
-                />
-              </div>
-            </div>
+            {/* Reusable Interactive Location Picker */}
+            <LocationPicker
+              latitude={form.latitude}
+              longitude={form.longitude}
+              address={form.address}
+              onChange={({ latitude, longitude, address }) => {
+                setForm(prev => ({
+                  ...prev,
+                  latitude,
+                  longitude,
+                  address,
+                }));
+              }}
+              height={230}
+              label="Patient Residential Address & Location Pin"
+              required
+            />
 
             {/* Emergency Contact */}
             <div className="grid-2" style={{ gap: 10 }}>

@@ -16,6 +16,7 @@ from homecareOS.auth_views import (
     VerifyOTPView,
     ResetPasswordView,
 )
+from homecareOS.location_resolver import ResolveLocationLinkView
 from lms.views import CertificateVerifyView
 
 urlpatterns = [
@@ -48,6 +49,9 @@ urlpatterns = [
     path('api/lab/',           include('lab.urls')),
     # Quality forms (manager-sign standalone endpoint)
     path('api/feedback/',      include('quality.urls')),
+
+    # ── Location Link & Coordinate Resolver ───────────────────────────────────
+    path('api/locations/resolve-link/', ResolveLocationLinkView.as_view(), name='locations-resolve-link'),
 
     # ── Public Real-Time Certificate Verification ─────────────────────────────
     path('api/certificates/verify/<str:certificate_id>/', CertificateVerifyView.as_view(), name='public-cert-verify'),

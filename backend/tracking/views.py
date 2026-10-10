@@ -200,8 +200,8 @@ class GPSPingView(APIView):
         from bookings.models import Booking, BookingStatus
 
         booking_id = request.data.get('booking_id')
-        lat = request.data.get('lat')
-        lng = request.data.get('lng')
+        lat = request.data.get('lat') if request.data.get('lat') is not None else request.data.get('latitude')
+        lng = request.data.get('lng') if request.data.get('lng') is not None else request.data.get('longitude')
 
         if not all([booking_id, lat is not None, lng is not None]):
             return Response(
@@ -226,6 +226,31 @@ class GPSPingView(APIView):
         except Booking.DoesNotExist:
             return Response({'error': 'Booking not found.'}, status=status.HTTP_404_NOT_FOUND)
 
+        heading = request.data.get('heading')
+        speed = request.data.get('speed')
+        accuracy_meters = request.data.get('accuracy_meters') or request.data.get('accuracy')
+        battery_level = request.data.get('battery_level') or request.data.get('battery')
+
+        try:
+            heading = float(heading) if heading is not None else None
+        except (ValueError, TypeError):
+            heading = None
+
+        try:
+            speed = float(speed) if speed is not None else None
+        except (ValueError, TypeError):
+            speed = None
+
+        try:
+            accuracy_meters = float(accuracy_meters) if accuracy_meters is not None else None
+        except (ValueError, TypeError):
+            accuracy_meters = None
+
+        try:
+            battery_level = int(battery_level) if battery_level is not None else None
+        except (ValueError, TypeError):
+            battery_level = None
+
         now = timezone.now()
 
         # 1. Update staff position
@@ -236,16 +261,31 @@ class GPSPingView(APIView):
         # 2. Upsert LiveVisit
         live_visit, _ = LiveVisit.objects.update_or_create(
             booking=booking,
-            defaults={'staff': staff, 'current_latitude': lat, 'current_longitude': lng},
+            defaults={
+                'staff': staff,
+                'current_latitude': lat,
+                'current_longitude': lng,
+                'heading': heading,
+                'speed': speed,
+                'accuracy_meters': accuracy_meters,
+                'battery_level': battery_level,
+                'last_ping_at': now,
+            },
         )
 
         # Broadcast live position to Web Dashboard
         _broadcast_to_channel_layer({
             'type': 'broadcast_location',
             'staff_id': staff.id,
+            'booking_id': booking.id,
             'lat': float(lat),
             'lng': float(lng),
             'eta_minutes': live_visit.eta_minutes,
+            'heading': heading,
+            'speed': speed,
+            'accuracy_meters': accuracy_meters,
+            'battery_level': battery_level,
+            'last_ping_at': now.isoformat(),
         })
 
         # Persist this ping so the route trail endpoint has history
@@ -254,6 +294,10 @@ class GPSPingView(APIView):
             booking=booking,
             latitude=lat,
             longitude=lng,
+            heading=heading,
+            speed=speed,
+            accuracy_meters=accuracy_meters,
+            battery_level=battery_level,
         )
 
         # 3. Haversine geofence check (only if not already checked in)
@@ -502,15 +546,21 @@ class StaffRouteView(APIView):
 
     def get(self, request, staff_id):
         try:
-            limit = max(1, min(int(request.query_params.get('limit', 30)), 200))
+            limit = max(1, min(int(request.query_params.get('limit', 50)), 200))
         except (TypeError, ValueError):
-            limit = 30
+            limit = 50
 
-        pings = (
-            LocationPing.objects
-            .filter(staff_id=staff_id)
-            .order_by('-timestamp')[:limit]
-        )
+        qs = LocationPing.objects.filter(staff_id=staff_id)
+        minutes = request.query_params.get('minutes')
+        if minutes:
+            try:
+                mins = int(minutes)
+                since = timezone.now() - timezone.timedelta(minutes=mins)
+                qs = qs.filter(timestamp__gte=since)
+            except (TypeError, ValueError):
+                pass
+
+        pings = qs.order_by('-timestamp')[:limit]
 
         # Reverse so oldest ping is first → correct polyline draw direction
         data = [
@@ -518,6 +568,10 @@ class StaffRouteView(APIView):
                 'lat': float(p.latitude),
                 'lng': float(p.longitude),
                 'ts':  p.timestamp.isoformat(),
+                'heading': p.heading,
+                'speed': p.speed,
+                'accuracy_meters': p.accuracy_meters,
+                'battery_level': p.battery_level,
             }
             for p in reversed(list(pings))
         ]

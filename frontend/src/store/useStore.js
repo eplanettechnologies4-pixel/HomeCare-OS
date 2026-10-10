@@ -131,6 +131,8 @@ const useStore = create((set, get) => ({
 
   // ── Live Visits (GPS state) ──────────────────────────────────────────────
   liveVisits: [],
+  wsConnected: false,
+  setWsConnected: (wsConnected) => set({ wsConnected }),
 
   fetchLiveVisits: async () => {
     try {
@@ -141,6 +143,8 @@ const useStore = create((set, get) => ({
         set({
           liveVisits: items.map((lv) => ({
             id: lv.booking || lv.id,
+            booking: lv.booking || lv.id,
+            staff_id: lv.staff,
             staff_name: lv.staff_name || 'Staff',
             staff_role: lv.staff_role || 'Nurse',
             staff_lat: parseFloat(lv.current_latitude) || null,
@@ -150,12 +154,20 @@ const useStore = create((set, get) => ({
             patient_name: lv.patient_name || 'Patient',
             patient_lat: lv.patient_lat ? parseFloat(lv.patient_lat) : null,
             patient_lng: lv.patient_lng ? parseFloat(lv.patient_lng) : null,
+            patient_address: lv.patient_address,
             service_type_display: 'Home Care',
             status: lv.booking_status || 'in_progress',
             status_display: lv.booking_status === 'in_progress' ? 'In Progress' : lv.booking_status === 'en_route' ? 'En Route' : 'Assigned',
             scheduled_time: lv.scheduled_time || new Date().toISOString(),
             eta_minutes: lv.eta_minutes,
             assigned_staff: { id: lv.staff, full_name: lv.staff_name, role_display: lv.staff_role },
+            last_ping_at: lv.last_ping_at || lv.last_update,
+            last_update: lv.last_update,
+            is_stale: Boolean(lv.is_stale),
+            speed: lv.speed != null ? parseFloat(lv.speed) : null,
+            heading: lv.heading != null ? parseFloat(lv.heading) : null,
+            accuracy_meters: lv.accuracy_meters != null ? parseFloat(lv.accuracy_meters) : null,
+            battery_level: lv.battery_level != null ? parseInt(lv.battery_level, 10) : null,
           })),
         });
       } else {
@@ -170,38 +182,40 @@ const useStore = create((set, get) => ({
   updateStaffLocation: (staffId, lat, lng) =>
     set((s) => ({
       liveVisits: s.liveVisits.map((v) =>
-        v.assigned_staff?.id === staffId
-          ? { ...v, staff_lat: lat, staff_lng: lng, current_latitude: lat, current_longitude: lng }
+        v.assigned_staff?.id === staffId || v.staff_id === staffId
+          ? { ...v, staff_lat: lat, staff_lng: lng, current_latitude: lat, current_longitude: lng, is_stale: false }
           : v
       ),
     })),
 
   // ── Staff Route Trails (real-time polyline history) ──────────────────────
-  // Keyed by staff_id → array of {lat, lng, ts} (ring buffer, max 30 pings).
-  // Written by the WS hook on every location_update; read by StaffProfilePanel.
+  // Keyed by staff_id → array of {lat, lng, ts, speed, battery_level} (max 50 pings).
+  // Written by the WS hook on every location_update; read by MiniMap & StaffProfilePanel.
   staffTrails: {},
 
-  appendStaffPing: (staffId, lat, lng) =>
+  appendStaffPing: (staffId, lat, lng, extra = {}) =>
     set((s) => {
       const prev = s.staffTrails[staffId] || [];
-      const next = [...prev, { lat, lng, ts: Date.now() }].slice(-30);
+      const next = [...prev, { lat, lng, ts: Date.now(), ...extra }].slice(-50);
       return { staffTrails: { ...s.staffTrails, [staffId]: next } };
     }),
 
   /**
    * Seed the trail with historical pings from the REST endpoint.
-   * Called once when StaffProfilePanel first mounts, so the polyline
-   * is populated even before any new WS pings arrive.
    */
-  fetchStaffRoute: async (staffId, limit = 30) => {
+  fetchStaffRoute: async (staffId, limit = 50, minutes = 30) => {
     try {
-      const res = await apiFetch(`/tracking/staff/${staffId}/route/?limit=${limit}`);
+      const url = `/tracking/staff/${staffId}/route/?limit=${limit}${minutes ? `&minutes=${minutes}` : ''}`;
+      const res = await apiFetch(url);
       if (res.ok) {
         const data = await res.json();
         const pings = (data.pings || []).map((p) => ({
           lat: parseFloat(p.lat),
           lng: parseFloat(p.lng),
           ts: new Date(p.ts).getTime(),
+          speed: p.speed,
+          heading: p.heading,
+          battery_level: p.battery_level,
         }));
         if (pings.length > 0) {
           set((s) => ({
@@ -590,6 +604,10 @@ const useStore = create((set, get) => ({
       if (res.ok) {
         // Refresh patients list so has_portal_account badge updates immediately
         await get().fetchPatients();
+        const updated = get().patients.find((p) => p.id === patientId);
+        if (updated && get().selectedPatient?.id === patientId) {
+          set({ selectedPatient: updated });
+        }
         return { success: true, data };
       }
       const errorMsg = data.detail || data.username?.[0] || data.error || JSON.stringify(data);

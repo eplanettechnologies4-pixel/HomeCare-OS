@@ -136,6 +136,38 @@ CHANNEL_LAYERS = {
     'default': _get_channel_layer(),
 }
 
+# Caches — Redis in production (shared across gunicorn workers for DRF throttling);
+# fallback to LocMemCache for local dev/testing when Redis is not running
+def _get_cache_config():
+    if _redis_url:
+        if not DEBUG:
+            return {
+                'default': {
+                    'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+                    'LOCATION': _redis_url,
+                }
+            }
+        try:
+            import redis
+            r = redis.from_url(_redis_url, socket_connect_timeout=0.2)
+            r.ping()
+            return {
+                'default': {
+                    'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+                    'LOCATION': _redis_url,
+                }
+            }
+        except Exception:
+            pass
+    return {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+            'LOCATION': 'homecare-local-cache',
+        }
+    }
+
+CACHES = _get_cache_config()
+
 # Celery
 CELERY_BROKER_URL = config('REDIS_URL', default='redis://127.0.0.1:6379')
 CELERY_RESULT_BACKEND = config('REDIS_URL', default='redis://127.0.0.1:6379')
@@ -170,8 +202,12 @@ MEDIA_ROOT = BASE_DIR / 'media'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+# Throttle Rate Configuration (env-configurable)
+PUBLIC_BOOKING_THROTTLE_RATE = config('PUBLIC_BOOKING_THROTTLE_RATE', default='10/hour').strip()
+
 # REST Framework
 REST_FRAMEWORK = {
+    'NUM_PROXIES': 1,
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ),
@@ -186,7 +222,20 @@ REST_FRAMEWORK = {
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 25,
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+    'DEFAULT_THROTTLE_CLASSES': [
+        'rest_framework.throttling.AnonRateThrottle',
+        'rest_framework.throttling.UserRateThrottle',
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'anon': '100/day',
+        'user': '1000/day',
+        'public_booking': PUBLIC_BOOKING_THROTTLE_RATE,
+    },
 }
+
+# Shared API Keys for Public Booking Endpoints (env-configurable)
+PUBLIC_BOOKING_API_KEY = config('PUBLIC_BOOKING_API_KEY', default='').strip()
+MOBILE_PUBLIC_API_KEY = config('MOBILE_PUBLIC_API_KEY', default='').strip()
 
 # JWT
 from datetime import timedelta
@@ -216,6 +265,7 @@ CORS_ALLOW_HEADERS = [
     'x-csrftoken',
     'x-requested-with',
     'x-client-platform',  # required by frontend API client
+    'x-public-key',        # shared key for external public website bookings
 ]
 
 # API Schema

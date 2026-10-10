@@ -7,10 +7,15 @@ class PatientSummarySerializer(serializers.ModelSerializer):
     full_name = serializers.ReadOnlyField()
     age = serializers.ReadOnlyField()
     care_manager_name = serializers.CharField(source='assigned_care_manager.full_name', read_only=True)
+    source_display = serializers.CharField(source='get_source_display', read_only=True)
 
     class Meta:
         model = Patient
-        fields = ['id', 'mr_number', 'full_name', 'age', 'gender', 'primary_diagnosis', 'care_manager_name', 'is_active']
+        fields = [
+            'id', 'mr_number', 'full_name', 'age', 'gender',
+            'primary_diagnosis', 'care_manager_name', 'is_active',
+            'source', 'source_display',
+        ]
 
 
 class PatientListSerializer(serializers.ModelSerializer):
@@ -45,6 +50,7 @@ class PatientDetailSerializer(serializers.ModelSerializer):
     full_name = serializers.ReadOnlyField()
     age = serializers.ReadOnlyField()
     gender_display = serializers.CharField(source='get_gender_display', read_only=True)
+    source_display = serializers.CharField(source='get_source_display', read_only=True)
     care_manager_name = serializers.CharField(source='assigned_care_manager.full_name', read_only=True)
     active_prescriptions = serializers.SerializerMethodField()
     recent_vitals = serializers.SerializerMethodField()
