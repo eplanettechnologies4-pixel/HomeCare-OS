@@ -111,30 +111,26 @@ DATABASES = {
     )
 }
 
-# Channel layers (Redis in production; fallback to InMemory for local dev)
+# Channel layers (Redis via REDIS_URL in production; InMemory for testing & local dev)
+import sys
 _redis_url = config('REDIS_URL', default='').strip()
+_is_testing = 'test' in sys.argv
 
-def _get_channel_layer():
-    if _redis_url:
-        try:
-            import redis
-            r = redis.from_url(_redis_url, socket_connect_timeout=0.5)
-            r.ping()
-            return {
-                'BACKEND': 'channels_redis.core.RedisChannelLayer',
-                'CONFIG': {
-                    'hosts': [_redis_url],
-                },
-            }
-        except Exception:
-            pass
-    return {
-        'BACKEND': 'channels.layers.InMemoryChannelLayer',
+if _redis_url and not _is_testing:
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels_redis.core.RedisChannelLayer',
+            'CONFIG': {
+                'hosts': [_redis_url],
+            },
+        }
     }
-
-CHANNEL_LAYERS = {
-    'default': _get_channel_layer(),
-}
+else:
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels.layers.InMemoryChannelLayer',
+        }
+    }
 
 # Caches — Redis in production (shared across gunicorn workers for DRF throttling);
 # fallback to LocMemCache for local dev/testing when Redis is not running

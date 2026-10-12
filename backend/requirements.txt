@@ -19,3 +19,4 @@ gunicorn==22.0.0                  # production WSGI server (used in Dockerfile C
 cryptography==42.0.8              # Fernet key generation (django-cryptography dep)
 django-celery-beat==2.6.0         # periodic task scheduler using DatabaseScheduler
 
+requests>=2.31

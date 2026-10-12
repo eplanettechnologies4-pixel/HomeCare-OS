@@ -4,7 +4,8 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
+from homecareOS.permissions import is_family_user, IsPatientOrFamilyOwner
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle
@@ -65,12 +66,32 @@ class PublicBookingRateThrottle(AnonRateThrottle):
 
 
 class BookingViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticated, IsPatientOrFamilyOwner]
     queryset = Booking.objects.select_related('patient', 'assigned_staff').all()
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_class = BookingFilter
     search_fields = ['patient__first_name', 'patient__last_name', 'patient__mr_number']
     ordering_fields = ['scheduled_time', 'created_at', 'status', 'amount']
     ordering = ['-scheduled_time']
+
+    def get_queryset(self):
+        qs = Booking.objects.select_related('patient', 'assigned_staff').all()
+        user = self.request.user
+        if is_family_user(user):
+            return qs.filter(patient__portal_user=user)
+        return qs
+
+    def get_object(self):
+        user = self.request.user
+        if is_family_user(user):
+            lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
+            lookup_val = self.kwargs.get(lookup_url_kwarg)
+            if lookup_val is not None:
+                target = Booking.objects.filter(**{self.lookup_field: lookup_val}).first()
+                if target and (not target.patient or target.patient.portal_user_id != user.id):
+                    from rest_framework.exceptions import PermissionDenied
+                    raise PermissionDenied("You do not have permission to access this booking.")
+        return super().get_object()
 
     def get_serializer_class(self):
         if self.action in ['list']:
@@ -115,7 +136,9 @@ class BookingViewSet(viewsets.ModelViewSet):
 
         # 1. Medicine Deliveries
         med_qs = MedicineOrder.objects.filter(status__in=['confirmed', 'out_for_delivery'])
-        if target_staff_id:
+        if is_family_user(request.user):
+            med_qs = med_qs.filter(patient__portal_user=request.user)
+        elif target_staff_id:
             med_qs = med_qs.filter(delivery_staff_id=target_staff_id)
         for order in med_qs:
             items.append({
@@ -144,7 +167,9 @@ class BookingViewSet(viewsets.ModelViewSet):
 
         # 2. Equipment Deliveries & Pickups
         eq_qs = EquipmentRental.objects.filter(status__in=['requested', 'active', 'pickup_pending'])
-        if target_staff_id:
+        if is_family_user(request.user):
+            eq_qs = eq_qs.filter(patient__portal_user=request.user)
+        elif target_staff_id:
             eq_qs = eq_qs.filter(Q(delivery_staff_id=target_staff_id) | Q(pickup_staff_id=target_staff_id))
         for rental in eq_qs:
             is_pickup = rental.status in ('active', 'pickup_pending')
@@ -174,7 +199,9 @@ class BookingViewSet(viewsets.ModelViewSet):
 
         # 3. Lab Collections
         lab_qs = LabOrder.objects.filter(status__in=['collector_assigned', 'sample_collected'])
-        if target_staff_id:
+        if is_family_user(request.user):
+            lab_qs = lab_qs.filter(patient__portal_user=request.user)
+        elif target_staff_id:
             lab_qs = lab_qs.filter(collection_staff_id=target_staff_id)
         for lab in lab_qs:
             items.append({

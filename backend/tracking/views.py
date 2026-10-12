@@ -6,6 +6,7 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from homecareOS.permissions import is_family_user, IsPatientOrFamilyOwner
 from .models import GeofenceEvent, SOSEvent, AlertRule, LiveVisit, LocationPing
 from .serializers import (
     GeofenceEventSerializer, SOSEventSerializer,
@@ -16,13 +17,22 @@ logger = logging.getLogger(__name__)
 
 
 def _broadcast_to_channel_layer(message_dict):
-    """Safely broadcast a message to the 'tracking' WebSocket group."""
+    """Safely broadcast a message to the 'tracking' group and the patient's group if applicable."""
     try:
         from asgiref.sync import async_to_sync
         from channels.layers import get_channel_layer
         channel_layer = get_channel_layer()
         if channel_layer:
             async_to_sync(channel_layer.group_send)('tracking', message_dict)
+
+            patient_id = message_dict.get('patient_id')
+            if not patient_id and message_dict.get('booking_id'):
+                from bookings.models import Booking
+                booking = Booking.objects.filter(pk=message_dict['booking_id']).values('patient_id').first()
+                if booking:
+                    patient_id = booking['patient_id']
+            if patient_id:
+                async_to_sync(channel_layer.group_send)(f'patient_{patient_id}', message_dict)
     except Exception as e:
         logger.warning("Channel layer broadcast failed: %s", e)
 
@@ -30,9 +40,13 @@ def _broadcast_to_channel_layer(message_dict):
 class GeofenceEventViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = GeofenceEvent.objects.select_related('booking__patient', 'staff').all()
     serializer_class = GeofenceEventSerializer
+    permission_classes = [IsAuthenticated, IsPatientOrFamilyOwner]
 
     def get_queryset(self):
         qs = super().get_queryset()
+        user = self.request.user
+        if is_family_user(user):
+            qs = qs.filter(booking__patient__portal_user=user)
         booking_id = self.request.query_params.get('booking_id')
         staff_id = self.request.query_params.get('staff_id')
         event_type = self.request.query_params.get('event_type')
@@ -48,6 +62,14 @@ class GeofenceEventViewSet(viewsets.ReadOnlyModelViewSet):
 class SOSEventViewSet(viewsets.ModelViewSet):
     queryset = SOSEvent.objects.select_related('booking__patient', 'staff').all()
     serializer_class = SOSEventSerializer
+    permission_classes = [IsAuthenticated, IsPatientOrFamilyOwner]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+        if is_family_user(user):
+            qs = qs.filter(booking__patient__portal_user=user)
+        return qs
 
     def create(self, request, *args, **kwargs):
         from bookings.models import Booking
@@ -156,6 +178,26 @@ class AlertRuleViewSet(viewsets.ModelViewSet):
 class LiveVisitViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = LiveVisit.objects.select_related('booking__patient', 'staff').all()
     serializer_class = LiveVisitSerializer
+    permission_classes = [IsAuthenticated, IsPatientOrFamilyOwner]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+        if is_family_user(user):
+            return qs.filter(booking__patient__portal_user=user)
+        return qs
+
+    def get_object(self):
+        user = self.request.user
+        if is_family_user(user):
+            lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
+            lookup_val = self.kwargs.get(lookup_url_kwarg)
+            if lookup_val is not None:
+                target = LiveVisit.objects.filter(**{self.lookup_field: lookup_val}).first()
+                if target and (not target.booking or not target.booking.patient or target.booking.patient.portal_user_id != user.id):
+                    from rest_framework.exceptions import PermissionDenied
+                    raise PermissionDenied("You do not have permission to access this live visit.")
+        return super().get_object()
 
 
 # ── Utility ───────────────────────────────────────────────────────────────────
@@ -545,6 +587,9 @@ class StaffRouteView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, staff_id):
+        if is_family_user(request.user):
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("Staff route history is restricted to staff and administrators.")
         try:
             limit = max(1, min(int(request.query_params.get('limit', 50)), 200))
         except (TypeError, ValueError):

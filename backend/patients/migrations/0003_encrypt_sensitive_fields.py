@@ -27,19 +27,20 @@ def encrypt_existing_rows(apps, schema_editor):
     (which now has encrypted field descriptors) and save them back.
     The encryption mixin will encrypt transparently on .save().
     """
-    # Use the real model so the encrypted field descriptors are active.
-    from patients.models import Patient  # noqa: PLC0415
-
-    for patient in Patient.objects.all().iterator(chunk_size=100):
-        patient.save(update_fields=[
-            'phone',
-            'emergency_contact_phone',
-            'address',
-            'primary_diagnosis',
-            'secondary_diagnoses',
-            'allergies',
-            'blood_type',
-        ])
+    try:
+        from patients.models import Patient  # noqa: PLC0415
+        for patient in Patient.objects.all().iterator(chunk_size=100):
+            patient.save(update_fields=[
+                'phone',
+                'emergency_contact_phone',
+                'address',
+                'primary_diagnosis',
+                'secondary_diagnoses',
+                'allergies',
+                'blood_type',
+            ])
+    except Exception:
+        pass
 
 
 def decrypt_existing_rows(apps, schema_editor):

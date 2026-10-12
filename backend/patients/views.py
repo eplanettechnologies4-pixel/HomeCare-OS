@@ -12,7 +12,8 @@ from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from homecareOS.permissions import (
-    CanDeletePatient, IsPrescriptionManagementAllowed, CanManagePatientPortal
+    CanDeletePatient, IsPrescriptionManagementAllowed, CanManagePatientPortal,
+    is_family_user, IsPatientOrFamilyOwner
 )
 from .models import (
     Patient, Prescription, VitalSign, NurseNote, LabResult,
@@ -27,8 +28,27 @@ from .serializers import (
 
 
 class PatientViewSet(viewsets.ModelViewSet):
-    permission_classes = [IsAuthenticated, CanDeletePatient]
+    permission_classes = [IsAuthenticated, CanDeletePatient, IsPatientOrFamilyOwner]
     queryset = Patient.objects.select_related('assigned_care_manager').all().order_by('-created_at')
+
+    def get_queryset(self):
+        qs = Patient.objects.select_related('assigned_care_manager').all().order_by('-created_at')
+        user = self.request.user
+        if is_family_user(user):
+            return qs.filter(portal_user=user)
+        return qs
+
+    def get_object(self):
+        user = self.request.user
+        if is_family_user(user):
+            lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
+            lookup_val = self.kwargs.get(lookup_url_kwarg)
+            if lookup_val is not None:
+                target = Patient.objects.filter(**{self.lookup_field: lookup_val}).first()
+                if target and target.portal_user_id != user.id:
+                    from rest_framework.exceptions import PermissionDenied
+                    raise PermissionDenied("You do not have permission to access this patient's records.")
+        return super().get_object()
 
     def get_permissions(self):
         if self.action in ['create_portal_user', 'reset_portal_password']:
@@ -464,8 +484,27 @@ class PatientViewSet(viewsets.ModelViewSet):
 class PrescriptionViewSet(viewsets.ModelViewSet):
     queryset = Prescription.objects.all()
     serializer_class = PrescriptionSerializer
-    permission_classes = [IsPrescriptionManagementAllowed]
+    permission_classes = [IsPrescriptionManagementAllowed, IsPatientOrFamilyOwner]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+        if is_family_user(user):
+            return qs.filter(patient__portal_user=user)
+        return qs
+
+    def get_object(self):
+        user = self.request.user
+        if is_family_user(user):
+            lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
+            lookup_val = self.kwargs.get(lookup_url_kwarg)
+            if lookup_val is not None:
+                target = Prescription.objects.filter(**{self.lookup_field: lookup_val}).first()
+                if target and (not target.patient or target.patient.portal_user_id != user.id):
+                    from rest_framework.exceptions import PermissionDenied
+                    raise PermissionDenied("You do not have permission to access this prescription.")
+        return super().get_object()
 
 
 class PatientPrescriptionDetailView(APIView):
@@ -476,10 +515,16 @@ class PatientPrescriptionDetailView(APIView):
     - PATCH / PUT: update prescription (Admins only)
     - DELETE: delete prescription (Admins only)
     """
-    permission_classes = [IsPrescriptionManagementAllowed]
+    permission_classes = [IsPrescriptionManagementAllowed, IsPatientOrFamilyOwner]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get_object(self, patient_pk, prescription_pk):
+        user = self.request.user
+        if is_family_user(user):
+            target_patient = Patient.objects.filter(pk=patient_pk).first()
+            if target_patient and target_patient.portal_user_id != user.id:
+                from rest_framework.exceptions import PermissionDenied
+                raise PermissionDenied("You do not have permission to access this patient's records.")
         return get_object_or_404(Prescription, pk=prescription_pk, patient_id=patient_pk)
 
     def get(self, request, patient_pk, prescription_pk):
@@ -509,14 +554,75 @@ class PatientPrescriptionDetailView(APIView):
 class VitalSignViewSet(viewsets.ModelViewSet):
     queryset = VitalSign.objects.select_related('patient', 'recorded_by').all()
     serializer_class = VitalSignSerializer
+    permission_classes = [IsAuthenticated, IsPatientOrFamilyOwner]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+        if is_family_user(user):
+            return qs.filter(patient__portal_user=user)
+        return qs
+
+    def get_object(self):
+        user = self.request.user
+        if is_family_user(user):
+            lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
+            lookup_val = self.kwargs.get(lookup_url_kwarg)
+            if lookup_val is not None:
+                target = VitalSign.objects.filter(**{self.lookup_field: lookup_val}).first()
+                if target and (not target.patient or target.patient.portal_user_id != user.id):
+                    from rest_framework.exceptions import PermissionDenied
+                    raise PermissionDenied("You do not have permission to access these vitals.")
+        return super().get_object()
 
 
 class NurseNoteViewSet(viewsets.ModelViewSet):
     queryset = NurseNote.objects.select_related('patient', 'recorded_by').all()
     serializer_class = NurseNoteSerializer
+    permission_classes = [IsAuthenticated, IsPatientOrFamilyOwner]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+        if is_family_user(user):
+            return qs.filter(patient__portal_user=user)
+        return qs
+
+    def get_object(self):
+        user = self.request.user
+        if is_family_user(user):
+            lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
+            lookup_val = self.kwargs.get(lookup_url_kwarg)
+            if lookup_val is not None:
+                target = NurseNote.objects.filter(**{self.lookup_field: lookup_val}).first()
+                if target and (not target.patient or target.patient.portal_user_id != user.id):
+                    from rest_framework.exceptions import PermissionDenied
+                    raise PermissionDenied("You do not have permission to access this note.")
+        return super().get_object()
 
 
 class LabResultViewSet(viewsets.ModelViewSet):
     queryset = LabResult.objects.all()
     serializer_class = LabResultSerializer
+    permission_classes = [IsAuthenticated, IsPatientOrFamilyOwner]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+        if is_family_user(user):
+            return qs.filter(patient__portal_user=user)
+        return qs
+
+    def get_object(self):
+        user = self.request.user
+        if is_family_user(user):
+            lookup_url_kwarg = self.lookup_url_kwarg or self.lookup_field
+            lookup_val = self.kwargs.get(lookup_url_kwarg)
+            if lookup_val is not None:
+                target = LabResult.objects.filter(**{self.lookup_field: lookup_val}).first()
+                if target and (not target.patient or target.patient.portal_user_id != user.id):
+                    from rest_framework.exceptions import PermissionDenied
+                    raise PermissionDenied("You do not have permission to access this lab result.")
+        return super().get_object()
+
 

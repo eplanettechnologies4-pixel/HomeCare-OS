@@ -59,7 +59,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # ── Django / Gunicorn ────────────────────────────────────────────────────
+  # ── Django / Daphne ASGI (HTTP & WebSockets via Channels) ────────────────
   web:
     build:
       context: ./backend
@@ -69,6 +69,7 @@ services:
     environment:
       # Overridden here to make container-to-container hostname ('db') explicit
       DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
     volumes:
       - static_files:/app/staticfiles
       - media_files:/app/media
@@ -83,12 +84,11 @@ services:
     networks:
       - homecare_net
     command: >
-      gunicorn homecareOS.wsgi:application
-        --bind 0.0.0.0:8000
-        --workers 3
-        --timeout 120
-        --access-logfile -
-        --error-logfile -
+      daphne
+        -b 0.0.0.0
+        -p 8000
+        --proxy-headers
+        homecareOS.asgi:application
 
   # ── Celery Worker ────────────────────────────────────────────────────────
   celery:

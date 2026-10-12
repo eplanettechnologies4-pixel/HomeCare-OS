@@ -146,3 +146,48 @@ class IsPrescriptionManagementAllowed(BasePermission):
         return False
 
 
+def is_family_user(user):
+    """
+    Returns True if the user has a family / patient portal role:
+    - UserProfile role in ('patient_family', 'family')
+    - Or has a linked Patient via portal_user (related_name='patient_profile') and is not staff/admin
+    """
+    if not user or not user.is_authenticated:
+        return False
+    if user.is_superuser or user.is_staff:
+        return False
+    role = get_user_role(user)
+    if role in ('patient_family', 'family'):
+        return True
+    if hasattr(user, 'patient_profile') and not hasattr(user, 'staffmember'):
+        return True
+    return False
+
+
+class IsPatientOrFamilyOwner(BasePermission):
+    """
+    Object-level permission check:
+    - Clinical staff, management, and administrators have access according to their role.
+    - Family and patient_family roles are strictly restricted to accessing records linked
+      to their own patient (patient.portal_user == request.user).
+    """
+    message = "You do not have permission to access records for this patient."
+
+    def has_object_permission(self, request, view, obj):
+        if not request.user or not request.user.is_authenticated:
+            return False
+        if not is_family_user(request.user):
+            return True
+
+        # Resolve patient from obj (Patient, Prescription, VitalSign, NurseNote, Booking, LiveVisit, etc.)
+        patient = getattr(obj, 'patient', None)
+        if patient is None and hasattr(obj, 'portal_user'):
+            patient = obj
+        if patient is None and hasattr(obj, 'booking'):
+            booking = getattr(obj, 'booking', None)
+            patient = getattr(booking, 'patient', None) if booking else None
+
+        return bool(patient and patient.portal_user_id == request.user.id)
+
+
+
