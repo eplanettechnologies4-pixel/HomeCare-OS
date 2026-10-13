@@ -149,7 +149,7 @@ def test_generate():
     qr.make(fit=True)
     qr_img = qr.make_image(fill_color="#5B1A4A", back_color="white")
     qr_buf = io.BytesIO()
-    qr_img.save(qr_buf, format="PNG")
+    qr_img.save(qr_buf)
     qr_buf.seek(0)
     qr_flowable = RLImage(qr_buf, width=46, height=46)
 

@@ -45,7 +45,7 @@ def create_notification(
     icon_key: str = 'bell',
     target_screen: str = '',
     target_params: dict | None = None,
-) -> Notification:
+) -> Notification | None:
     """
     Convenience function called by bookings, staff, and tasks to create a
     Notification record for a given Django auth User.

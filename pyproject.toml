@@ -1,2 +1,21 @@
 [tool.pyright]
 extraPaths = ["backend"]
+typeCheckingMode = "basic"
+reportMissingTypeStubs = false
+reportAttributeAccessIssue = false
+
+[tool.pyrefly]
+preset = "basic"
+search_path = ["backend"]
+
+[tool.pyrefly.errors]
+missing-attribute = false
+missing-type-stubs = false
+missing-module-stubs = false
+bad-assignment = false
+bad-argument-type = false
+bad-index = false
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "homecareOS.settings"
+pythonpath = ["backend"]

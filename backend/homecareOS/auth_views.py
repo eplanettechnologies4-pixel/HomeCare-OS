@@ -13,6 +13,7 @@ to the root urlpatterns next to simplejwt's token endpoints.
 """
 import secrets
 import logging
+from typing import Any
 
 from django.contrib.auth.models import User
 from django.utils import timezone
@@ -46,7 +47,7 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
             if user_by_email:
                 attrs['username'] = user_by_email.username
 
-        data = super().validate(attrs)
+        data: dict[str, Any] = dict(super().validate(attrs))
 
         user = self.user
         staff_member = getattr(user, 'staffmember', None)

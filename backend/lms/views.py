@@ -214,7 +214,6 @@ class LectureProgressView(APIView):
     def post(self, request, lecture_id):
         # Resolve staff from JWT
         try:
-            from staff.models import StaffMember
             staff = StaffMember.objects.get(user=request.user)
         except StaffMember.DoesNotExist:
             # Admin/super_admin calling directly (e.g. for testing)
@@ -232,7 +231,6 @@ class LectureProgressView(APIView):
         staff_id_override = request.data.get('staff_id')
         if staff is None and staff_id_override:
             try:
-                from staff.models import StaffMember
                 staff = StaffMember.objects.get(pk=staff_id_override)
             except StaffMember.DoesNotExist:
                 return Response({'error': 'Staff member not found.'}, status=404)

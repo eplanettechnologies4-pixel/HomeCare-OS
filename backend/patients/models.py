@@ -95,8 +95,10 @@ class Patient(models.Model):
     @property
     def age(self):
         from django.utils import timezone
-        today = timezone.now().date()
         dob = self.date_of_birth
+        if not dob:
+            return None
+        today = timezone.now().date()
         return today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
 
 
@@ -285,8 +287,10 @@ class MARAdministration(models.Model):
 
     def __str__(self):
         day_names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+        day_idx = self.day_number
+        day_label = day_names[day_idx] if 0 <= day_idx < len(day_names) else f'Day {day_idx}'
         return (
-            f'{self.prescription.medication} — {day_names[self.day_number]} '
+            f'{self.prescription.medication} — {day_label} '
             f'— by {self.administered_by}'
         )
 

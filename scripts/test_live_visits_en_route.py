@@ -12,6 +12,7 @@ from bookings.models import Booking, BookingStatus
 from staff.models import StaffMember, StaffRole
 from patients.models import Patient
 from tracking.models import LiveVisit
+from decimal import Decimal
 from django.utils import timezone
 
 def test_en_route_live_visits():
@@ -24,8 +25,8 @@ def test_en_route_live_visits():
         user=staff_user,
         defaults={'first_name': 'EnRoute', 'last_name': 'Nurse', 'role': StaffRole.NURSE, 'phone': '03009998877', 'hire_date': '2024-01-01', 'employee_id': 'EMP-ENROUTE-99'}
     )
-    staff.current_latitude = 33.7294
-    staff.current_longitude = 73.0931
+    staff.current_latitude = Decimal('33.7294')
+    staff.current_longitude = Decimal('73.0931')
     staff.save()
 
     patient, _ = Patient.objects.get_or_create(
@@ -53,8 +54,8 @@ def test_en_route_live_visits():
     assert res.status_code == 200
     assert len(results) >= 1
 
-    item = next((v for v in results if (v.get('booking') if isinstance(v, dict) else getattr(v, 'booking', None)) == booking.id), None)
-    assert item is not None, f"Booking {booking.id} not found in live visits! items: {results}"
+    item = next((v for v in results if (v.get('booking') if isinstance(v, dict) else getattr(v, 'booking', None)) == booking.pk), None)
+    assert item is not None, f"Booking {booking.pk} not found in live visits! items: {results}"
     print(f"En-route staff ID: {item['staff']}")
     print(f"En-route coordinates: lat={item['current_latitude']}, lng={item['current_longitude']}")
     print(f"Booking status: {item['booking_status']}")

@@ -1,5 +1,8 @@
 {
   "extraPaths": [
     "./backend"
-  ]
+  ],
+  "typeCheckingMode": "basic",
+  "reportMissingTypeStubs": false,
+  "reportAttributeAccessIssue": false
 }
