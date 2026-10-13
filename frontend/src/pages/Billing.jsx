@@ -17,6 +17,7 @@ export default function Billing() {
   const recordPayment = useStore((s) => s.recordInvoicePayment);
   const sendInvoice   = useStore((s) => s.sendInvoice);
   const patients      = useStore((s) => s.patients);
+  const eventsWsConnected = useStore((s) => s.eventsWsConnected);
 
   const [selectedInvoice, setSelectedInvoice] = useState(null);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -81,7 +82,13 @@ export default function Billing() {
     <div>
       <div className="section-header">
         <div>
-          <h1 className="page-title">Billing & Invoicing</h1>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <h1 className="page-title" style={{ margin: 0 }}>Billing & Invoicing</h1>
+            <span className={`badge ${eventsWsConnected ? 'badge-green' : 'badge-teal'}`} style={{ fontSize: '0.7rem', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ width: 7, height: 7, borderRadius: '50%', background: eventsWsConnected ? '#10b981' : '#6b7280', display: 'inline-block' }} />
+              {eventsWsConnected ? 'Live Sync Active' : 'Real-Time Ready'}
+            </span>
+          </div>
           <p className="page-subtitle">Patient invoices, monthly billing packages, line-item breakdowns & receipts</p>
         </div>
       </div>
@@ -144,19 +151,32 @@ export default function Billing() {
             </thead>
             <tbody>
               {filteredInvoices.map(inv => (
-                <tr key={inv.id} onClick={() => setSelectedInvoice(inv)}>
-                  <td className="ts" style={{ fontWeight: 700, color: 'var(--teal-800)' }}>{inv.invoice_number}</td>
+                <tr
+                  key={inv.id}
+                  onClick={() => setSelectedInvoice(inv)}
+                  style={{
+                    cursor: 'pointer',
+                    background: inv.isNew ? '#f0fdf4' : inv.isUpdated ? '#fefce8' : 'inherit',
+                    transition: 'background-color 1.2s ease',
+                    borderLeft: inv.isNew ? '4px solid #22c55e' : inv.isUpdated ? '4px solid #eab308' : 'none',
+                  }}
+                >
+                  <td className="ts" style={{ fontWeight: 700, color: 'var(--teal-800)' }}>
+                    {inv.invoice_number}
+                    {inv.isNew && <span className="badge badge-green" style={{ marginLeft: 6, fontSize: '0.62rem' }}>NEW</span>}
+                    {inv.isUpdated && <span className="badge badge-amber" style={{ marginLeft: 6, fontSize: '0.62rem' }}>UPDATED</span>}
+                  </td>
                   <td>
                     <div style={{ fontWeight: 600 }}>{inv.patient_name}</div>
-                    <div className="ts">{inv.patient_mr}</div>
+                    <div className="ts">{inv.patient_mr || ''}</div>
                   </td>
                   <td><span className="badge badge-teal" style={{ fontSize: '0.68rem' }}>{inv.billing_type_display || inv.billing_type}</span></td>
                   <td className="ts">{inv.issued_date}</td>
                   <td className="ts">{inv.due_date}</td>
-                  <td className="ts" style={{ fontWeight: 600 }}>PKR {inv.total?.toLocaleString()}</td>
-                  <td className="ts" style={{ color: 'var(--status-green)' }}>PKR {inv.amount_paid?.toLocaleString()}</td>
+                  <td className="ts" style={{ fontWeight: 600 }}>PKR {Number(inv.total || 0).toLocaleString()}</td>
+                  <td className="ts" style={{ color: 'var(--status-green)' }}>PKR {Number(inv.amount_paid || 0).toLocaleString()}</td>
                   <td className="ts" style={{ color: inv.balance_due > 0 ? 'var(--status-red)' : 'var(--status-grey)', fontWeight: inv.balance_due > 0 ? 700 : 400 }}>
-                    PKR {inv.balance_due?.toLocaleString()}
+                    PKR {Number(inv.balance_due || 0).toLocaleString()}
                   </td>
                   <td><span className={`badge ${STATUS_BADGE[inv.status] || 'badge-grey'}`}>{inv.status_display || inv.status}</span></td>
                 </tr>

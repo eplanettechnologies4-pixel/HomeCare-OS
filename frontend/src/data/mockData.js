@@ -567,8 +567,8 @@ export const DAILY_REPORTS = [
 ];
 
 export const ROLE_CONFIG = {
-  super_admin:     { label: 'Super Admin',     nav: ['overview', 'bookings', 'live-tracking', 'staff', 'patients', 'patient-360', 'therapy', 'pharmacy', 'equipment', 'lab-orders', 'admin-hr', 'accounts', 'billing', 'crm', 'lms', 'reports', 'analytics', 'users'] },
-  admin:           { label: 'Admin',           nav: ['overview', 'bookings', 'live-tracking', 'patients', 'patient-360', 'therapy', 'pharmacy', 'equipment', 'lab-orders', 'admin-hr', 'crm', 'lms', 'reports', 'analytics'] },
+  super_admin:     { label: 'Super Admin',     nav: ['overview', 'bookings', 'live-tracking', 'staff', 'patients', 'patient-360', 'therapy', 'pharmacy', 'equipment', 'lab-orders', 'forms', 'admin-hr', 'accounts', 'billing', 'crm', 'lms', 'reports', 'analytics', 'users'] },
+  admin:           { label: 'Admin',           nav: ['overview', 'bookings', 'live-tracking', 'patients', 'patient-360', 'therapy', 'pharmacy', 'equipment', 'lab-orders', 'forms', 'admin-hr', 'crm', 'lms', 'reports', 'analytics'] },
   branch_manager:  { label: 'Branch Manager',  nav: ['overview', 'bookings', 'live-tracking', 'patients', 'patient-360', 'pharmacy', 'equipment', 'lab-orders', 'lms', 'reports', 'analytics'] },
   care_manager:    { label: 'Care Manager',    nav: ['overview', 'bookings', 'live-tracking', 'patients', 'patient-360', 'therapy', 'pharmacy', 'equipment', 'lab-orders'] },
   nurse:           { label: 'Nurse / Doctor',  nav: ['overview', 'bookings', 'live-tracking', 'patients', 'patient-360', 'pharmacy', 'equipment', 'lab-orders'] },

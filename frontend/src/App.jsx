@@ -24,6 +24,8 @@ import LMS            from './pages/LMS';
 import Pharmacy       from './pages/Pharmacy';
 import Equipment      from './pages/Equipment';
 import LabOrders      from './pages/LabOrders';
+import FormBuilder    from './pages/FormBuilder';
+import { useRealtimeEvents } from './hooks/useRealtimeEvents';
 
 const PAGE_META = {
   'overview':       { title: 'Overview',            subtitle: 'Live operations at a glance' },
@@ -36,6 +38,7 @@ const PAGE_META = {
   'pharmacy':       { title: 'Pharmacy Orders',     subtitle: 'Medicine ordering, Rx verification & delivery tracking' },
   'equipment':      { title: 'Equipment Rentals',   subtitle: 'Hospital equipment leasing, delivery & deposit refunds' },
   'lab-orders':     { title: 'Diagnostic Lab Orders',subtitle: 'At-home sample collection, phlebotomy & digital reports' },
+  'forms':          { title: 'Form Builder',        subtitle: 'Dynamic forms, custom clinical intakes & surveys' },
   'admin-hr':       { title: 'Admin / HR',          subtitle: 'Announcements, docs, training & payroll' },
   'lms':            { title: 'Training / LMS',       subtitle: 'Course library, staff assignments & certificates' },
   'accounts':       { title: 'Accounts',            subtitle: 'Payments, invoices and revenue' },
@@ -57,6 +60,7 @@ const PAGE_COMPONENTS = {
   'pharmacy':       Pharmacy,
   'equipment':      Equipment,
   'lab-orders':     LabOrders,
+  'forms':          FormBuilder,
   'admin-hr':       AdminHR,
   'lms':            LMS,
   'accounts':       Accounts,
@@ -72,7 +76,11 @@ export default function App() {
   const activePage      = useStore((s) => s.activePage);
   const currentRole     = useStore((s) => s.currentRole);
   const currentUser     = useStore((s) => s.currentUser);
+  const userToken       = useStore((s) => s.userToken);
   const fetchAllData    = useStore((s) => s.fetchAllData);
+
+  // Wire unified WebSocket events channel (ws://<host>/ws/events/?token=<JWT>)
+  useRealtimeEvents(isAuthenticated ? userToken : null);
 
   React.useEffect(() => {
     if (isAuthenticated) {

@@ -61,6 +61,8 @@ INSTALLED_APPS = [
     'pharmacy',
     'equipment',
     'lab',
+    'documents',
+    'forms_builder',
 ]
 
 MIDDLEWARE = [
@@ -111,26 +113,37 @@ DATABASES = {
     )
 }
 
-# Channel layers (Redis via REDIS_URL in production; InMemory for testing & local dev)
+# Channel layers (Redis via REDIS_URL in production; InMemory for testing & fallback)
 import sys
-_redis_url = config('REDIS_URL', default='').strip()
+_redis_url = config('REDIS_URL', default='redis://redis:6379/0').strip()
 _is_testing = 'test' in sys.argv
 
-if _redis_url and not _is_testing:
-    CHANNEL_LAYERS = {
-        'default': {
-            'BACKEND': 'channels_redis.core.RedisChannelLayer',
-            'CONFIG': {
-                'hosts': [_redis_url],
-            },
-        }
-    }
-else:
-    CHANNEL_LAYERS = {
-        'default': {
-            'BACKEND': 'channels.layers.InMemoryChannelLayer',
-        }
-    }
+def _get_channel_layer_config():
+    if _is_testing:
+        return {'default': {'BACKEND': 'channels.layers.InMemoryChannelLayer'}}
+    if _redis_url:
+        if not DEBUG:
+            return {
+                'default': {
+                    'BACKEND': 'channels_redis.core.RedisChannelLayer',
+                    'CONFIG': {'hosts': [_redis_url]},
+                }
+            }
+        try:
+            import redis
+            r = redis.from_url(_redis_url, socket_connect_timeout=0.2)
+            r.ping()
+            return {
+                'default': {
+                    'BACKEND': 'channels_redis.core.RedisChannelLayer',
+                    'CONFIG': {'hosts': [_redis_url]},
+                }
+            }
+        except Exception:
+            pass
+    return {'default': {'BACKEND': 'channels.layers.InMemoryChannelLayer'}}
+
+CHANNEL_LAYERS = _get_channel_layer_config()
 
 # Caches — Redis in production (shared across gunicorn workers for DRF throttling);
 # fallback to LocMemCache for local dev/testing when Redis is not running
@@ -197,6 +210,12 @@ MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+ 
+# ── Upload & Memory Limits ───────────────────────────────────────────────────
+# Allow up to 2GB uploads for high-definition course videos and 200MB media docs
+DATA_UPLOAD_MAX_MEMORY_SIZE = 2147483648  # 2 GB
+FILE_UPLOAD_MAX_MEMORY_SIZE = 2147483648  # 2 GB
+DATA_UPLOAD_MAX_NUMBER_FIELDS = 10000
 
 # Throttle Rate Configuration (env-configurable)
 PUBLIC_BOOKING_THROTTLE_RATE = config('PUBLIC_BOOKING_THROTTLE_RATE', default='10/hour').strip()

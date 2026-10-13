@@ -5,7 +5,7 @@ import {
   LayoutDashboard, Calendar, MapPin, Users, UserCog,
   Heart, Settings, DollarSign, BarChart2, Menu, X,
   Activity, Receipt, Kanban, PieChart, Shield, GraduationCap,
-  Pill, Truck, FlaskConical
+  Pill, Truck, FlaskConical, FileText
 } from 'lucide-react';
 
 const NAV = [
@@ -30,6 +30,7 @@ const NAV = [
     { id: 'crm',       label: 'CRM Leads',   icon: Kanban },
     { id: 'billing',   label: 'Billing',     icon: Receipt },
     { id: 'accounts',  label: 'Accounts',    icon: DollarSign },
+    { id: 'forms',     label: 'Form Builder', icon: FileText },
     { id: 'admin-hr',  label: 'Admin / HR',  icon: UserCog },
     { id: 'lms',       label: 'Training / LMS', icon: GraduationCap },
     { id: 'reports',   label: 'Reports',     icon: BarChart2 },

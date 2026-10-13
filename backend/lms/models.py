@@ -29,15 +29,17 @@ class Course(models.Model):
         SOFT_SKILLS   = 'soft_skills',   'Soft Skills'
         OTHER         = 'other',         'Other'
 
-    title       = models.CharField(max_length=200)
-    description = models.TextField(blank=True)
-    category    = models.CharField(max_length=30, choices=Category.choices, default=Category.ONBOARDING)
-    created_by  = models.ForeignKey(
+    title        = models.CharField(max_length=200)
+    description  = models.TextField(blank=True)
+    thumbnail    = models.ImageField(upload_to='lms/thumbnails/', null=True, blank=True)
+    category     = models.CharField(max_length=30, choices=Category.choices, default=Category.ONBOARDING)
+    created_by   = models.ForeignKey(
         'auth.User', on_delete=models.SET_NULL, null=True, related_name='lms_courses_created'
     )
-    is_active   = models.BooleanField(default=True)
-    created_at  = models.DateTimeField(auto_now_add=True)
-    updated_at  = models.DateTimeField(auto_now=True)
+    is_active    = models.BooleanField(default=True)
+    is_published = models.BooleanField(default=True)
+    created_at   = models.DateTimeField(auto_now_add=True)
+    updated_at   = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ['-created_at']
@@ -56,19 +58,25 @@ class Course(models.Model):
 
 class Lecture(models.Model):
     """
-    A single video lecture within a Course.
-    Supports either an uploaded video file (reusing the existing media storage
-    pattern from patients/daily-report/ReportPhoto) or an external video URL.
-    At least one of video_file or video_url must be set.
+    A single video lecture within a Course with HLS multi-bitrate support.
     """
+    STATUS_CHOICES = [
+        ('processing', 'Processing'),
+        ('ready',      'Ready'),
+        ('failed',     'Failed'),
+    ]
+
     course           = models.ForeignKey(Course, on_delete=models.CASCADE, related_name='lectures')
     title            = models.CharField(max_length=200)
-    # Media file — stored under MEDIA_ROOT/lms/videos/ (same pattern as ReportPhoto)
     video_file       = models.FileField(upload_to='lms/videos/', blank=True, null=True)
-    video_url        = models.URLField(blank=True)  # e.g. YouTube embed or internal URL
+    video_url        = models.URLField(blank=True)
     duration_seconds = models.PositiveIntegerField(default=0, help_text='Expected duration in seconds')
     order            = models.PositiveSmallIntegerField(default=1)
     description      = models.TextField(blank=True)
+    hls_master_url   = models.CharField(max_length=500, blank=True)
+    status           = models.CharField(max_length=20, choices=STATUS_CHOICES, default='ready')
+    attachments      = models.FileField(upload_to='lms/attachments/', blank=True, null=True)
+    processing_error = models.TextField(blank=True)
     created_at       = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -146,12 +154,17 @@ class LectureProgress(models.Model):
     COMPLETION_THRESHOLD_PCT = 90  # percent
 
     assignment       = models.ForeignKey(
-        CourseAssignment, on_delete=models.CASCADE, related_name='lecture_progresses'
+        CourseAssignment, on_delete=models.CASCADE, related_name='lecture_progresses', null=True, blank=True
+    )
+    staff            = models.ForeignKey(
+        'staff.StaffMember', on_delete=models.CASCADE, null=True, blank=True, related_name='lecture_progresses'
     )
     lecture          = models.ForeignKey(Lecture, on_delete=models.CASCADE, related_name='progresses')
     watched_seconds  = models.PositiveIntegerField(default=0)
+    last_position    = models.PositiveIntegerField(default=0)
     percentage       = models.DecimalField(max_digits=5, decimal_places=2, default=0)
     completed        = models.BooleanField(default=False)
+    updated_at       = models.DateTimeField(auto_now=True)
     last_updated     = models.DateTimeField(auto_now=True)
 
     class Meta:

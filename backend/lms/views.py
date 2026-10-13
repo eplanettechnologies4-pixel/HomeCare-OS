@@ -52,40 +52,113 @@ class CourseViewSet(viewsets.ModelViewSet):
     def assign(self, request, pk=None):
         """
         POST /api/lms/courses/{id}/assign/
-        Body: { "staff_ids": [1, 2, 3], "due_date": "2026-12-31" (optional) }
-        Creates a CourseAssignment for each staff member.
-        Already-assigned staff are skipped (idempotent).
+        Body:
+          {
+             "staff_ids": [1, 2],       # optional
+             "role": "nurse",           # optional: doctor/nurse/caregiver/all
+             "all": true,               # optional: all active staff
+             "due_date": "2026-12-31"   # optional
+          }
         """
         course = self.get_object()
         staff_ids = request.data.get('staff_ids', [])
+        role = request.data.get('role')
+        assign_all = request.data.get('all', False)
         due_date  = request.data.get('due_date', None) or None
 
-        if not staff_ids:
-            return Response({'error': 'staff_ids is required (array of staff member IDs).'}, status=400)
-
         from staff.models import StaffMember
+        from homecareOS.event_broadcaster import broadcast_event
+
+        targets = []
+        if staff_ids:
+            targets = list(StaffMember.objects.filter(pk__in=staff_ids))
+        elif role and role != 'all':
+            targets = list(StaffMember.objects.filter(role=role, is_active=True))
+        elif assign_all or role == 'all':
+            targets = list(StaffMember.objects.filter(is_active=True))
+
+        if not targets:
+            return Response({'error': 'No matching staff members found to assign.'}, status=400)
+
         created, skipped = [], []
 
-        for sid in staff_ids:
-            try:
-                staff_member = StaffMember.objects.get(pk=sid)
-            except StaffMember.DoesNotExist:
-                continue
+        for staff_member in targets:
             assignment, was_created = CourseAssignment.objects.get_or_create(
                 staff=staff_member,
                 course=course,
                 defaults={'assigned_by': request.user, 'due_date': due_date},
             )
             if was_created:
-                created.append(sid)
+                created.append(staff_member.id)
+                # Emit real-time event: course.assigned to staff_<id>
+                broadcast_event(
+                    event_type='course.assigned',
+                    data={
+                        'assignment_id': assignment.id,
+                        'course_id': course.id,
+                        'course_title': course.title,
+                        'assigned_by': request.user.get_full_name() or request.user.username,
+                        'due_date': str(assignment.due_date) if assignment.due_date else None,
+                        'status': assignment.status,
+                    },
+                    groups=[f'staff_{staff_member.id}']
+                )
+                # Push / in-app notification
+                if staff_member.user:
+                    try:
+                        from notifications.views import create_notification
+                        create_notification(
+                            recipient_user=staff_member.user,
+                            message=f"🎓 New Course Assigned: '{course.title}' is now available in your Learning center.",
+                            icon_key='graduation-cap',
+                            target_screen='Learning',
+                            target_params={'course_id': course.id},
+                        )
+                    except Exception:
+                        pass
             else:
-                skipped.append(sid)
+                skipped.append(staff_member.id)
 
         return Response({
             'course': course.title,
             'assigned': created,
             'already_assigned': skipped,
+            'count': len(created),
         }, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['get'], url_path='report')
+    def report(self, request, pk=None):
+        course = self.get_object()
+        assignments = course.assignments.select_related('staff').prefetch_related('lecture_progresses').all()
+        total_lectures = course.lectures.count()
+
+        reports = []
+        for a in assignments:
+            completed_lec = a.lecture_progresses.filter(completed=True).count()
+            pct = round(completed_lec / total_lectures * 100) if total_lectures > 0 else 0
+            last_prog = a.lecture_progresses.order_by('-last_updated').first()
+
+            reports.append({
+                'assignment_id': a.id,
+                'staff_id': a.staff.id,
+                'staff_name': a.staff.full_name,
+                'staff_role': a.staff.get_role_display(),
+                'status': a.status,
+                'status_display': a.get_status_display(),
+                'progress_pct': pct,
+                'completed_lectures': completed_lec,
+                'total_lectures': total_lectures,
+                'due_date': str(a.due_date) if a.due_date else None,
+                'last_watched': str(last_prog.last_updated) if last_prog else None,
+                'last_position': last_prog.last_position if last_prog else 0,
+            })
+
+        return Response({
+            'course_id': course.id,
+            'title': course.title,
+            'total_assigned': len(reports),
+            'staff_reports': reports,
+        })
 
 
 # ── 2. LECTURES ───────────────────────────────────────────────────────────────
@@ -93,12 +166,25 @@ class CourseViewSet(viewsets.ModelViewSet):
 class LectureViewSet(viewsets.ModelViewSet):
     """
     CRUD for lectures within a course.
-    Accepts multipart uploads for video_file (same pattern as DailyReport photo uploads).
+    Accepts multipart uploads for video_file (up to 2GB).
+    Triggers automated HLS multi-bitrate ffmpeg transcoding on upload.
     """
     queryset = Lecture.objects.select_related('course').all()
     serializer_class = LectureSerializer
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def perform_create(self, serializer):
+        lecture = serializer.save()
+        if lecture.video_file:
+            from .transcode import trigger_transcoding
+            trigger_transcoding(lecture.id)
+
+    def perform_update(self, serializer):
+        lecture = serializer.save()
+        if 'video_file' in self.request.FILES:
+            from .transcode import trigger_transcoding
+            trigger_transcoding(lecture.id)
 
     def get_queryset(self):
         qs = super().get_queryset()

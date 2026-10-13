@@ -110,8 +110,9 @@ export const apiFetch = async (endpoint, options = {}) => {
     ? endpoint
     : `${API_BASE}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
 
+  const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
   const buildHeaders = (token) => ({
-    ...(options.body && !options.headers?.['Content-Type']
+    ...(options.body && !isFormData && !options.headers?.['Content-Type']
       ? { 'Content-Type': 'application/json' }
       : {}),
     ...(token ? { Authorization: `Bearer ${token}` } : {}),

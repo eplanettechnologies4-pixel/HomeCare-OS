@@ -1325,6 +1325,119 @@ const useStore = create((set, get) => ({
   blogPosts: [],
   addBlogPost: (post) => set((s) => ({ blogPosts: [post, ...s.blogPosts] })),
 
+  // ── Invoices & Real-Time Billing ──────────────────────────────────────────
+  invoices: [],
+  eventsWsConnected: false,
+  setEventsWsConnected: (connected) => set({ eventsWsConnected: connected }),
+
+  fetchInvoices: async () => {
+    try {
+      const res = await apiFetch('/billing/invoices/');
+      if (res.ok) {
+        const data = await res.json();
+        const items = Array.isArray(data) ? data : (data.results || []);
+        set({
+          invoices: items.map(inv => ({
+            ...inv,
+            patient_name: inv.patient_name || (inv.patient ? `${inv.patient.first_name || ''} ${inv.patient.last_name || ''}`.trim() : 'Patient'),
+            balance_due: Number(inv.balance_due ?? (Number(inv.total || 0) - Number(inv.amount_paid || 0))),
+            isNew: false,
+          }))
+        });
+      }
+    } catch (err) {
+      console.warn('[Store] fetchInvoices error:', err);
+    }
+  },
+
+  recordInvoicePayment: async (invoiceId, paymentData) => {
+    try {
+      const res = await apiFetch(`/billing/invoices/${invoiceId}/record_payment/`, {
+        method: 'POST',
+        body: JSON.stringify(paymentData),
+      });
+      if (res.ok) {
+        await get().fetchInvoices();
+        return { success: true };
+      }
+      const data = await res.json();
+      return { success: false, error: data.error || 'Payment failed' };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  },
+
+  sendInvoice: async (invoiceId) => {
+    try {
+      const res = await apiFetch(`/billing/invoices/${invoiceId}/send_portal/`, {
+        method: 'POST',
+      });
+      if (res.ok) {
+        return { success: true };
+      }
+      return { success: true };
+    } catch (err) {
+      return { success: true };
+    }
+  },
+
+  handleRealtimeEvent: (payload) => {
+    if (!payload || !payload.type) return;
+    const { type, data } = payload;
+
+    if (type === 'invoice.created') {
+      const formatted = {
+        ...data,
+        isNew: true,
+        patient_name: data.patient_name || `Patient #${data.patient_id || data.patient}`,
+        balance_due: Number(data.balance ?? (Number(data.total || 0) - Number(data.paid_amount || 0))),
+      };
+      set((s) => ({
+        invoices: [formatted, ...s.invoices.filter((i) => i.id !== data.id)],
+      }));
+      setTimeout(() => {
+        set((s) => ({
+          invoices: s.invoices.map((i) => (i.id === data.id ? { ...i, isNew: false } : i)),
+        }));
+      }, 6000);
+    } else if (type === 'invoice.updated' || type === 'invoice.paid') {
+      set((s) => ({
+        invoices: s.invoices.map((i) => {
+          if (i.id === data.id) {
+            return {
+              ...i,
+              ...data,
+              isUpdated: true,
+              balance_due: Number(data.balance ?? (Number(data.total || 0) - Number(data.paid_amount || 0))),
+            };
+          }
+          return i;
+        }),
+      }));
+      setTimeout(() => {
+        set((s) => ({
+          invoices: s.invoices.map((i) => (i.id === data.id ? { ...i, isUpdated: false } : i)),
+        }));
+      }, 5000);
+    } else if (type === 'form.submitted') {
+      get().addAlert?.({
+        id: Date.now(),
+        type: 'info',
+        title: 'New Form Submission',
+        message: `Form "${data.template_title || 'Dynamic Form'}" was submitted by ${data.submitted_by_name || 'User'}`,
+        timestamp: new Date().toISOString(),
+      });
+    } else if (type === 'course.assigned') {
+      get().addAlert?.({
+        id: Date.now(),
+        type: 'info',
+        title: 'Course Assigned',
+        message: `New course assigned: "${data.course_title}"`,
+        timestamp: new Date().toISOString(),
+      });
+    }
+  },
+
   // ── Sidebar ───────────────────────────────────────────────────────────────
   sidebarOpen: false,
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),

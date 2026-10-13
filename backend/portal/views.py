@@ -6,7 +6,7 @@ from patients.serializers import PatientDetailSerializer
 from bookings.models import Booking
 from bookings.serializers import BookingListSerializer
 from billing.models import Invoice
-from billing.serializers import InvoiceListSerializer
+from billing.serializers import InvoiceListSerializer, PortalInvoiceSerializer
 
 
 def _resolve_patient_for_user(user):
@@ -92,5 +92,5 @@ class FamilyPortalViewSet(viewsets.ViewSet):
         patient, err = self._get_patient(request)
         if err:
             return err
-        qs = Invoice.objects.filter(patient=patient).order_by('-issued_date')
-        return Response(InvoiceListSerializer(qs, many=True).data)
+        qs = Invoice.objects.filter(patient=patient).prefetch_related('line_items').order_by('-issued_date')
+        return Response(PortalInvoiceSerializer(qs, many=True, context={'request': request}).data)

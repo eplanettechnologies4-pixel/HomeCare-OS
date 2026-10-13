@@ -9,7 +9,7 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# Install system dependencies required by psycopg2 and Pillow
+# Install system dependencies required by psycopg2, Pillow, and video transcoding
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
         libpq-dev \
@@ -17,6 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libpng-dev \
         zlib1g-dev \
         gnupg \
+        ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies

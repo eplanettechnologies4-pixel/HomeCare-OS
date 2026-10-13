@@ -19,6 +19,8 @@ class BillingType(models.TextChoices):
 
 
 class Invoice(models.Model):
+    objects = models.Manager()
+
     invoice_number = models.CharField(max_length=30, unique=True)
     patient        = models.ForeignKey('patients.Patient', on_delete=models.CASCADE, related_name='billing_invoices')
     booking        = models.ForeignKey('bookings.Booking', on_delete=models.SET_NULL, null=True, blank=True, related_name='billing_invoices')
@@ -81,6 +83,8 @@ class InvoiceLineItem(models.Model):
 
 
 class BillingPayment(models.Model):
+    objects = models.Manager()
+
     class Method(models.TextChoices):
         CASH          = 'cash',          'Cash'
         BANK_TRANSFER = 'bank_transfer', 'Bank Transfer'

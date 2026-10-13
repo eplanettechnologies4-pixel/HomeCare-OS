@@ -46,3 +46,38 @@ class InvoiceDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model  = Invoice
         fields = '__all__'
+
+
+class PortalInvoiceLineItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = InvoiceLineItem
+        fields = ['id', 'description', 'quantity', 'unit_price', 'amount']
+
+
+class PortalInvoiceSerializer(serializers.ModelSerializer):
+    """
+    Family/Patient Portal Invoice Serializer.
+    Returns: id, invoice_number, issue_date, due_date, total, paid_amount, balance,
+             status, status_display, items[], pdf_url.
+    """
+    issue_date     = serializers.DateField(source='issued_date')
+    paid_amount    = serializers.DecimalField(source='amount_paid', max_digits=12, decimal_places=2)
+    balance        = serializers.DecimalField(source='balance_due', max_digits=12, decimal_places=2)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    items          = PortalInvoiceLineItemSerializer(source='line_items', many=True, read_only=True)
+    pdf_url        = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Invoice
+        fields = [
+            'id', 'invoice_number', 'issue_date', 'due_date',
+            'total', 'paid_amount', 'balance', 'status', 'status_display',
+            'items', 'pdf_url'
+        ]
+
+    def get_pdf_url(self, obj):
+        request = self.context.get('request')
+        url = f"/api/billing/invoices/{obj.id}/pdf/"
+        if request:
+            return request.build_absolute_uri(url)
+        return url
