@@ -2,11 +2,15 @@
 HomeCare OS URL Configuration
 """
 from django.contrib import admin
-from django.urls import path, include
+from django.urls import path, re_path, include
 from django.conf import settings
 from django.conf.urls.static import static
+from django.views.static import serve
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
+
+from homecareOS.health_view import HealthCheckView
+from reports.views import ReportsOverviewView
 
 # Extended auth views (me, forgot-password, verify-otp, reset-password, custom login)
 from homecareOS.auth_views import (
@@ -53,6 +57,9 @@ urlpatterns = [
     # Quality forms (manager-sign standalone endpoint)
     path('api/feedback/',      include('quality.urls')),
 
+    path('api/health/', HealthCheckView.as_view(), name='health-check'),
+    path('api/reports/overview/', ReportsOverviewView.as_view(), name='reports-overview'),
+
     # ── Location Link & Coordinate Resolver ───────────────────────────────────
     path('api/locations/resolve-link/', ResolveLocationLinkView.as_view(), name='locations-resolve-link'),
 
@@ -62,5 +69,8 @@ urlpatterns = [
     # ── API Schema ────────────────────────────────────────────────────────────
     path('api/schema/', SpectacularAPIView.as_view(),                       name='schema'),
     path('api/docs/',   SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
+
+    # ── Media Serving Fallback (Serves user uploads in production behind ASGI) ──
+    re_path(r'^media/(?P<path>.*)$', serve, {'document_root': settings.MEDIA_ROOT}),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 

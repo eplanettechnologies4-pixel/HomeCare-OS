@@ -1,3 +1,4 @@
+from typing import Any
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -22,7 +23,7 @@ class DashboardSummaryView(APIView):
         role = get_user_role(user) or 'nurse'
 
         allowed_widgets = ROLE_WIDGET_CONFIG.get(role, [])
-        data = {'allowed_widgets': allowed_widgets}
+        data: dict[str, Any] = {'allowed_widgets': allowed_widgets}
 
         # Securely compute ONLY allowed widget payloads
         if 'total_revenue' in allowed_widgets or 'branch_revenue' in allowed_widgets:

@@ -15,13 +15,15 @@ export function useRealtimeEvents(token) {
   useEffect(() => {
     if (!token) return;
 
-    const host = window.location.hostname || '127.0.0.1';
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    // If running in Vite dev server (usually :5173), target backend :8000 directly
-    const defaultWsPort = window.location.port === '5173' ? '8000' : (window.location.port || (window.location.protocol === 'https:' ? '443' : '80'));
-    const wsPort = import.meta.env.VITE_WS_PORT || defaultWsPort;
-    const portSuffix = (wsPort === '80' || wsPort === '443') ? '' : `:${wsPort}`;
-    const wsUrl = import.meta.env.VITE_EVENTS_WS_URL || `${wsProtocol}//${host}${portSuffix}/ws/events/?token=${encodeURIComponent(token)}`;
+    let wsUrl;
+    if (import.meta.env.VITE_EVENTS_WS_URL) {
+      wsUrl = `${import.meta.env.VITE_EVENTS_WS_URL}?token=${encodeURIComponent(token)}`;
+    } else if (window.location.protocol === 'https:') {
+      wsUrl = `wss://${window.location.host}/ws/events/?token=${encodeURIComponent(token)}`;
+    } else {
+      const port = window.location.port === '5173' ? ':8000' : (window.location.port ? `:${window.location.port}` : '');
+      wsUrl = `ws://${window.location.hostname}${port}/ws/events/?token=${encodeURIComponent(token)}`;
+    }
 
     let isSubscribed = true;
     let reconnectTimeout = null;

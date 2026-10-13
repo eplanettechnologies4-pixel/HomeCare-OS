@@ -20,3 +20,4 @@ cryptography==42.0.8              # Fernet key generation (django-cryptography d
 django-celery-beat==2.6.0         # periodic task scheduler using DatabaseScheduler
 
 requests>=2.31
+whitenoise==6.7.0

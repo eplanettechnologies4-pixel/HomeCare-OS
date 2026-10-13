@@ -181,7 +181,27 @@ class LiveVisitViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated, IsPatientOrFamilyOwner]
 
     def get_queryset(self):
-        qs = super().get_queryset()
+        from bookings.models import Booking
+        active_bookings = Booking.objects.filter(
+            status__in=['en_route', 'in_progress'],
+            assigned_staff__isnull=False,
+        ).select_related('assigned_staff', 'patient')
+
+        for b in active_bookings:
+            if not hasattr(b, 'live_visit'):
+                LiveVisit.objects.get_or_create(
+                    booking=b,
+                    defaults={
+                        'staff': b.assigned_staff,
+                        'current_latitude': b.assigned_staff.current_latitude or b.patient.latitude or 0,
+                        'current_longitude': b.assigned_staff.current_longitude or b.patient.longitude or 0,
+                        'last_ping_at': b.assigned_staff.updated_at or timezone.now(),
+                    }
+                )
+
+        qs = LiveVisit.objects.select_related('booking__patient', 'staff').filter(
+            booking__status__in=['en_route', 'in_progress']
+        )
         user = self.request.user
         if is_family_user(user):
             return qs.filter(booking__patient__portal_user=user)

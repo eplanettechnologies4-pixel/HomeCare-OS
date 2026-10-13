@@ -66,7 +66,7 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
                 linked_patient = getattr(user, 'patient_profile', None)
                 if linked_patient is not None:
                     role = 'patient_family'
-                    platform_allowed = 'mobile'
+                    platform_allowed = 'both'
                 else:
                     role = 'super_admin' if user.is_superuser else 'admin'
                     platform_allowed = 'web'
@@ -98,7 +98,7 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
             'role': role,
             'role_display': (
                 staff_member.get_role_display() if staff_member
-                else role.replace('_', ' ').title()
+                else (role or '').replace('_', ' ').title()
             ),
             'platform_allowed': platform_allowed,
             'staff_id': staff_member.id if staff_member else None,
@@ -196,8 +196,8 @@ class MeView(APIView):
                 role = profile_role or 'patient_family'
                 payload.update({
                     'role': role,
-                    'role_display': role.replace('_', ' ').title(),
-                    'platform_allowed': 'mobile',
+                    'role_display': (role or '').replace('_', ' ').title(),
+                    'platform_allowed': 'both',
                     'linked_patient_id': linked_patient.id if linked_patient else None,
                     'linked_patient_name': linked_patient.full_name if linked_patient else None,
                 })

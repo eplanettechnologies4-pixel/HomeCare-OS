@@ -73,10 +73,29 @@ class PatientViewSet(viewsets.ModelViewSet):
         patient = self.get_object()
         return Response(VitalSignSerializer(patient.vitals.all(), many=True).data)
 
-    @action(detail=True, methods=['get'])
-    def nurse_notes(self, request, pk=None):
+    def _handle_notes(self, request):
         patient = self.get_object()
-        return Response(NurseNoteSerializer(patient.nurse_notes.all(), many=True).data)
+        if request.method == 'POST':
+            staff = getattr(request.user, 'staffmember', None)
+            note_text = request.data.get('note', '') or request.data.get('notes', '')
+            booking_id = request.data.get('booking') or request.data.get('booking_id')
+            booking = None
+            if booking_id:
+                from bookings.models import Booking
+                booking = Booking.objects.filter(pk=booking_id, patient=patient).first()
+            created_note = NurseNote.objects.create(
+                patient=patient,
+                recorded_by=staff,
+                booking=booking,
+                note=note_text or 'Nurse note recorded.'
+            )
+            return Response(NurseNoteSerializer(created_note).data, status=status.HTTP_201_CREATED)
+        notes = patient.nurse_notes.select_related('recorded_by').order_by('-recorded_at')
+        return Response(NurseNoteSerializer(notes, many=True).data)
+
+    @action(detail=True, methods=['get', 'post'])
+    def nurse_notes(self, request, pk=None):
+        return self._handle_notes(request)
 
     @action(detail=True, methods=['get'])
     def labs(self, request, pk=None):
@@ -350,11 +369,9 @@ class PatientViewSet(viewsets.ModelViewSet):
 
         return Response(result)
 
-    @action(detail=True, methods=['get'])
+    @action(detail=True, methods=['get', 'post'])
     def notes(self, request, pk=None):
-        patient = self.get_object()
-        notes = patient.nurse_notes.select_related('recorded_by').order_by('-recorded_at')
-        return Response(NurseNoteSerializer(notes, many=True).data)
+        return self._handle_notes(request)
 
     # ── Patient Portal Login Actions ──────────────────────────────────────────
 

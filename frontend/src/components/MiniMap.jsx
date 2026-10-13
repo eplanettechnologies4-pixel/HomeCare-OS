@@ -81,7 +81,7 @@ export default function MiniMap({
 
     // Clean up patient destination markers
     Object.keys(patientMarkersRef.current).forEach((id) => {
-      if (!visits.find((v) => String(v.id) === id) || (selectedStaffId && !visits.find((v) => String(v.id) === id && (v.assigned_staff?.id === selectedStaffId || v.staff_id === selectedStaffId)))) {
+      if (!visits.find((v) => String(v.id) === id) || (selectedStaffId && !visits.find((v) => String(v.id) === id && (String(v.assigned_staff?.id) === String(selectedStaffId) || String(v.staff_id) === String(selectedStaffId))))) {
         patientMarkersRef.current[id].remove();
         delete patientMarkersRef.current[id];
       }
@@ -97,7 +97,7 @@ export default function MiniMap({
       if (!lat || !lng) return;
 
       const visitStaffId = visit.assigned_staff?.id || visit.staff_id;
-      const isSelected = selectedStaffId && visitStaffId === selectedStaffId;
+      const isSelected = selectedStaffId && String(visitStaffId) === String(selectedStaffId);
       const isDimmed = selectedStaffId && !isSelected;
 
       if (isSelected) {
@@ -258,9 +258,8 @@ export default function MiniMap({
         connectLineRef.current.bindPopup(`<strong>Distance:</strong> ${distFormatted}${etaText}`);
       }
 
-      // 3. Draw Trail of the last 30 minutes of GPS pings for the selected nurse
       const staffId = selectedVisit.assigned_staff?.id || selectedVisit.staff_id;
-      const rawTrail = (staffId && staffTrails[staffId]) ? staffTrails[staffId] : [];
+      const rawTrail = staffId ? (staffTrails[staffId] || staffTrails[String(staffId)] || []) : [];
       // Filter pings within the last 30 minutes (30 * 60 * 1000 ms)
       const now = Date.now();
       const recentPings = rawTrail.filter((p) => {

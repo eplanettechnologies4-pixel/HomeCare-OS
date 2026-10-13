@@ -47,13 +47,16 @@ export function useWebSocketTracking(token) {
   useEffect(() => {
     if (!token) return;
 
-    // Resolve host and port dynamically from window location or env
-    const host = window.location.hostname || 'localhost';
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const defaultWsPort = window.location.port === '5173' ? '8000' : (window.location.port || (window.location.protocol === 'https:' ? '443' : '80'));
-    const wsPort = import.meta.env.VITE_WS_PORT || defaultWsPort;
-    const portSuffix = (wsPort === '80' || wsPort === '443') ? '' : `:${wsPort}`;
-    const wsUrl = import.meta.env.VITE_WS_URL || `${wsProtocol}//${host}${portSuffix}/ws/tracking/?token=${encodeURIComponent(token)}`;
+    // Resolve WebSocket URL: on HTTPS strictly connect to wss://${window.location.host}/ws/tracking/ (no port 8000)
+    let wsUrl;
+    if (import.meta.env.VITE_WS_URL) {
+      wsUrl = `${import.meta.env.VITE_WS_URL}?token=${encodeURIComponent(token)}`;
+    } else if (window.location.protocol === 'https:') {
+      wsUrl = `wss://${window.location.host}/ws/tracking/?token=${encodeURIComponent(token)}`;
+    } else {
+      const port = window.location.port === '5173' ? ':8000' : (window.location.port ? `:${window.location.port}` : '');
+      wsUrl = `ws://${window.location.hostname}${port}/ws/tracking/?token=${encodeURIComponent(token)}`;
+    }
 
     let isSubscribed = true;
     let reconnectTimeout = null;
@@ -123,7 +126,10 @@ function handleWebSocketMessage(msg) {
       useStore.setState((prev) => ({
         liveVisits: (prev.liveVisits || []).map((v) => {
           const staffId = v.assigned_staff?.id || v.staff?.id || v.staff_id || v.staff;
-          if (staffId === msg.staff_id || v.id === msg.booking_id) {
+          if (
+            (staffId !== undefined && msg.staff_id !== undefined && String(staffId) === String(msg.staff_id)) ||
+            (v.id !== undefined && msg.booking_id !== undefined && String(v.id) === String(msg.booking_id))
+          ) {
             return {
               ...v,
               staff_lat: lat,
@@ -206,7 +212,7 @@ function handleWebSocketMessage(msg) {
 
       useStore.setState((prev) => ({
         liveVisits: (prev.liveVisits || []).map((v) =>
-          v.id === booking_id
+          String(v.id) === String(booking_id)
             ? {
                 ...v,
                 status: newStatus,

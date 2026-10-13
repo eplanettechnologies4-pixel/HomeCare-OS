@@ -4,7 +4,7 @@ import {
 } from '../data/mockData';
 import { apiFetch, setTokenGetter, setStoreRef } from '../services/api';
 
-const rawBase = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
+const rawBase = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? 'http://localhost:8000/api' : '/api');
 const API_BASE = rawBase.endsWith('/api') ? rawBase : `${rawBase.replace(/\/+$/, '')}/api`;
 
 const savedToken = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
@@ -78,7 +78,7 @@ const useStore = create((set, get) => ({
         return { success: false, error: err, isMobileOnly };
       }
     } catch (err) {
-      return { success: false, error: 'Cannot connect to server. Please check backend is running on port 8000.' };
+      return { success: false, error: 'Cannot connect to server. Please check that the backend is running.' };
     }
   },
 
@@ -182,7 +182,7 @@ const useStore = create((set, get) => ({
   updateStaffLocation: (staffId, lat, lng) =>
     set((s) => ({
       liveVisits: s.liveVisits.map((v) =>
-        v.assigned_staff?.id === staffId || v.staff_id === staffId
+        String(v.assigned_staff?.id) === String(staffId) || String(v.staff_id) === String(staffId)
           ? { ...v, staff_lat: lat, staff_lng: lng, current_latitude: lat, current_longitude: lng, is_stale: false }
           : v
       ),

@@ -74,8 +74,14 @@ services:
       - static_files:/app/staticfiles
       - media_files:/app/media
     ports:
-      # Only web (80/443) is exposed — typically fronted by Nginx/Caddy on VPS
-      - "8000:8000"
+      # Hardened: loopback only on host so requests MUST pass through Nginx
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health/')\" || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     depends_on:
       db:
         condition: service_healthy
@@ -128,11 +134,17 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://179.198.198.179:8000}
-        VITE_API_URL: ${VITE_API_URL:-http://179.198.198.179:8000/api}
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api}
+        VITE_API_URL: ${VITE_API_URL:-/api}
     restart: unless-stopped
     ports:
-      - "5173:80"
+      # Hardened: loopback only on host port 3001, fronted by host Nginx
+      - "127.0.0.1:3001:80"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://127.0.0.1:80/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
     networks:
       - homecare_net
     depends_on:
