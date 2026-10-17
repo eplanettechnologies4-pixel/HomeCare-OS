@@ -8,7 +8,7 @@ import useStore from '../store/useStore';
 import { REVENUE_BY_SERVICE, DAILY_REVENUE } from '../data/mockData';
 import { format } from 'date-fns';
 
-const PIE_COLORS = ['#611F8C', '#8B36C4', '#A855F7', '#DE9A3C'];
+const PIE_COLORS = ['#6D28D9', '#8B5CF6', '#A78BFA', '#DE9A3C'];
 const PAYMENT_BADGE = { advance: 'badge-green', pending: 'badge-red', partial: 'badge-amber', waived: 'badge-grey' };
 
 export default function Accounts() {
@@ -91,7 +91,7 @@ export default function Accounts() {
                 <XAxis dataKey="date" tick={{ fontSize: 10, fontFamily: 'var(--font-mono)', fill: '#9ca3af' }} />
                 <YAxis tick={{ fontSize: 10, fontFamily: 'var(--font-mono)', fill: '#9ca3af' }} />
                 <Tooltip formatter={(v) => `PKR ${v.toLocaleString()}`} contentStyle={{ fontSize: 12, fontFamily: 'var(--font-body)', borderRadius: 8 }} />
-                <Bar dataKey="total" fill="#611F8C" radius={[4, 4, 0, 0]} name="Revenue" />
+                <Bar dataKey="total" fill="#6D28D9" radius={[4, 4, 0, 0]} name="Revenue" />
               </BarChart>
             </ResponsiveContainer>
           </div>

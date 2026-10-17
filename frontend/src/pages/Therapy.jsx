@@ -16,8 +16,8 @@ const DISCIPLINES = [
     serviceType: 'physiotherapy',
     roleFilter: 'physio',
     icon: Activity,
-    accent: '#611F8C',
-    gradient: 'linear-gradient(135deg, #611F8C 0%, #8b36c4 100%)',
+    accent: '#6D28D9',
+    gradient: 'linear-gradient(135deg, #6D28D9 0%, #8b36c4 100%)',
     lightBg: '#fbf5ff',
     border: '#e9d5ff',
     badge: 'Mobility & Ortho',
@@ -84,8 +84,8 @@ const DISCIPLINES = [
 const STATUS_BADGE = {
   completed:   { label: 'Completed',   color: '#065f46', bg: '#ecfdf5', border: '#a7f3d0' },
   in_progress: { label: 'In Progress', color: '#1e40af', bg: '#eff6ff', border: '#bfdbfe' },
-  assigned:    { label: 'Assigned',    color: '#611F8C', bg: '#faf5ff', border: '#e9d5ff' },
-  scheduled:   { label: 'Scheduled',   color: '#611F8C', bg: '#faf5ff', border: '#e9d5ff' },
+  assigned:    { label: 'Assigned',    color: '#6D28D9', bg: '#faf5ff', border: '#e9d5ff' },
+  scheduled:   { label: 'Scheduled',   color: '#6D28D9', bg: '#faf5ff', border: '#e9d5ff' },
   pending:     { label: 'Pending Care',color: '#92400e', bg: '#fef3c7', border: '#fde68a' },
   cancelled:   { label: 'Cancelled',   color: '#991b1b', bg: '#fef2f2', border: '#fecaca' },
 };
@@ -121,7 +121,7 @@ function ReassignTherapistModal({ session, staffList, onClose, onConfirm }) {
   return (
     <div className="modal-backdrop" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal" style={{ width: 560 }}>
-        <div className="modal-header" style={{ background: '#611F8C', color: 'white' }}>
+        <div className="modal-header" style={{ background: '#6D28D9', color: 'white' }}>
           <div>
             <h2 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.15rem', margin: 0, color: 'white', display: 'flex', alignItems: 'center', gap: 8 }}>
               <UserCheck size={18} /> Assign Nurse / Therapist
@@ -202,7 +202,7 @@ function ReassignTherapistModal({ session, staffList, onClose, onConfirm }) {
 
           <div className="modal-footer">
             <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
-            <button type="submit" className="btn btn-primary" style={{ background: '#611F8C' }}>
+            <button type="submit" className="btn btn-primary">
               Confirm Staff Dispatch & Sync Booking →
             </button>
           </div>
@@ -462,7 +462,7 @@ function SoapNoteModal({ session, onClose, onSave }) {
   return (
     <div className="modal-backdrop" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal" style={{ width: 640 }}>
-        <div className="modal-header" style={{ background: '#611F8C', color: 'white' }}>
+        <div className="modal-header" style={{ background: '#6D28D9', color: 'white' }}>
           <div>
             <h2 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.15rem', margin: 0, color: 'white', display: 'flex', alignItems: 'center', gap: 8 }}>
               <FileText size={18} /> Clinical SOAP Assessment
@@ -476,7 +476,7 @@ function SoapNoteModal({ session, onClose, onSave }) {
 
         <div className="modal-body" style={{ padding: 20 }}>
           <div className="form-group" style={{ marginBottom: 12 }}>
-            <label className="form-label" style={{ fontWeight: 700, color: '#611F8C' }}>S — Subjective (Patient Feedback & Symptoms)</label>
+            <label className="form-label" style={{ fontWeight: 700, color: '#6D28D9' }}>S — Subjective (Patient Feedback & Symptoms)</label>
             <textarea className="form-textarea" rows={2} value={subjective} onChange={e => setSubjective(e.target.value)} />
           </div>
           <div className="form-group" style={{ marginBottom: 12 }}>
@@ -495,7 +495,7 @@ function SoapNoteModal({ session, onClose, onSave }) {
 
         <div className="modal-footer">
           <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" onClick={handleSave} style={{ background: '#611F8C' }}>
+          <button className="btn btn-primary" onClick={handleSave}>
             Save SOAP Assessment
           </button>
         </div>
@@ -1122,7 +1122,7 @@ export default function Therapy() {
       {/* ── 2. REAL-TIME STATS ROW (LIVE NURSE & BOOKING METRICS) ───────────── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14, marginBottom: 24 }}>
         <div className="card" style={{ padding: '16px 18px', display: 'flex', alignItems: 'center', gap: 14, borderRadius: 14 }}>
-          <div style={{ width: 48, height: 48, borderRadius: 12, background: 'rgba(97,31,140,0.08)', color: '#611F8C', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ width: 48, height: 48, borderRadius: 12, background: 'rgba(109,40,217,0.08)', color: '#6D28D9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Activity size={24} />
           </div>
           <div>
@@ -1139,7 +1139,7 @@ export default function Therapy() {
           <div>
             <div style={{ fontSize: '0.74rem', textTransform: 'uppercase', color: 'var(--status-grey)', fontWeight: 700 }}>Synced Therapy Bookings</div>
             <div style={{ fontSize: '1.4rem', fontWeight: 800, color: 'var(--teal-900)' }}>{totalSessionsCount} Sessions</div>
-            <div style={{ fontSize: '0.72rem', color: '#611F8C', fontWeight: 600 }}>Live Roster Feed</div>
+            <div style={{ fontSize: '0.72rem', color: '#6D28D9', fontWeight: 600 }}>Live Roster Feed</div>
           </div>
         </div>
 

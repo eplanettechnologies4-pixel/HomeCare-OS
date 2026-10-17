@@ -1,4 +1,6 @@
 import os
+import re
+from decimal import Decimal
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
@@ -15,8 +17,13 @@ from django.contrib.auth.models import User
 from patients.models import Patient
 from crm.models import Lead, LeadStage
 from notifications.views import create_notification
-from .models import Booking
-from .serializers import BookingListSerializer, BookingDetailSerializer
+from .models import Booking, ServiceCatalogItem
+from .serializers import (
+    BookingListSerializer,
+    BookingDetailSerializer,
+    ServiceCatalogItemSerializer,
+    PublicServiceCatalogItemSerializer,
+)
 from .filters import BookingFilter
 
 
@@ -62,6 +69,131 @@ class PublicBookingRateThrottle(AnonRateThrottle):
     def get_rate(self):
         env_rate = os.environ.get('PUBLIC_BOOKING_THROTTLE_RATE') or getattr(settings, 'PUBLIC_BOOKING_THROTTLE_RATE', '10/hour')
         return (env_rate or '10/hour').strip()
+
+
+class PublicCatalogRateThrottle(AnonRateThrottle):
+    """
+    Limits public service catalogue reads per IP.
+    """
+    scope = 'public_catalog'
+
+    def get_rate(self):
+        env_rate = os.environ.get('PUBLIC_CATALOG_THROTTLE_RATE') or getattr(settings, 'PUBLIC_CATALOG_THROTTLE_RATE', '60/minute')
+        return (env_rate or '60/minute').strip()
+
+
+def compute_catalog_price(service_type, requested_item='', service_mode='', provider_level='', shift_role='', rental_period='', shift_duration=''):
+    """
+    Computes estimated_price server-side from ServiceCatalogItem.
+    Returns Decimal or None. Client-sent prices are never used.
+    Unknown or ambiguous unresolvable names return None (never guess).
+    """
+    item = None
+
+    # If requested_item is provided, resolve via ServiceCatalogItem.resolve_alias
+    if requested_item and str(requested_item).strip():
+        clean_req = str(requested_item).strip()
+        item = ServiceCatalogItem.resolve_alias(clean_req, service_type=service_type)
+        if not item:
+            # Explicit requested item could not be resolved -> never guess!
+            return None
+        return item.price_min
+
+    # If requested_item was NOT provided, attempt unambiguous category-based resolution
+    st = (service_type or '').strip().lower()
+
+    # Doctors resolution
+    if st in ('doctors', 'doctor_consultation'):
+        target_name = None
+        if service_mode == 'online':
+            target_name = 'Online Specialist' if provider_level == 'specialist' else ('Online Medical Officer' if provider_level == 'medical_officer' else None)
+        elif service_mode == 'home':
+            target_name = 'Home visit Specialist' if provider_level == 'specialist' else ('Home visit Medical Officer' if provider_level == 'medical_officer' else None)
+        if target_name:
+            item = ServiceCatalogItem.objects.filter(is_active=True, category='doctors', name__iexact=target_name).first()
+
+    # Nursing Long Term resolution
+    elif st in ('long_term', 'nursing_long_term'):
+        shift_prefix = '8h' if '8' in str(shift_duration) else ('12h' if '12' in str(shift_duration) else ('24h' if '24' in str(shift_duration) else ''))
+        role_kw = 'RN' if shift_role == 'rn' else ('Assistant' if shift_role == 'assistant' else ('Attendant' if shift_role == 'attendant' else ''))
+        if shift_prefix == '8h' and role_kw == 'Attendant':
+            return None  # 8h attendant is n.a.
+        if shift_prefix == '24h' and role_kw == 'RN':
+            return None  # 24h RN is no longer offered
+        pkg_prefix = 'Per shift' if (rental_period == 'per_shift' or service_mode == 'per_shift') else 'Per month'
+        if shift_prefix and role_kw:
+            item = ServiceCatalogItem.objects.filter(
+                is_active=True,
+                category='long_term',
+                name__startswith=pkg_prefix,
+                name__icontains=shift_prefix,
+            ).filter(name__icontains=role_kw).first()
+
+    # Nutrition resolution
+    elif st in ('nutrition', 'dietician'):
+        if service_mode == 'online':
+            item = ServiceCatalogItem.objects.filter(is_active=True, category='nutrition', name__iexact='online').first()
+        elif service_mode == 'home':
+            item = ServiceCatalogItem.objects.filter(is_active=True, category='nutrition', name__iexact='home').first()
+
+    # Psychology resolution
+    elif st in ('psychology', 'psychotherapy'):
+        if service_mode == 'online':
+            item = ServiceCatalogItem.objects.filter(is_active=True, category='psychology', name__iexact='online').first()
+        elif service_mode == 'home':
+            item = ServiceCatalogItem.objects.filter(is_active=True, category='psychology', name__iexact='in-person or home').first()
+
+    # Baby Sitter resolution
+    elif st in ('baby_sitter',):
+        if '12' in str(shift_duration):
+            item = ServiceCatalogItem.objects.filter(is_active=True, category='baby_sitter', name__iexact='12h').first()
+        elif '24' in str(shift_duration):
+            item = ServiceCatalogItem.objects.filter(is_active=True, category='baby_sitter', name__iexact='24h').first()
+
+    if item and item.price_min is not None:
+        return item.price_min
+
+    return None
+
+
+class ServiceCatalogViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    Service Catalogue endpoints:
+    - GET /api/services/catalog/ (authenticated)
+    - GET /api/services/catalog/public/ (AllowAny, throttled, no internal fields)
+    """
+    permission_classes = [IsAuthenticated]
+    queryset = ServiceCatalogItem.objects.filter(is_active=True)
+    serializer_class = ServiceCatalogItemSerializer
+
+    def get_permissions(self):
+        if self.action == 'public':
+            return [AllowAny()]
+        return super().get_permissions()
+
+    def get_throttles(self):
+        if self.action == 'public':
+            return [PublicCatalogRateThrottle()]
+        return super().get_throttles()
+
+    def get_queryset(self):
+        qs = ServiceCatalogItem.objects.filter(is_active=True)
+        cat = self.request.query_params.get('category')
+        if cat:
+            qs = qs.filter(category=cat)
+        return qs
+
+    @action(
+        detail=False,
+        methods=['get'],
+        permission_classes=[AllowAny],
+        throttle_classes=[PublicCatalogRateThrottle],
+        url_path='public'
+    )
+    def public(self, request):
+        qs = self.get_queryset()
+        serializer = PublicServiceCatalogItemSerializer(qs, many=True)
+        return Response(serializer.data)
 
 
 
@@ -570,10 +702,41 @@ class BookingViewSet(viewsets.ModelViewSet):
             )
 
             # ── 7. Resolve Booking Scheduling & Options ──────────────────────
-            service_type = data.get('service_type') or data.get('service_id') or 'short_service'
-            valid_services = [c[0] for c in Booking._meta.get_field('service_type').choices]
-            if service_type not in valid_services:
+            raw_service = data.get('service_type') or data.get('service_id')
+            valid_services = [c[0] for c in Booking.service_type.field.choices]
+            if raw_service:
+                if raw_service not in valid_services:
+                    return Response(
+                        {'error': f'Invalid service_type "{raw_service}".'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                service_type = raw_service
+            else:
                 service_type = 'short_service'
+
+            # Parse requested_item from payload or notes ("Requested service: <name>")
+            notes = (data.get('notes') or '').strip()
+            requested_item = (data.get('requested_item') or '').strip()
+            if not requested_item and notes:
+                match = re.search(r'Requested service:\s*([^\r\n;]+)', notes, re.IGNORECASE)
+                if match:
+                    requested_item = match.group(1).strip()
+
+            raw_mode = (data.get('service_mode') or '').strip().lower()
+            valid_modes = [c[0] for c in Booking.service_mode.field.choices]
+            service_mode = raw_mode if raw_mode in valid_modes else ''
+
+            raw_level = (data.get('provider_level') or '').strip().lower()
+            valid_levels = [c[0] for c in Booking.provider_level.field.choices]
+            provider_level = raw_level if raw_level in valid_levels else ''
+
+            raw_role = (data.get('shift_role') or '').strip().lower()
+            valid_roles = [c[0] for c in Booking.shift_role.field.choices]
+            shift_role = raw_role if raw_role in valid_roles else ''
+
+            raw_period = (data.get('rental_period') or '').strip().lower()
+            valid_periods = [c[0] for c in Booking.rental_period.field.choices]
+            rental_period = raw_period if raw_period in valid_periods else ''
 
             scheduled_time = None
             sched_str = data.get('scheduled_time')
@@ -601,19 +764,28 @@ class BookingViewSet(viewsets.ModelViewSet):
                     scheduled_time = timezone.now() + timezone.timedelta(days=1)
 
             shift_duration = data.get('shift_duration') or '4_hours'
-            if shift_duration not in [c[0] for c in Booking._meta.get_field('shift_duration').choices]:
+            valid_durations = [c[0] for c in Booking.shift_duration.field.choices]
+            if shift_duration not in valid_durations:
                 shift_duration = '4_hours'
 
             shift_frequency = data.get('shift_frequency') or 'once'
-            if shift_frequency not in [c[0] for c in Booking._meta.get_field('shift_frequency').choices]:
+            valid_frequencies = [c[0] for c in Booking.shift_frequency.field.choices]
+            if shift_frequency not in valid_frequencies:
                 shift_frequency = 'once'
 
             payment_method = data.get('payment_method') or 'cash_on_delivery'
 
-            try:
-                amount = float(data.get('amount') or 2500)
-            except (ValueError, TypeError):
-                amount = 2500.0
+            # Server-side pricing: NEVER trust client price!
+            estimated_price = compute_catalog_price(
+                service_type=service_type,
+                requested_item=requested_item,
+                service_mode=service_mode,
+                provider_level=provider_level,
+                shift_role=shift_role,
+                rental_period=rental_period,
+                shift_duration=shift_duration,
+            )
+            amount = estimated_price if estimated_price is not None else Decimal('0.00')
 
             # Prescription handling: if true but no file sent, don't fail, save has_prescription=True
             raw_has_rx = data.get('has_prescription')
@@ -632,6 +804,12 @@ class BookingViewSet(viewsets.ModelViewSet):
             booking = Booking(
                 patient=patient,
                 service_type=service_type,
+                requested_item=requested_item,
+                service_mode=service_mode,
+                provider_level=provider_level,
+                shift_role=shift_role,
+                rental_period=rental_period,
+                estimated_price=estimated_price,
                 status='pending',
                 payment_status='pending',
                 payment_method=payment_method,
@@ -653,9 +831,9 @@ class BookingViewSet(viewsets.ModelViewSet):
                 gender_preference=data.get('gender_preference') or 'any',
                 consultant_name=data.get('consultant_name') or '',
                 consultant_details=data.get('consultant_details') or '',
-                notes=data.get('notes') or '',
+                notes=notes,
                 amount=amount,
-                amount_paid=0,
+                amount_paid=Decimal('0.00'),
                 care_manager_name='Hina Malik (Care Coordinator)',
             )
             if prescription_file:
@@ -674,7 +852,10 @@ class BookingViewSet(viewsets.ModelViewSet):
                 source=source,
                 stage=LeadStage.NEW_LEAD,
                 notes=f"Received via {source_title}. Ref: {booking.reference_code}. Notes: {booking.notes}".strip(),
-                service_needed=booking.get_service_type_display(),
+                service_needed=booking.requested_item or booking.get_service_type_display(),
+                requested_item=booking.requested_item,
+                service_mode=booking.service_mode,
+                estimated_price=booking.estimated_price,
                 converted_patient=patient,
                 converted_booking=booking,
             )
@@ -685,9 +866,20 @@ class BookingViewSet(viewsets.ModelViewSet):
             target_users.update(User.objects.filter(profile__role__in=['super_admin', 'admin', 'crm_executive']))
             target_users.update(User.objects.filter(staffmember__role__in=['super_admin', 'admin', 'crm_executive']))
 
+            extra_info = []
+            if booking.requested_item:
+                extra_info.append(f"Item: {booking.requested_item}")
+            if booking.service_mode:
+                extra_info.append(f"Mode: {booking.service_mode}")
+            if booking.estimated_price is not None:
+                extra_info.append(f"Est: PKR {int(booking.estimated_price):,}")
+
+            extra_str = f" [{', '.join(extra_info)}]" if extra_info else ""
+
             notification_msg = (
                 f"New Public Booking Received: {patient.first_name} {patient.last_name} "
-                f"for {booking.get_service_type_display()} (Ref: {booking.reference_code}, Source: {source_title})"
+                f"for {booking.get_service_type_display()}{extra_str} "
+                f"(Ref: {booking.reference_code}, Source: {source_title})"
             )
             for u in target_users:
                 create_notification(
@@ -695,7 +887,13 @@ class BookingViewSet(viewsets.ModelViewSet):
                     message=notification_msg,
                     icon_key='calendar',
                     target_screen='bookings',
-                    target_params={'booking_id': booking.id, 'reference_code': booking.reference_code}
+                    target_params={
+                        'booking_id': booking.id,
+                        'reference_code': booking.reference_code,
+                        'requested_item': booking.requested_item,
+                        'service_mode': booking.service_mode,
+                        'estimated_price': str(booking.estimated_price) if booking.estimated_price is not None else None,
+                    }
                 )
 
         # ── 11. Return Confirmation Response ─────────────────────────────────

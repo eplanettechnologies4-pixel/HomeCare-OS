@@ -1,5 +1,5 @@
 import React from 'react';
-import { Shield, ChevronDown } from 'lucide-react';
+import { Shield } from 'lucide-react';
 import useStore from '../store/useStore';
 import { ROLE_CONFIG } from '../data/mockData';
 
@@ -23,21 +23,36 @@ export default function RoleSelector() {
   };
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--sage-100)', padding: '4px 10px', borderRadius: 'var(--radius-sm)' }}>
-      <Shield size={14} style={{ color: 'var(--teal-600)' }} />
-      <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--teal-800)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Role:</span>
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        background: 'var(--gray-100)',
+        border: '1px solid var(--border)',
+        padding: '0 12px',
+        height: 38,
+        borderRadius: 'var(--radius-control)',
+      }}
+    >
+      <Shield size={15} style={{ color: 'var(--primary)' }} />
+      <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+        Role:
+      </span>
       <select
         value={currentRole}
         onChange={handleRoleChange}
         style={{
           border: 'none',
           background: 'transparent',
-          fontSize: '0.8rem',
-          fontWeight: 700,
-          color: 'var(--teal-800)',
+          fontSize: 13,
+          fontWeight: 600,
+          color: 'var(--text)',
           cursor: 'pointer',
-          outline: 'none'
+          outline: 'none',
+          paddingRight: 8,
         }}
+        aria-label="Switch User Role"
       >
         {Object.entries(ROLE_CONFIG).map(([key, cfg]) => (
           <option key={key} value={key}>{cfg.label}</option>

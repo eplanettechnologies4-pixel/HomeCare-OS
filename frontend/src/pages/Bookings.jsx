@@ -8,7 +8,10 @@ import useStore from '../store/useStore';
 import NurseAssignPanel from '../components/NurseAssignPanel';
 import PatientSourceBadge from '../components/PatientSourceBadge';
 import LocationPicker from '../components/LocationPicker';
+import UniversalPrintButton from '../components/UniversalPrintButton';
 import { format } from 'date-fns';
+import { Stepper } from '../components/ui/Stepper';
+import { SERVICE_CATEGORIES, SERVICE_CATALOG_ITEMS, getItemsByCategory, findCatalogItem, PHARMACY_REQUIREMENTS_NOTE } from '../data/serviceCatalog';
 
 const STATUS_BADGE = {
   pending:     'badge-amber',
@@ -26,13 +29,16 @@ const PAYMENT_BADGE = { advance: 'badge-green', pending: 'badge-red', partial: '
 function NewBookingModal({ onClose, onSubmit }) {
   const patients      = useStore((s) => s.patients);
   const staff         = useStore((s) => s.staff);
+  const catalog       = useStore((s) => s.catalog);
   const fetchStaff    = useStore((s) => s.fetchStaff);
   const fetchPatients = useStore((s) => s.fetchPatients);
+  const fetchCatalog  = useStore((s) => s.fetchCatalog);
 
   useEffect(() => {
     fetchStaff();
     fetchPatients();
-  }, [fetchStaff, fetchPatients]);
+    fetchCatalog();
+  }, [fetchStaff, fetchPatients, fetchCatalog]);
 
 
   // Full Intake State (Required & Optional fields)
@@ -52,12 +58,19 @@ function NewBookingModal({ onClose, onSubmit }) {
     consult_doctor_needed: false,
     prescription_name: '',
     allergies: 'NKDA',
-    service_type: 'short_service',
+    service_type: 'doctors',
+    requested_item: 'Online Specialist',
+    service_mode: 'online',
+    provider_level: 'specialist',
+    shift_role: '',
+    rental_period: '',
+    delivery_charge: '',
+    estimated_price: 3500,
     scheduled_time: '',
     shift_duration: '4_hours',
     shift_frequency: 'once',
     payment_method: 'cash_on_delivery',
-    amount: '2500',
+    amount: '3500',
     assigned_staff_id: '',
     backup_staff_id: '',
     email: '',
@@ -86,6 +99,139 @@ function NewBookingModal({ onClose, onSubmit }) {
       return next;
     });
   };
+
+  const handleCategoryChange = (catId) => {
+    const items = getItemsByCategory(catId, catalog);
+    let firstItem = items[0] || null;
+    let autoAmount = '';
+    let estPrice = null;
+    let mode = '';
+    let level = '';
+    let role = '';
+    let period = '';
+    let duration = form.shift_duration;
+    let pkgType = form.package_type || 'per_month';
+
+    if (catId === 'long_term') {
+      pkgType = 'per_month';
+      duration = '8_hours';
+      role = 'rn';
+      firstItem = findCatalogItem('long_term', 'Per month - 8h - Registered Nurse (RN)', catalog) || firstItem;
+    }
+
+    if (firstItem) {
+      if (firstItem.price_min != null && firstItem.price_min === firstItem.price_max) {
+        autoAmount = String(firstItem.price_min);
+        estPrice = firstItem.price_min;
+      }
+      mode = firstItem.service_mode || (catId === 'doctors' ? 'online' : '');
+      level = firstItem.provider_level || (catId === 'doctors' ? 'specialist' : '');
+      if (catId !== 'long_term') role = firstItem.shift_role || '';
+      period = firstItem.rental_period || (catId === 'equipment_rental' ? 'monthly' : '');
+      if (firstItem.shift_duration && catId !== 'long_term') duration = firstItem.shift_duration;
+    }
+
+    setForm(f => ({
+      ...f,
+      service_type: catId,
+      package_type: pkgType,
+      requested_item: firstItem ? firstItem.name : '',
+      service_mode: mode,
+      provider_level: level,
+      shift_role: role,
+      rental_period: period,
+      shift_duration: duration,
+      estimated_price: estPrice,
+      amount: autoAmount,
+    }));
+  };
+
+  const handleItemChange = (itemName) => {
+    const item = findCatalogItem(form.service_type, itemName, catalog);
+    let autoAmount = '';
+    let estPrice = null;
+    let mode = form.service_mode;
+    let level = form.provider_level;
+    let role = form.shift_role;
+    let period = form.rental_period;
+    let duration = form.shift_duration;
+    let pkgType = form.package_type || 'per_month';
+
+    if (item) {
+      if (item.price_min != null && item.price_min === item.price_max) {
+        autoAmount = String(item.price_min);
+        estPrice = item.price_min;
+      } else {
+        autoAmount = '';
+        estPrice = item.price_min || null;
+      }
+      if (item.service_mode) mode = item.service_mode;
+      if (item.provider_level) level = item.provider_level;
+      if (item.shift_role) role = item.shift_role;
+      if (item.rental_period) period = item.rental_period;
+      if (item.shift_duration) duration = item.shift_duration;
+      if (item.package_type) pkgType = item.package_type;
+      else if (itemName.startsWith('Per shift')) pkgType = 'per_shift';
+      else if (itemName.startsWith('Per month')) pkgType = 'per_month';
+    }
+
+    setForm(f => ({
+      ...f,
+      requested_item: itemName,
+      package_type: pkgType,
+      service_mode: mode,
+      provider_level: level,
+      shift_role: role,
+      rental_period: period,
+      shift_duration: duration,
+      estimated_price: estPrice,
+      amount: autoAmount,
+    }));
+  };
+
+  const handleDoctorFieldChange = (newMode, newLevel) => {
+    let matchName = form.requested_item;
+    if (form.requested_item !== 'Follow-up') {
+      if (newMode === 'online' && newLevel === 'specialist') matchName = 'Online Specialist';
+      else if (newMode === 'online' && newLevel === 'medical_officer') matchName = 'Online Medical Officer';
+      else if (newMode === 'home' && newLevel === 'specialist') matchName = 'Home visit Specialist';
+      else if (newMode === 'home' && newLevel === 'medical_officer') matchName = 'Home visit Medical Officer';
+    }
+    const item = findCatalogItem('doctors', matchName);
+    setForm(f => ({
+      ...f,
+      service_mode: newMode,
+      provider_level: newLevel,
+      requested_item: matchName,
+      estimated_price: item && item.price_min != null && item.price_min === item.price_max ? item.price_min : null,
+      amount: item && item.price_min != null && item.price_min === item.price_max ? String(item.price_min) : '',
+    }));
+  };
+
+  const handleNursingLongTermFieldChange = (newPkgType, newDuration, newRole) => {
+    let role = newRole;
+    // Auto-adjust not-offered combinations
+    if (newDuration === '8_hours' && role === 'attendant') {
+      role = 'rn';
+    } else if (newDuration === '24_hours' && role === 'rn') {
+      role = 'assistant';
+    }
+    const pkgPrefix = newPkgType === 'per_shift' ? 'Per shift' : 'Per month';
+    const durPrefix = newDuration === '8_hours' ? '8h' : newDuration === '12_hours' ? '12h' : '24h';
+    const roleName = role === 'rn' ? 'Registered Nurse (RN)' : (role === 'assistant' ? 'Nursing Assistant' : 'Nursing Attendant');
+    const candidateName = `${pkgPrefix} - ${durPrefix} - ${roleName}`;
+    const item = findCatalogItem('long_term', candidateName, catalog);
+    setForm(f => ({
+      ...f,
+      package_type: newPkgType,
+      shift_duration: newDuration,
+      shift_role: role,
+      requested_item: item ? candidateName : f.requested_item,
+      estimated_price: item?.price_min ?? null,
+      amount: item?.price_min ? String(item.price_min) : f.amount,
+    }));
+  };
+
 
   // When an existing patient is selected, auto-populate all demographic & clinical fields
   const handleExistingPatientSelect = (pId) => {
@@ -166,7 +312,15 @@ function NewBookingModal({ onClose, onSubmit }) {
       return;
     }
     if (!form.service_type) {
-      setValidationError('10. Required Service Type must be selected.');
+      setValidationError('10. Required Service Category must be selected.');
+      return;
+    }
+    if (!form.requested_item) {
+      setValidationError('10b. Specific catalogue item must be selected.');
+      return;
+    }
+    if (!form.amount || Number(form.amount) <= 0) {
+      setValidationError('10c. Rate / Amount (PKR) is required. For items with a price range or price on request, staff must enter the agreed amount.');
       return;
     }
     if (!form.scheduled_time) {
@@ -486,25 +640,174 @@ function NewBookingModal({ onClose, onSubmit }) {
           <div style={{ marginBottom: 18, borderBottom: '1px solid #e5e7eb', paddingBottom: 16 }}>
             <div style={{ fontSize: '0.82rem', fontWeight: 800, color: 'var(--teal-900)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
               <Clock size={15} style={{ color: 'var(--teal-600)' }} />
-              3. Service & Shift Details (Required)
+              3. Service Catalogue & Shift Details (Required)
             </div>
 
+            {/* Category and Item Selectors */}
             <div className="grid-2" style={{ gap: 10, marginBottom: 10 }}>
               <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label">Required Clinical Service *</label>
-                <select className="form-select" value={form.service_type} onChange={e => set('service_type', e.target.value)}>
-                  <option value="short_service">Short Service (Nursing Procedure / Vitals)</option>
-                  <option value="long_term">Long-Term Home Nursing (Day/Night)</option>
-                  <option value="long_term_admission">Hospital at Home ICU Admission</option>
-                  <option value="physiotherapy">Physiotherapy & Rehabilitation</option>
-                  <option value="elderly_care">Elderly Attendant & Palliative</option>
-                  <option value="doctor_consultation">Doctor Home Visit Consultation</option>
-                  <option value="medicine_delivery">Medicine Delivery & Phlebotomy</option>
+                <label className="form-label">Service Category *</label>
+                <select
+                  className="form-select"
+                  value={form.service_type}
+                  onChange={e => handleCategoryChange(e.target.value)}
+                >
+                  {SERVICE_CATEGORIES.map(cat => (
+                    <option key={cat.id} value={cat.id}>{cat.name}</option>
+                  ))}
                 </select>
               </div>
 
               <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label">Required Start Date & Time *</label>
+                <label className="form-label">Service Item *</label>
+                <select
+                  className="form-select"
+                  value={form.requested_item}
+                  onChange={e => handleItemChange(e.target.value)}
+                >
+                  {getItemsByCategory(form.service_type, catalog).map(it => (
+                    <option key={it.name} value={it.name}>
+                      {it.name} ({it.price_text})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Category-Specific Extra Fields */}
+            {/* 1. Doctors: online/home and specialist/medical officer */}
+            {form.service_type === 'doctors' && (
+              <div style={{ background: '#f0fdfa', border: '1px solid #99f6e4', borderRadius: 8, padding: '10px 12px', marginBottom: 10 }}>
+                <div style={{ fontSize: '0.74rem', fontWeight: 700, color: '#0f766e', textTransform: 'uppercase', marginBottom: 6 }}>
+                  Doctor Consultation Options
+                </div>
+                <div className="grid-2" style={{ gap: 10 }}>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label" style={{ fontSize: '0.76rem' }}>Consultation Mode *</label>
+                    <select
+                      className="form-select"
+                      value={form.service_mode}
+                      onChange={e => handleDoctorFieldChange(e.target.value, form.provider_level || 'specialist')}
+                    >
+                      <option value="online">Online Video Consultation</option>
+                      <option value="home">Home Visit (within 5 km)</option>
+                    </select>
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label" style={{ fontSize: '0.76rem' }}>Provider Level *</label>
+                    <select
+                      className="form-select"
+                      value={form.provider_level}
+                      onChange={e => handleDoctorFieldChange(form.service_mode || 'online', e.target.value)}
+                    >
+                      <option value="specialist">Specialist Consultant</option>
+                      <option value="medical_officer">General Medical Officer</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* 2. Nursing Long Term: package type, shift duration and shift role */}
+            {form.service_type === 'long_term' && (
+              <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '10px 12px', marginBottom: 10 }}>
+                <div style={{ fontSize: '0.74rem', fontWeight: 700, color: '#1e40af', textTransform: 'uppercase', marginBottom: 6 }}>
+                  Long-Term Package & Shift Details
+                </div>
+                <div className="grid-3" style={{ gap: 10, marginBottom: 6 }}>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label" style={{ fontSize: '0.76rem' }}>Package Type *</label>
+                    <select
+                      className="form-select"
+                      value={form.package_type || 'per_month'}
+                      onChange={e => handleNursingLongTermFieldChange(e.target.value, form.shift_duration || '8_hours', form.shift_role || 'rn')}
+                    >
+                      <option value="per_month">Per month</option>
+                      <option value="per_shift">Per shift</option>
+                    </select>
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label" style={{ fontSize: '0.76rem' }}>Shift Duration *</label>
+                    <select
+                      className="form-select"
+                      value={form.shift_duration}
+                      onChange={e => handleNursingLongTermFieldChange(form.package_type || 'per_month', e.target.value, form.shift_role || 'rn')}
+                    >
+                      <option value="8_hours">8 Hours (Full Day or Night)</option>
+                      <option value="12_hours">12 Hours (Day or Night Shift)</option>
+                      <option value="24_hours">24 Hours (Full Bedside Care)</option>
+                    </select>
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label" style={{ fontSize: '0.76rem' }}>Clinical Shift Role *</label>
+                    <select
+                      className="form-select"
+                      value={form.shift_role}
+                      onChange={e => handleNursingLongTermFieldChange(form.package_type || 'per_month', form.shift_duration || '8_hours', e.target.value)}
+                    >
+                      <option value="rn" disabled={form.shift_duration === '24_hours'}>
+                        Registered Nurse (RN) {form.shift_duration === '24_hours' ? '(Not offered)' : ''}
+                      </option>
+                      <option value="assistant">Nursing Assistant</option>
+                      <option value="attendant" disabled={form.shift_duration === '8_hours'}>
+                        Nursing Attendant {form.shift_duration === '8_hours' ? '(Not offered)' : ''}
+                      </option>
+                    </select>
+                  </div>
+                </div>
+                <div style={{ fontSize: '0.72rem', color: '#1e40af' }}>
+                  ℹ️ <em>Includes transport, one doctor visit, one physiotherapist visit, 2 nursing supervisor visits and 24h monitoring.</em>
+                </div>
+              </div>
+            )}
+
+            {/* Pharmacy Requirements Note */}
+            {form.service_type === 'medicine_delivery' && (
+              <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 8, padding: '10px 12px', marginBottom: 10, fontSize: '0.78rem', color: '#c2410c' }}>
+                <strong>Pharmacy & Supplies Policy:</strong> {PHARMACY_REQUIREMENTS_NOTE}
+              </div>
+            )}
+
+            {/* 3. Equipment Rental: rental period and separate delivery charge field */}
+            {form.service_type === 'equipment_rental' && (
+              <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '10px 12px', marginBottom: 10 }}>
+                <div style={{ fontSize: '0.74rem', fontWeight: 700, color: '#b45309', textTransform: 'uppercase', marginBottom: 6 }}>
+                  Equipment Rental Details
+                </div>
+                <div className="grid-2" style={{ gap: 10, marginBottom: 6 }}>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label" style={{ fontSize: '0.76rem' }}>Rental Period *</label>
+                    <select
+                      className="form-select"
+                      value={form.rental_period}
+                      onChange={e => set('rental_period', e.target.value)}
+                    >
+                      <option value="monthly">Monthly Rental</option>
+                      <option value="weekly">Weekly Rental</option>
+                      <option value="daily">Daily Rental</option>
+                    </select>
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label" style={{ fontSize: '0.76rem' }}>Delivery, Setup & Collection Charge (PKR)</label>
+                    <input
+                      type="number"
+                      className="form-input"
+                      placeholder="e.g. 2000"
+                      value={form.delivery_charge}
+                      onChange={e => set('delivery_charge', e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div style={{ fontSize: '0.72rem', color: '#b45309' }}>
+                  ℹ️ <em>Daily/weekly/monthly rental; delivery, setup and collection charged separately.</em>
+                </div>
+              </div>
+            )}
+
+            {/* Schedule, Duration, Frequency */}
+            <div className="grid-3" style={{ gap: 10, marginBottom: 10 }}>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Start Date & Time *</label>
                 <input
                   type="datetime-local"
                   className="form-input"
@@ -513,22 +816,22 @@ function NewBookingModal({ onClose, onSubmit }) {
                   required
                 />
               </div>
-            </div>
 
-            <div className="grid-2" style={{ gap: 10, marginBottom: 10 }}>
-              <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label">Shift Duration *</label>
-                <select className="form-select" value={form.shift_duration} onChange={e => set('shift_duration', e.target.value)}>
-                  <option value="1_hour">1 Hour (Single Clinical Procedure)</option>
-                  <option value="2_hours">2 Hours</option>
-                  <option value="4_hours">4 Hours (Half Day Shift)</option>
-                  <option value="8_hours">8 Hours (Full Day / Night Shift)</option>
-                  <option value="12_hours">12 Hours (Extended Hospital Shift)</option>
-                  <option value="24_hours">24 Hours (Full Bedside ICU Cover)</option>
-                </select>
-              </div>
+              {form.service_type !== 'long_term' && (
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Shift Duration *</label>
+                  <select className="form-select" value={form.shift_duration} onChange={e => set('shift_duration', e.target.value)}>
+                    <option value="1_hour">1 Hour (Procedure)</option>
+                    <option value="2_hours">2 Hours</option>
+                    <option value="4_hours">4 Hours (Half Day)</option>
+                    <option value="8_hours">8 Hours (Full Day)</option>
+                    <option value="12_hours">12 Hours (Extended)</option>
+                    <option value="24_hours">24 Hours (Full Bedside)</option>
+                  </select>
+                </div>
+              )}
 
-              <div className="form-group" style={{ marginBottom: 0 }}>
+              <div className="form-group" style={{ marginBottom: 0, gridColumn: form.service_type === 'long_term' ? 'span 2' : 'auto' }}>
                 <label className="form-label">Shift Frequency *</label>
                 <select className="form-select" value={form.shift_frequency} onChange={e => set('shift_frequency', e.target.value)}>
                   <option value="once">Once (Single Visit)</option>
@@ -541,6 +844,7 @@ function NewBookingModal({ onClose, onSubmit }) {
               </div>
             </div>
 
+            {/* Payment Method & Amount */}
             <div className="grid-2" style={{ gap: 10 }}>
               <div className="form-group" style={{ marginBottom: 0 }}>
                 <label className="form-label">Payment Method *</label>
@@ -553,14 +857,55 @@ function NewBookingModal({ onClose, onSubmit }) {
               </div>
 
               <div className="form-group" style={{ marginBottom: 0 }}>
-                <label className="form-label">Rate / Estimated Amount (PKR)</label>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <label className="form-label">Rate / Amount (PKR) *</label>
+                  {(() => {
+                    const it = findCatalogItem(form.service_type, form.requested_item);
+                    if (!it) return null;
+                    if (it.price_min != null && it.price_min === it.price_max) {
+                      return <span style={{ fontSize: '0.72rem', color: '#15803d', fontWeight: 600 }}>Catalogue: PKR {it.price_min.toLocaleString()}</span>;
+                    }
+                    if (it.price_min != null && it.price_min !== it.price_max) {
+                      return <span style={{ fontSize: '0.72rem', color: '#b45309', fontWeight: 600 }}>Range: PKR {it.price_min.toLocaleString()} - {it.price_max.toLocaleString()}</span>;
+                    }
+                    return <span style={{ fontSize: '0.72rem', color: '#b45309', fontWeight: 600 }}>Price on request</span>;
+                  })()}
+                </div>
                 <input
                   type="number"
                   className="form-input"
-                  placeholder="2500"
+                  placeholder={(() => {
+                    const it = findCatalogItem(form.service_type, form.requested_item);
+                    if (it && it.price_min != null && it.price_min !== it.price_max) return `Enter PKR (${it.price_min}-${it.price_max})`;
+                    if (it && it.price_min == null) return 'Enter agreed PKR amount';
+                    return '2500';
+                  })()}
                   value={form.amount}
                   onChange={e => set('amount', e.target.value)}
+                  style={{
+                    borderColor: (() => {
+                      const it = findCatalogItem(form.service_type, form.requested_item);
+                      if (it && (it.price_min == null || it.price_min !== it.price_max) && !form.amount) return '#f59e0b';
+                      return undefined;
+                    })()
+                  }}
+                  required
                 />
+                {(() => {
+                  const it = findCatalogItem(form.service_type, form.requested_item);
+                  if (it && (it.price_min == null || it.price_min !== it.price_max)) {
+                    return (
+                      <div style={{ fontSize: '0.72rem', color: '#b45309', marginTop: 3 }}>
+                        ⚠️ Staff must type agreed PKR amount ({it.price_text || 'custom quote'}).
+                      </div>
+                    );
+                  }
+                  return (
+                    <div style={{ fontSize: '0.72rem', color: 'var(--status-grey)', marginTop: 3 }}>
+                      Auto-filled from catalogue (editable by staff).
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           </div>
@@ -664,11 +1009,29 @@ function BookingDrawer({ booking, onClose }) {
               {booking.service_type_display} · {booking.shift_duration_display || '4 Hours Shift'}
             </div>
           </div>
-          <button className="btn btn-ghost btn-icon btn-sm" onClick={onClose}><X size={16} /></button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <UniversalPrintButton type="booking_slip" data={booking} label="Print Slip" variant="ghost" size="sm" />
+            <UniversalPrintButton type="vitals_history" data={{ patient: { full_name: booking.patient_name, mr_number: booking.patient?.mr_number || booking.patient_mr || 'MR-2026-0042', care_manager_name: 'Dr. Raza Khan' }, vitals: [] }} label="Print Vitals" variant="ghost" size="sm" />
+            <button className="btn btn-ghost btn-icon btn-sm" onClick={onClose}><X size={16} /></button>
+          </div>
         </div>
 
         <div className="drawer-body" style={{ padding: 18 }}>
           
+          {/* Booking Progress Lifecycle Stepper */}
+          <div style={{ marginBottom: 16, padding: '12px 14px', background: 'var(--surface)', borderRadius: 'var(--radius-control)', border: '1px solid var(--border)' }}>
+            <Stepper
+              steps={[
+                { id: 'pending', label: 'Pending' },
+                { id: 'assigned', label: 'Assigned' },
+                { id: 'en_route', label: 'En Route' },
+                { id: 'in_progress', label: 'In Progress' },
+                { id: 'completed', label: 'Completed' },
+              ]}
+              currentStep={booking.status}
+            />
+          </div>
+
           {/* Patient Overview */}
           <div style={{ background: '#f8fafc', padding: 14, borderRadius: 8, border: '1px solid #e2e8f0', marginBottom: 16 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
@@ -708,6 +1071,66 @@ function BookingDrawer({ booking, onClose }) {
                 />
               </div>
             )}
+          </div>
+
+          {/* Catalogue & Clinical Specification */}
+          <div style={{ background: '#f0fdfa', padding: 14, borderRadius: 8, border: '1px solid #99f6e4', marginBottom: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <Stethoscope size={15} style={{ color: '#0d9488' }} />
+              <span style={{ fontWeight: 800, fontSize: '0.88rem', color: '#0f766e' }}>Catalogue & Service Details</span>
+            </div>
+            <div className="info-row">
+              <span className="info-label">Requested Item</span>
+              <span className="info-value" style={{ fontWeight: 700, color: 'var(--teal-900)' }}>
+                {booking.requested_item || booking.service_type_display}
+              </span>
+            </div>
+            <div className="info-row">
+              <span className="info-label">Category</span>
+              <span className="info-value">{booking.service_type_display || booking.service_type}</span>
+            </div>
+            {booking.service_mode && (
+              <div className="info-row">
+                <span className="info-label">Service Mode</span>
+                <span className="info-value">
+                  <span className={`badge ${booking.service_mode === 'online' ? 'badge-blue' : 'badge-green'}`} style={{ textTransform: 'capitalize' }}>
+                    {booking.service_mode === 'online' ? 'Online Video Consultation' : 'Home Visit'}
+                  </span>
+                </span>
+              </div>
+            )}
+            {booking.provider_level && (
+              <div className="info-row">
+                <span className="info-label">Provider Level</span>
+                <span className="info-value" style={{ textTransform: 'capitalize' }}>
+                  {booking.provider_level === 'specialist' ? 'Specialist Consultant' : 'General Medical Officer'}
+                </span>
+              </div>
+            )}
+            {booking.shift_role && (
+              <div className="info-row">
+                <span className="info-label">Shift Role</span>
+                <span className="info-value" style={{ textTransform: 'capitalize' }}>
+                  {booking.shift_role === 'rn' ? 'Registered Nurse (RN)' : booking.shift_role === 'assistant' ? 'Nursing Assistant' : 'Nursing Attendant'}
+                </span>
+              </div>
+            )}
+            {booking.rental_period && (
+              <div className="info-row">
+                <span className="info-label">Rental Period</span>
+                <span className="info-value" style={{ textTransform: 'capitalize' }}>
+                  {booking.rental_period} Rental
+                </span>
+              </div>
+            )}
+            <div className="info-row">
+              <span className="info-label">Estimated Price</span>
+              <span className="info-value ts" style={{ color: '#0d9488', fontWeight: 700 }}>
+                {booking.estimated_price !== null && booking.estimated_price !== undefined
+                  ? `PKR ${Number(booking.estimated_price).toLocaleString()}`
+                  : 'As per situation / On Request'}
+              </span>
+            </div>
           </div>
 
           {/* Shift Details & Schedule */}
@@ -895,11 +1318,10 @@ export default function Bookings() {
           onChange={(e) => setFilters(f => ({ ...f, service_type: e.target.value }))}
         >
           <option value="">All Services</option>
-          <option value="short_service">Short Service</option>
-          <option value="long_term">Long-Term Care</option>
+          {SERVICE_CATEGORIES.map(cat => (
+            <option key={cat.id} value={cat.id}>{cat.name}</option>
+          ))}
           <option value="long_term_admission">Hospital at Home ICU</option>
-          <option value="physiotherapy">Physiotherapy</option>
-          <option value="medicine_delivery">Medicine Delivery</option>
         </select>
       </div>
 
@@ -948,9 +1370,11 @@ export default function Bookings() {
                       </div>
                     </td>
                     <td>
-                      <div style={{ fontWeight: 600, fontSize: '0.82rem' }}>{b.service_type_display}</div>
+                      <div style={{ fontWeight: 600, fontSize: '0.82rem', color: 'var(--teal-900)' }}>
+                        {b.requested_item || b.service_type_display}
+                      </div>
                       <div style={{ fontSize: '0.72rem', color: 'var(--status-grey)' }}>
-                        {b.shift_duration_display || '4 Hours'} · {b.shift_frequency_display || 'Once'}
+                        {b.service_type_display} {b.service_mode ? `(${b.service_mode})` : ''} · {b.shift_duration_display || '4 Hours'}
                       </div>
                     </td>
                     <td>
@@ -1048,6 +1472,12 @@ export default function Bookings() {
               reference_code: bkRef,
               patient_id: Number(patientId),
               service_type: form.service_type || 'short_service',
+              requested_item: form.requested_item || '',
+              service_mode: form.service_mode || '',
+              provider_level: form.provider_level || '',
+              shift_role: form.shift_role || '',
+              rental_period: form.rental_period || '',
+              estimated_price: form.estimated_price !== null && form.estimated_price !== undefined ? Number(form.estimated_price) : null,
               scheduled_time: form.scheduled_time ? new Date(form.scheduled_time).toISOString() : new Date().toISOString(),
               shift_duration: form.shift_duration || '4_hours',
               shift_frequency: form.shift_frequency || 'once',
@@ -1069,7 +1499,7 @@ export default function Bookings() {
               gender_preference: form.gender_preference || 'any',
               consultant_name: form.consultant_name || '',
               consultant_details: form.consultant_details || '',
-              notes: form.notes || '',
+              notes: form.delivery_charge ? `${form.notes || ''} [Delivery Charge: PKR ${form.delivery_charge}]`.trim() : (form.notes || ''),
               amount: amt,
               amount_paid: paid,
               assigned_staff_id: form.assigned_staff_id ? Number(form.assigned_staff_id) : null,
@@ -1086,7 +1516,7 @@ export default function Bookings() {
                 patient: patientObj,
                 patient_name: form.patient_name,
                 patient_mr: patientObj?.mr_number || 'MR-NEW',
-                service_type_display: form.service_type.replace('_', ' ').replace(/\b\w/g, c=>c.toUpperCase()),
+                service_type_display: (SERVICE_CATEGORIES.find(c => c.id === form.service_type)?.name) || form.service_type.replace('_', ' ').replace(/\b\w/g, c=>c.toUpperCase()),
                 status_display: form.assigned_staff_id ? 'Assigned' : 'Pending',
                 payment_status_display: form.payment_method === 'advance' ? 'Advance Paid' : 'Payment Pending',
                 created_at: new Date().toISOString()

@@ -1,0 +1,1 @@
+# Bookings management commands package

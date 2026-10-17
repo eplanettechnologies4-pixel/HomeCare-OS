@@ -101,10 +101,10 @@ export default function UniversalPrintButton({
                 
                 {/* Header Banner */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '2px solid var(--amber-500)', paddingBottom: 16, marginBottom: 20 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <img src="/ehealth-logo.png" alt="eHealth Logo" style={{ width: 36, height: 36, borderRadius: '50%', objectFit: 'cover' }} />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <img src="/ehealth-logo.png" alt="eHealth Hospital At Home" style={{ width: 52, height: 52, objectFit: 'contain' }} />
                     <div>
-                      <h1 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.5rem', margin: 0, color: 'var(--teal-800)', fontWeight: 800 }}>
+                      <h1 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.45rem', margin: 0, color: 'var(--teal-800)', fontWeight: 800 }}>
                         e<span style={{ color: 'var(--amber-500)' }}>Health</span>
                       </h1>
                       <div style={{ fontSize: '0.72rem', color: 'var(--status-grey)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>
@@ -356,6 +356,77 @@ export default function UniversalPrintButton({
                             </table>
                           </div>
                         ))}
+                      </div>
+                    )}
+
+                    {type === 'lab_report' && (
+                      <div style={{ fontSize: '0.82rem' }}>
+                        <div style={{ background: '#f8fafc', padding: 12, border: '1px solid #cbd5e1', borderRadius: 6, marginBottom: 14 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #cbd5e1', paddingBottom: 6, marginBottom: 8 }}>
+                            <div style={{ fontWeight: 800, fontSize: '0.95rem', color: 'var(--teal-800)' }}>
+                              DIAGNOSTIC PATHOLOGY & LABORATORY REPORT
+                            </div>
+                            <span className={`badge ${rec.flagged_abnormal || rec.is_abnormal ? 'badge-red' : 'badge-green'}`} style={{ fontSize: '0.72rem' }}>
+                              {rec.flagged_abnormal || rec.is_abnormal ? 'ABNORMAL VALUES FLAGGED' : 'NORMAL FINDINGS'}
+                            </span>
+                          </div>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, fontSize: '0.78rem' }}>
+                            <div><strong>Patient:</strong> {rec.patient_name || rec.patient?.full_name || 'Patient'}</div>
+                            <div><strong>MR #:</strong> {rec.mr_number || rec.patient?.mr_number || 'MR-2026-0042'}</div>
+                            <div><strong>Order Ref:</strong> LAB-{rec.id || rec.lab_order_id || '001'}</div>
+                            <div><strong>Tests:</strong> {rec.tests_summary || rec.test_name || 'Diagnostic Panel'}</div>
+                            <div><strong>Sample Type:</strong> {rec.sample_type || 'Blood (EDTA / Serum)'}</div>
+                            <div><strong>Collected At:</strong> {rec.collected_at ? format(new Date(rec.collected_at), 'dd/MM/yyyy HH:mm') : 'Verified Home Collection'}</div>
+                          </div>
+                        </div>
+
+                        {/* Diagnostic Results Table */}
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem', marginBottom: 14 }}>
+                          <thead>
+                            <tr style={{ background: '#1e293b', color: '#ffffff' }}>
+                              <th style={{ border: '1px solid #cbd5e1', padding: '6px 8px', textAlign: 'left' }}>Investigation / Parameter</th>
+                              <th style={{ border: '1px solid #cbd5e1', padding: '6px 8px', textAlign: 'center' }}>Observed Result</th>
+                              <th style={{ border: '1px solid #cbd5e1', padding: '6px 8px', textAlign: 'center' }}>Units</th>
+                              <th style={{ border: '1px solid #cbd5e1', padding: '6px 8px', textAlign: 'center' }}>Biological Reference Interval</th>
+                              <th style={{ border: '1px solid #cbd5e1', padding: '6px 8px', textAlign: 'center' }}>Flag</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {rec.result_data && Object.keys(rec.result_data).length > 0 ? (
+                              Object.entries(rec.result_data).map(([param, val], pIdx) => (
+                                <tr key={pIdx} style={{ background: pIdx % 2 === 0 ? '#f8fafc' : '#ffffff' }}>
+                                  <td style={{ border: '1px solid #cbd5e1', padding: '6px 8px', fontWeight: 600 }}>{param}</td>
+                                  <td style={{ border: '1px solid #cbd5e1', padding: '6px 8px', textAlign: 'center', fontWeight: 800, color: 'var(--teal-900)' }}>{String(val)}</td>
+                                  <td style={{ border: '1px solid #cbd5e1', padding: '6px 8px', textAlign: 'center', color: '#64748b' }}>{String(val).includes(' ') ? String(val).split(' ').slice(1).join(' ') : '—'}</td>
+                                  <td style={{ border: '1px solid #cbd5e1', padding: '6px 8px', textAlign: 'center', color: '#64748b' }}>Standard Reference</td>
+                                  <td style={{ border: '1px solid #cbd5e1', padding: '6px 8px', textAlign: 'center' }}>
+                                    <span style={{ color: rec.flagged_abnormal ? '#dc2626' : '#16a34a', fontWeight: 700 }}>
+                                      {rec.flagged_abnormal ? 'ALERT' : 'NORMAL'}
+                                    </span>
+                                  </td>
+                                </tr>
+                              ))
+                            ) : (
+                              <tr>
+                                <td style={{ border: '1px solid #cbd5e1', padding: '6px 8px', fontWeight: 600 }}>{rec.test_name || 'Clinical Test Panel'}</td>
+                                <td style={{ border: '1px solid #cbd5e1', padding: '6px 8px', textAlign: 'center', fontWeight: 800, color: 'var(--teal-900)' }}>{rec.result_value || 'Completed'}</td>
+                                <td style={{ border: '1px solid #cbd5e1', padding: '6px 8px', textAlign: 'center', color: '#64748b' }}>{rec.unit || '—'}</td>
+                                <td style={{ border: '1px solid #cbd5e1', padding: '6px 8px', textAlign: 'center', color: '#64748b' }}>{rec.reference_range || 'Normal'}</td>
+                                <td style={{ border: '1px solid #cbd5e1', padding: '6px 8px', textAlign: 'center' }}>
+                                  <span style={{ color: rec.is_abnormal ? '#dc2626' : '#16a34a', fontWeight: 700 }}>
+                                    {rec.is_abnormal ? 'ALERT' : 'NORMAL'}
+                                  </span>
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+
+                        {rec.clinical_remarks && (
+                          <div style={{ background: '#f1f5f9', padding: '8px 12px', borderRadius: 6, marginBottom: 12, fontSize: '0.76rem' }}>
+                            <strong>Consultant Pathologist Remarks:</strong> {rec.clinical_remarks}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>

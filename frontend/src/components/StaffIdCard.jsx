@@ -63,7 +63,7 @@ export default function StaffIdCard({ staffMember }) {
             {/* Header */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(253,224,71,0.4)', paddingBottom: 8 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <img src="/ehealth-logo.png" alt="eHealth Logo" style={{ width: 24, height: 24, borderRadius: '50%', objectFit: 'cover', border: '1px solid white' }} />
+                <img src="/ehealth-logo.png" alt="eHealth Logo" style={{ width: 28, height: 28, borderRadius: 4, background: '#fff', padding: 1, objectFit: 'contain' }} />
                 <span style={{ fontFamily: 'var(--font-heading)', fontSize: '0.95rem', fontWeight: 800 }}>
                   e<span style={{ color: '#FDE047' }}>Health</span>
                 </span>

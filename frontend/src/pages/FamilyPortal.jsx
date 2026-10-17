@@ -214,7 +214,7 @@ export default function FamilyPortal() {
         {/* Logo */}
         <div style={{ padding: '20px 18px 16px', borderBottom: '1px solid rgba(255,255,255,0.12)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-            <img src="/ehealth-logo.png" alt="eHealth" style={{ width: 34, height: 34, borderRadius: '50%', border: '2px solid rgba(255,255,255,0.3)', objectFit: 'cover' }} />
+            <img src="/ehealth-logo.png" alt="eHealth" style={{ width: 38, height: 38, borderRadius: 8, background: '#fff', padding: 2, border: '1px solid rgba(255,255,255,0.4)', objectFit: 'contain' }} />
             <div>
               <div style={{ fontFamily: 'var(--font-heading)', fontSize: '1.05rem', fontWeight: 800, color: 'white' }}>
                 e<span style={{ color: '#FDE047' }}>Health</span> Family
@@ -509,7 +509,7 @@ export default function FamilyPortal() {
             {/* ③ MEDICATIONS */}
             {activeTab === 'medications' && (
               <div>
-                <SectionTitle icon={Pill} title="Medications (MAR)" subtitle="Medication Administration Record — what was given, dose, and time" color="#611F8C" />
+                <SectionTitle icon={Pill} title="Medications (MAR)" subtitle="Medication Administration Record — what was given, dose, and time" color="#6D28D9" />
                 {nurseNotes.length === 0 ? (
                   <div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--status-grey)' }}>
                     <Pill size={36} style={{ margin: '0 auto 12px', opacity: 0.3 }} />
@@ -768,7 +768,7 @@ export default function FamilyPortal() {
             {/* ⑨ STAFF ON DUTY */}
             {activeTab === 'staff-duty' && (
               <div>
-                <SectionTitle icon={User} title="Staff on Duty" subtitle="Nurse and clinicians currently assigned to this patient" color="#611F8C" />
+                <SectionTitle icon={User} title="Staff on Duty" subtitle="Nurse and clinicians currently assigned to this patient" color="#6D28D9" />
                 {!assignedNurse && !activeBooking ? (
                   <div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--status-grey)' }}>
                     <User size={36} style={{ margin: '0 auto 12px', opacity: 0.3 }} />
@@ -782,7 +782,7 @@ export default function FamilyPortal() {
                         <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', marginBottom: 16 }}>
                           <div style={{
                             width: 56, height: 56, borderRadius: '50%',
-                            background: 'linear-gradient(135deg, #611F8C, #8B36C4)',
+                            background: 'linear-gradient(135deg, #6D28D9, #8B5CF6)',
                             color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
                             fontSize: '1.1rem', fontWeight: 800, flexShrink: 0,
                           }}>

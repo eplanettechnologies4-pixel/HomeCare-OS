@@ -54,6 +54,7 @@ urlpatterns = [
     path('api/pharmacy/',      include('pharmacy.urls')),
     path('api/equipment/',     include('equipment.urls')),
     path('api/lab/',           include('lab.urls')),
+    path('api/services/',      include('bookings.service_urls')),
     # Quality forms (manager-sign standalone endpoint)
     path('api/feedback/',      include('quality.urls')),
 

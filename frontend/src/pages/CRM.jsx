@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
-import { Plus, User, Phone, Tag, ArrowRight, X, CheckCircle, Search, UserCheck } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Plus, User, Phone, Tag, ArrowRight, X, CheckCircle, Search, UserCheck, Stethoscope } from 'lucide-react';
 import useStore from '../store/useStore';
 import { format } from 'date-fns';
+import { SERVICE_CATEGORIES, getItemsByCategory, findCatalogItem, PHARMACY_REQUIREMENTS_NOTE } from '../data/serviceCatalog';
 
 const STAGES = [
   { id: 'new_lead',   title: 'New Lead',   color: '#3eb39e' },
@@ -12,18 +13,152 @@ const STAGES = [
 
 export default function CRM() {
   const leads           = useStore((s) => s.leads);
+  const catalog         = useStore((s) => s.catalog);
+  const fetchCatalog    = useStore((s) => s.fetchCatalog);
   const addLead         = useStore((s) => s.addLead);
   const updateLeadStage = useStore((s) => s.updateLeadStage);
   const addBooking      = useStore((s) => s.addBooking);
   const setActivePage   = useStore((s) => s.setActivePage);
+
+  useEffect(() => {
+    fetchCatalog();
+  }, [fetchCatalog]);
 
   const [showAddModal, setShowAddModal]   = useState(false);
   const [targetStage, setTargetStage]     = useState('new_lead');
   const [showConvertModal, setShowConvertModal] = useState(false);
   const [selectedLead, setSelectedLead]   = useState(null);
 
-  // Form states
-  const [newLeadForm, setNewLeadForm] = useState({ name: '', phone: '', source: 'Website Inquiry', service_needed: 'Elderly Nursing Care', notes: '' });
+  // Form states with Catalogue integration
+  const [newLeadForm, setNewLeadForm] = useState({
+    name: '',
+    phone: '',
+    source: 'Website Inquiry',
+    category: 'doctors',
+    package_type: 'per_month',
+    requested_item: 'Online Specialist',
+    service_mode: 'online',
+    provider_level: 'specialist',
+    shift_role: '',
+    shift_duration: '4_hours',
+    rental_period: '',
+    delivery_charge: '',
+    estimated_price: 3500,
+    amount: '3500',
+    notes: '',
+  });
+
+  const handleLeadCategoryChange = (catId) => {
+    const items = getItemsByCategory(catId, catalog);
+    let first = items[0] || null;
+    let autoAmount = '';
+    let est = null;
+    let mode = '';
+    let level = '';
+    let role = '';
+    let period = '';
+    let duration = '4_hours';
+    let pkgType = newLeadForm.package_type || 'per_month';
+
+    if (catId === 'long_term') {
+      pkgType = 'per_month';
+      duration = '8_hours';
+      role = 'rn';
+      first = findCatalogItem('long_term', 'Per month - 8h - Registered Nurse (RN)', catalog) || first;
+    }
+
+    if (first) {
+      if (first.price_min != null && first.price_min === first.price_max) {
+        autoAmount = String(first.price_min);
+        est = first.price_min;
+      }
+      mode = first.service_mode || (catId === 'doctors' ? 'online' : '');
+      level = first.provider_level || (catId === 'doctors' ? 'specialist' : '');
+      if (catId !== 'long_term') role = first.shift_role || '';
+      period = first.rental_period || (catId === 'equipment_rental' ? 'monthly' : '');
+      if (first.shift_duration && catId !== 'long_term') duration = first.shift_duration;
+    }
+
+    setNewLeadForm(f => ({
+      ...f,
+      category: catId,
+      package_type: pkgType,
+      requested_item: first ? first.name : '',
+      service_mode: mode,
+      provider_level: level,
+      shift_role: role,
+      rental_period: period,
+      shift_duration: duration,
+      estimated_price: est,
+      amount: autoAmount,
+    }));
+  };
+
+  const handleLeadItemChange = (itemName) => {
+    const it = findCatalogItem(newLeadForm.category, itemName, catalog);
+    let autoAmount = '';
+    let est = null;
+    let mode = newLeadForm.service_mode;
+    let level = newLeadForm.provider_level;
+    let role = newLeadForm.shift_role;
+    let period = newLeadForm.rental_period;
+    let duration = newLeadForm.shift_duration;
+    let pkgType = newLeadForm.package_type || 'per_month';
+
+    if (it) {
+      if (it.price_min != null && it.price_min === it.price_max) {
+        autoAmount = String(it.price_min);
+        est = it.price_min;
+      } else {
+        autoAmount = '';
+        est = it.price_min || null;
+      }
+      if (it.service_mode) mode = it.service_mode;
+      if (it.provider_level) level = it.provider_level;
+      if (it.shift_role) role = it.shift_role;
+      if (it.rental_period) period = it.rental_period;
+      if (it.shift_duration) duration = it.shift_duration;
+      if (it.package_type) pkgType = it.package_type;
+      else if (itemName.startsWith('Per shift')) pkgType = 'per_shift';
+      else if (itemName.startsWith('Per month')) pkgType = 'per_month';
+    }
+
+    setNewLeadForm(f => ({
+      ...f,
+      requested_item: itemName,
+      package_type: pkgType,
+      service_mode: mode,
+      provider_level: level,
+      shift_role: role,
+      rental_period: period,
+      shift_duration: duration,
+      estimated_price: est,
+      amount: autoAmount,
+    }));
+  };
+
+  const handleLeadLongTermChange = (newPkgType, newDuration, newRole) => {
+    let role = newRole;
+    if (newDuration === '8_hours' && role === 'attendant') {
+      role = 'rn';
+    } else if (newDuration === '24_hours' && role === 'rn') {
+      role = 'assistant';
+    }
+    const pkgPrefix = newPkgType === 'per_shift' ? 'Per shift' : 'Per month';
+    const durPrefix = newDuration === '8_hours' ? '8h' : newDuration === '12_hours' ? '12h' : '24h';
+    const roleName = role === 'rn' ? 'Registered Nurse (RN)' : (role === 'assistant' ? 'Nursing Assistant' : 'Nursing Attendant');
+    const candidateName = `${pkgPrefix} - ${durPrefix} - ${roleName}`;
+    const it = findCatalogItem('long_term', candidateName, catalog);
+    setNewLeadForm(f => ({
+      ...f,
+      package_type: newPkgType,
+      shift_duration: newDuration,
+      shift_role: role,
+      requested_item: it ? candidateName : f.requested_item,
+      estimated_price: it?.price_min ?? null,
+      amount: it?.price_min ? String(it.price_min) : f.amount,
+    }));
+  };
 
   // Native HTML5 Drag and Drop handlers
   const handleDragStart = (e, leadId) => {
@@ -44,19 +179,44 @@ export default function CRM() {
 
   const handleAddSubmit = () => {
     if (!newLeadForm.name || !newLeadForm.phone) return;
+    const catName = SERVICE_CATEGORIES.find(c => c.id === newLeadForm.category)?.name || newLeadForm.category;
     addLead({
       id: `lead-${Date.now()}`,
       name: newLeadForm.name,
       phone: newLeadForm.phone,
       source: newLeadForm.source,
-      service_needed: newLeadForm.service_needed,
+      service_needed: `${newLeadForm.requested_item || catName} (${catName})`,
+      category: newLeadForm.category,
+      requested_item: newLeadForm.requested_item,
+      service_mode: newLeadForm.service_mode,
+      provider_level: newLeadForm.provider_level,
+      shift_role: newLeadForm.shift_role,
+      rental_period: newLeadForm.rental_period,
+      estimated_price: newLeadForm.estimated_price,
+      amount: newLeadForm.amount,
       notes: newLeadForm.notes,
       stage: targetStage,
       assigned_to: 'Hina Malik',
       created_at: new Date().toISOString()
     });
     setShowAddModal(false);
-    setNewLeadForm({ name: '', phone: '', source: 'Website Inquiry', service_needed: 'Elderly Nursing Care', notes: '' });
+    setNewLeadForm({
+      name: '',
+      phone: '',
+      source: 'Website Inquiry',
+      category: 'doctors',
+      package_type: 'per_month',
+      requested_item: 'Online Specialist',
+      service_mode: 'online',
+      provider_level: 'specialist',
+      shift_role: '',
+      shift_duration: '4_hours',
+      rental_period: '',
+      delivery_charge: '',
+      estimated_price: 3500,
+      amount: '3500',
+      notes: '',
+    });
   };
 
   const handleConvertLead = (lead) => {
@@ -66,26 +226,34 @@ export default function CRM() {
 
   const confirmConversion = () => {
     if (!selectedLead) return;
-    // 1. Move lead to converted stage
     updateLeadStage(selectedLead.id, 'converted');
     
-    // 2. Automatically create linked booking
+    const amt = Number(selectedLead.amount || selectedLead.estimated_price) || 3500;
+    const cat = selectedLead.category || 'doctors';
+    const catName = SERVICE_CATEGORIES.find(c => c.id === cat)?.name || cat;
+
     addBooking({
       id: Date.now(),
       patient_name: selectedLead.name,
-      patient_mr: `MR-2024-00${Math.floor(Math.random()*90)+10}`,
-      service_type: 'long_term',
-      service_type_display: selectedLead.service_needed || 'Long-Term Care',
+      patient_mr: `MR-2026-00${Math.floor(Math.random()*90)+10}`,
+      service_type: cat,
+      service_type_display: catName,
+      requested_item: selectedLead.requested_item || selectedLead.service_needed || '',
+      service_mode: selectedLead.service_mode || '',
+      provider_level: selectedLead.provider_level || '',
+      shift_role: selectedLead.shift_role || '',
+      rental_period: selectedLead.rental_period || '',
+      estimated_price: selectedLead.estimated_price !== undefined ? selectedLead.estimated_price : null,
       status: 'pending',
       status_display: 'Pending',
       payment_status: 'pending',
       payment_status_display: 'Payment Pending',
       scheduled_time: new Date().toISOString(),
-      address: 'PWD / Soan Garden, Islamabad (Converted Lead Address)',
-      amount: 5000,
+      address: 'Islamabad / Rawalpindi (Lead Address)',
+      amount: amt,
       amount_paid: 0,
-      balance_due: 5000,
-      notes: `Converted from CRM Lead (${selectedLead.source}). ${selectedLead.notes}`,
+      balance_due: amt,
+      notes: `Converted from CRM Lead (${selectedLead.source}). ${selectedLead.notes || ''}`.trim(),
       created_at: new Date().toISOString()
     });
 
@@ -165,9 +333,21 @@ export default function CRM() {
                     <div style={{ fontSize: '0.78rem', color: 'var(--status-grey)', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
                       <Phone size={12} /> {lead.phone}
                     </div>
-                    {lead.service_needed && (
-                      <div style={{ fontSize: '0.75rem', background: 'var(--sage-50)', color: 'var(--teal-700)', padding: '2px 8px', borderRadius: 4, display: 'inline-block', marginBottom: 8 }}>
-                        {lead.service_needed}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 6 }}>
+                      {(lead.requested_item || lead.service_needed) && (
+                        <span style={{ fontSize: '0.75rem', fontWeight: 700, background: 'var(--sage-50)', color: 'var(--teal-800)', padding: '2px 8px', borderRadius: 4, border: '1px solid var(--sage-200)' }}>
+                          {lead.requested_item || lead.service_needed}
+                        </span>
+                      )}
+                      {lead.service_mode && (
+                        <span className={`badge ${lead.service_mode === 'online' ? 'badge-blue' : 'badge-green'}`} style={{ fontSize: '0.66rem' }}>
+                          {lead.service_mode === 'online' ? 'Online' : 'Home Visit'}
+                        </span>
+                      )}
+                    </div>
+                    {lead.estimated_price !== null && lead.estimated_price !== undefined && (
+                      <div style={{ fontSize: '0.74rem', color: '#0d9488', fontWeight: 700, marginBottom: 6 }}>
+                        Est: PKR {Number(lead.estimated_price).toLocaleString()}
                       </div>
                     )}
                     {lead.notes && (
@@ -225,9 +405,182 @@ export default function CRM() {
                   <option value="Phone Call">Phone Call</option>
                 </select>
               </div>
+              {/* Category and Item Select */}
+              <div className="grid-2" style={{ gap: 10 }}>
+                <div className="form-group">
+                  <label className="form-label">Service Category</label>
+                  <select
+                    className="form-select"
+                    value={newLeadForm.category}
+                    onChange={e => handleLeadCategoryChange(e.target.value)}
+                  >
+                    {SERVICE_CATEGORIES.map(cat => (
+                      <option key={cat.id} value={cat.id}>{cat.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Service Item</label>
+                  <select
+                    className="form-select"
+                    value={newLeadForm.requested_item}
+                    onChange={e => handleLeadItemChange(e.target.value)}
+                  >
+                    {getItemsByCategory(newLeadForm.category, catalog).map(it => (
+                      <option key={it.name} value={it.name}>{it.name} ({it.price_text})</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Extra Category Fields */}
+              {newLeadForm.category === 'doctors' && (
+                <div className="grid-2" style={{ gap: 10, background: '#f0fdfa', border: '1px solid #99f6e4', padding: '8px 10px', borderRadius: 6, marginBottom: 10 }}>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label" style={{ fontSize: '0.74rem' }}>Mode</label>
+                    <select
+                      className="form-select"
+                      value={newLeadForm.service_mode}
+                      onChange={e => setNewLeadForm({ ...newLeadForm, service_mode: e.target.value })}
+                    >
+                      <option value="online">Online Video</option>
+                      <option value="home">Home Visit</option>
+                    </select>
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label" style={{ fontSize: '0.74rem' }}>Provider Level</label>
+                    <select
+                      className="form-select"
+                      value={newLeadForm.provider_level}
+                      onChange={e => setNewLeadForm({ ...newLeadForm, provider_level: e.target.value })}
+                    >
+                      <option value="specialist">Specialist</option>
+                      <option value="medical_officer">Medical Officer</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              {newLeadForm.category === 'long_term' && (
+                <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', padding: '8px 10px', borderRadius: 6, marginBottom: 10 }}>
+                  <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#1e40af', textTransform: 'uppercase', marginBottom: 6 }}>
+                    Long-Term Package & Shift Details
+                  </div>
+                  <div className="grid-3" style={{ gap: 8, marginBottom: 4 }}>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label" style={{ fontSize: '0.74rem' }}>Package Type</label>
+                      <select
+                        className="form-select"
+                        value={newLeadForm.package_type || 'per_month'}
+                        onChange={e => handleLeadLongTermChange(e.target.value, newLeadForm.shift_duration || '8_hours', newLeadForm.shift_role || 'rn')}
+                      >
+                        <option value="per_month">Per month</option>
+                        <option value="per_shift">Per shift</option>
+                      </select>
+                    </div>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label" style={{ fontSize: '0.74rem' }}>Shift</label>
+                      <select
+                        className="form-select"
+                        value={newLeadForm.shift_duration}
+                        onChange={e => handleLeadLongTermChange(newLeadForm.package_type || 'per_month', e.target.value, newLeadForm.shift_role || 'rn')}
+                      >
+                        <option value="8_hours">8 Hours</option>
+                        <option value="12_hours">12 Hours</option>
+                        <option value="24_hours">24 Hours</option>
+                      </select>
+                    </div>
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label className="form-label" style={{ fontSize: '0.74rem' }}>Role</label>
+                      <select
+                        className="form-select"
+                        value={newLeadForm.shift_role}
+                        onChange={e => handleLeadLongTermChange(newLeadForm.package_type || 'per_month', newLeadForm.shift_duration || '8_hours', e.target.value)}
+                      >
+                        <option value="rn" disabled={newLeadForm.shift_duration === '24_hours'}>
+                          Registered Nurse (RN) {newLeadForm.shift_duration === '24_hours' ? '(Not offered)' : ''}
+                        </option>
+                        <option value="assistant">Nursing Assistant</option>
+                        <option value="attendant" disabled={newLeadForm.shift_duration === '8_hours'}>
+                          Nursing Attendant {newLeadForm.shift_duration === '8_hours' ? '(Not offered)' : ''}
+                        </option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {newLeadForm.category === 'medicine_delivery' && (
+                <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', padding: '8px 10px', borderRadius: 6, marginBottom: 10, fontSize: '0.76rem', color: '#c2410c' }}>
+                  <strong>Pharmacy Requirements:</strong> {PHARMACY_REQUIREMENTS_NOTE}
+                </div>
+              )}
+
+              {newLeadForm.category === 'equipment_rental' && (
+                <div className="grid-2" style={{ gap: 10, background: '#fffbeb', border: '1px solid #fde68a', padding: '8px 10px', borderRadius: 6, marginBottom: 10 }}>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label" style={{ fontSize: '0.74rem' }}>Rental Period</label>
+                    <select
+                      className="form-select"
+                      value={newLeadForm.rental_period}
+                      onChange={e => setNewLeadForm({ ...newLeadForm, rental_period: e.target.value })}
+                    >
+                      <option value="monthly">Monthly</option>
+                      <option value="weekly">Weekly</option>
+                      <option value="daily">Daily</option>
+                    </select>
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label" style={{ fontSize: '0.74rem' }}>Delivery Charge (PKR)</label>
+                    <input
+                      type="number"
+                      className="form-input"
+                      placeholder="e.g. 2000"
+                      value={newLeadForm.delivery_charge}
+                      onChange={e => setNewLeadForm({ ...newLeadForm, delivery_charge: e.target.value })}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Rate / Amount Field */}
               <div className="form-group">
-                <label className="form-label">Service Needed</label>
-                <input className="form-input" value={newLeadForm.service_needed} onChange={e => setNewLeadForm({...newLeadForm, service_needed: e.target.value})} placeholder="E.g. Elderly Care, Physio, Wound Care..." />
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <label className="form-label">Estimated Rate / Amount (PKR)</label>
+                  {(() => {
+                    const it = findCatalogItem(newLeadForm.category, newLeadForm.requested_item);
+                    if (!it) return null;
+                    if (it.price_min != null && it.price_min === it.price_max) {
+                      return <span style={{ fontSize: '0.72rem', color: '#15803d', fontWeight: 600 }}>Catalogue: PKR {it.price_min.toLocaleString()}</span>;
+                    }
+                    if (it.price_min != null && it.price_min !== it.price_max) {
+                      return <span style={{ fontSize: '0.72rem', color: '#b45309', fontWeight: 600 }}>Range: PKR {it.price_min.toLocaleString()} - {it.price_max.toLocaleString()}</span>;
+                    }
+                    return <span style={{ fontSize: '0.72rem', color: '#b45309', fontWeight: 600 }}>Price on request</span>;
+                  })()}
+                </div>
+                <input
+                  type="number"
+                  className="form-input"
+                  placeholder="Enter PKR amount"
+                  value={newLeadForm.amount}
+                  onChange={e => setNewLeadForm({ ...newLeadForm, amount: e.target.value })}
+                />
+                {(() => {
+                  const it = findCatalogItem(newLeadForm.category, newLeadForm.requested_item);
+                  if (it && (it.price_min == null || it.price_min !== it.price_max)) {
+                    return (
+                      <div style={{ fontSize: '0.72rem', color: '#b45309', marginTop: 2 }}>
+                        ⚠️ Staff must type agreed PKR amount ({it.price_text || 'custom quote'}).
+                      </div>
+                    );
+                  }
+                  return (
+                    <div style={{ fontSize: '0.72rem', color: 'var(--status-grey)', marginTop: 2 }}>
+                      Auto-filled from catalogue (editable by staff).
+                    </div>
+                  );
+                })()}
               </div>
               <div className="form-group">
                 <label className="form-label">Inquiry Notes</label>

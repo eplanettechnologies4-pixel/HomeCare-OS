@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import {
   ALERT_RULES, INITIAL_PERMISSION_MATRIX, ATTENDANCE_THRESHOLDS
 } from '../data/mockData';
+import { SERVICE_CATALOG_ITEMS } from '../data/serviceCatalog';
 import { apiFetch, setTokenGetter, setStoreRef } from '../services/api';
 
 const rawBase = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? 'http://localhost:8000/api' : '/api');
@@ -1034,11 +1035,52 @@ const useStore = create((set, get) => ({
       get().fetchActiveSOS(),
       get().fetchAlertRules(),
       get().fetchInvoices(),
+      get().fetchCatalog(),
     ]);
+  },
+
+  // ── Service Catalogue ─────────────────────────────────────────────────────
+  // Defaults to offline fallback from serviceCatalog.js; updated dynamically via GET /api/services/catalog/
+  catalog: SERVICE_CATALOG_ITEMS,
+  catalogLoaded: false,
+  fetchCatalog: async () => {
+    try {
+      let res = await apiFetch('/services/catalog/');
+      if (!res.ok) {
+        // Fallback to public endpoint if unauthenticated
+        res = await apiFetch('/services/catalog/public/');
+      }
+      if (res.ok) {
+        const data = await res.json();
+        const items = Array.isArray(data) ? data : (data.results || []);
+        if (items && items.length > 0) {
+          const normalized = items.map((apiItem) => {
+            const fallback = SERVICE_CATALOG_ITEMS.find(
+              (fb) => fb.name.toLowerCase() === apiItem.name.toLowerCase() && fb.category === apiItem.category
+            ) || SERVICE_CATALOG_ITEMS.find(
+              (fb) => fb.name.toLowerCase() === apiItem.name.toLowerCase()
+            );
+            return {
+              ...(fallback || {}),
+              ...apiItem,
+              price_min: apiItem.price_min != null ? Number(apiItem.price_min) : (fallback?.price_min ?? null),
+              price_max: apiItem.price_max != null ? Number(apiItem.price_max) : (fallback?.price_max ?? null),
+              price_text: apiItem.price_text || fallback?.price_text || '',
+            };
+          });
+          set({ catalog: normalized, catalogLoaded: true });
+          return normalized;
+        }
+      }
+    } catch (err) {
+      console.warn('[Store] fetchCatalog network error, retaining offline fallback catalogue:', err);
+    }
+    return get().catalog;
   },
 
   // ── CRM Leads ─────────────────────────────────────────────────────────────
   leads: [],
+
   addLead: (lead) => set((s) => ({ leads: [lead, ...s.leads] })),
   updateLeadStage: (id, newStage) => set((s) => ({
     leads: s.leads.map(l => l.id === id ? { ...l, stage: newStage } : l)

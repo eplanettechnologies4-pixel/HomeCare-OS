@@ -188,6 +188,7 @@ export default function Patient360() {
           {/* Quick Actions & Universal Print Button */}
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <UniversalPrintButton type="patient_summary" data={patient} label="Print Summary" variant="ghost" size="sm" />
+            <UniversalPrintButton type="vitals_history" data={{ patient, vitals: storeVitals }} label="Print Vitals Report" variant="ghost" size="sm" />
             
             {/* Make Permanent Patient (for patients without portal login) or Reset Password */}
             {!patient.has_portal_account ? (
@@ -328,7 +329,10 @@ export default function Patient360() {
                 <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <Activity size={16} /> Most Recent Vitals Report
                 </span>
-                <button className="btn btn-ghost btn-sm" onClick={() => setActiveTab('vitals')}>Vitals History →</button>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <UniversalPrintButton type="vitals_history" data={{ patient, vitals: storeVitals }} label="Print Vitals Sheet" variant="ghost" size="sm" />
+                  <button className="btn btn-ghost btn-sm" onClick={() => setActiveTab('vitals')}>Vitals History →</button>
+                </div>
               </div>
               {storeVitals[0] ? (
                 <div style={{ background: 'var(--sage-50)', padding: 12, borderRadius: 8 }}>

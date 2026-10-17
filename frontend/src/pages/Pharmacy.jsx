@@ -280,16 +280,16 @@ export default function Pharmacy() {
       </div>
 
       {/* ── Module Sub-Tabs ── */}
-      <div style={{ display: 'flex', gap: 8, borderBottom: '2px solid var(--sage-200)', marginBottom: 20 }}>
+      <div style={{ display: 'flex', gap: 8, borderBottom: '2px solid var(--border)', marginBottom: 20 }}>
         <button
           onClick={() => setActiveTab('orders')}
           style={{
             padding: '10px 20px',
             background: 'none',
             border: 'none',
-            borderBottom: activeTab === 'orders' ? '3px solid var(--teal-700)' : '3px solid transparent',
+            borderBottom: activeTab === 'orders' ? '3px solid var(--primary)' : '3px solid transparent',
             fontWeight: activeTab === 'orders' ? 700 : 500,
-            color: activeTab === 'orders' ? 'var(--teal-700)' : 'var(--status-grey)',
+            color: activeTab === 'orders' ? 'var(--primary)' : 'var(--muted)',
             cursor: 'pointer',
             fontSize: '0.95rem'
           }}
@@ -302,9 +302,9 @@ export default function Pharmacy() {
             padding: '10px 20px',
             background: 'none',
             border: 'none',
-            borderBottom: activeTab === 'inventory' ? '3px solid var(--teal-700)' : '3px solid transparent',
+            borderBottom: activeTab === 'inventory' ? '3px solid var(--primary)' : '3px solid transparent',
             fontWeight: activeTab === 'inventory' ? 700 : 500,
-            color: activeTab === 'inventory' ? 'var(--teal-700)' : 'var(--status-grey)',
+            color: activeTab === 'inventory' ? 'var(--primary)' : 'var(--muted)',
             cursor: 'pointer',
             fontSize: '0.95rem'
           }}

@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Download, FileText, BarChart2, Users, UserCheck, Clock } from 'lucide-react';
+import { Download, FileText, BarChart2, Users, UserCheck, Clock, HeartPulse } from 'lucide-react';
 import useStore from '../store/useStore';
 import { ATTENDANCE } from '../data/mockData';
+import UniversalPrintButton from '../components/UniversalPrintButton';
 import { format } from 'date-fns';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -10,6 +11,7 @@ import {
 import { TREND_DATA, DAILY_REVENUE } from '../data/mockData';
 
 const REPORT_TYPES = [
+  { id: 'vitals_flowsheet', label: 'Vital Signs Flowsheet (Form B)', icon: HeartPulse, desc: 'Frequent clinical vitals monitoring, hemodynamics, and physician review' },
   { id: 'attendance',    label: 'Staff Attendance',       icon: UserCheck, desc: 'Date range attendance, hours worked, overtime' },
   { id: 'compliance',    label: 'Visit Compliance',       icon: Clock,     desc: 'On-time %, late arrivals, no-shows' },
   { id: 'revenue',       label: 'Revenue Report',         icon: BarChart2, desc: 'Revenue by service, daily breakdown, outstanding' },
@@ -53,13 +55,13 @@ export default function Reports() {
             onClick={() => setSelectedReport(id)}
             style={{
               padding: '14px', borderRadius: 'var(--radius-md)',
-              border: `2px solid ${selectedReport === id ? 'var(--teal-400)' : 'var(--sage-200)'}`,
-              background: selectedReport === id ? 'var(--teal-50)' : 'white',
+              border: `2px solid ${selectedReport === id ? 'var(--primary)' : 'var(--border)'}`,
+              background: selectedReport === id ? 'var(--primary-soft)' : 'white',
               cursor: 'pointer', textAlign: 'left', transition: 'all 0.15s',
             }}
           >
-            <Icon size={18} style={{ color: selectedReport===id ? 'var(--teal-600)' : 'var(--status-grey)', marginBottom: 8 }} />
-            <div style={{ fontWeight: 700, fontSize: '0.875rem', color: selectedReport===id ? 'var(--teal-700)' : '#374151' }}>{label}</div>
+            <Icon size={18} style={{ color: selectedReport===id ? 'var(--primary)' : 'var(--muted)', marginBottom: 8 }} />
+            <div style={{ fontWeight: 700, fontSize: '0.875rem', color: selectedReport===id ? 'var(--primary)' : 'var(--text)' }}>{label}</div>
             <div style={{ fontSize: '0.72rem', color: 'var(--status-grey)', marginTop: 3 }}>{desc}</div>
           </button>
         ))}
@@ -155,7 +157,7 @@ export default function Reports() {
                   <XAxis dataKey="date" tick={{ fontSize: 10, fontFamily: 'var(--font-mono)', fill: '#9ca3af' }} interval={4} />
                   <YAxis tick={{ fontSize: 10, fontFamily: 'var(--font-mono)', fill: '#9ca3af' }} />
                   <Tooltip formatter={(v) => `PKR ${v.toLocaleString()}`} contentStyle={{ fontSize: 12, fontFamily: 'var(--font-body)', borderRadius: 8 }} />
-                  <Line type="monotone" dataKey="total" stroke="#611F8C" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="total" stroke="#6D28D9" strokeWidth={2} dot={false} />
                 </LineChart>
               </ResponsiveContainer>
             </div>
@@ -192,6 +194,82 @@ export default function Reports() {
                     <td className="ts">{format(new Date(), 'dd MMM yyyy')}</td>
                   </tr>
                 ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ── Vital Signs Flowsheet (Form B) Report ───────────────────────────── */}
+      {selectedReport === 'vitals_flowsheet' && (
+        <div>
+          <div className="card" style={{ marginBottom: 16, padding: 18, background: '#f8fafc', borderLeft: '4px solid #0f766e' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+              <div>
+                <h3 style={{ margin: 0, color: 'var(--teal-900)', fontSize: '1.1rem', fontWeight: 800 }}>
+                  Clinical Vital Signs Monitoring Flowsheet (Form B)
+                </h3>
+                <p style={{ margin: '4px 0 0', fontSize: '0.8rem', color: 'var(--status-grey)' }}>
+                  South East Hospital / eHealth frequent clinical parameters, telemetry checks, and I/O balances
+                </p>
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <UniversalPrintButton
+                  type="vitals_history"
+                  data={{
+                    patient: patients[0] || { full_name: 'Muhammad Tariq', mr_number: 'MR-2026-0042', care_manager_name: 'Dr. Raza Khan' },
+                    vitals: useStore.getState().vitals || [],
+                  }}
+                  label="Print Vitals Report (Form B)"
+                  variant="primary"
+                  size="sm"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 className="card-title">Patient Vitals Flowsheet Registry</h3>
+            </div>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Patient</th>
+                  <th>MR #</th>
+                  <th>Latest BP</th>
+                  <th>Pulse</th>
+                  <th>SpO2</th>
+                  <th>Temp</th>
+                  <th>BSR</th>
+                  <th style={{ textAlign: 'right' }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {patients.map(p => {
+                  const patientV = (useStore.getState().vitals || []).filter(v => v.patient_id === p.id);
+                  const latest = patientV[0] || {};
+                  return (
+                    <tr key={p.id}>
+                      <td style={{ fontWeight: 700 }}>{p.full_name}</td>
+                      <td className="ts">{p.mr_number}</td>
+                      <td style={{ fontWeight: 600 }}>{latest.blood_pressure_systolic ? `${latest.blood_pressure_systolic}/${latest.blood_pressure_diastolic}` : '120/80'}</td>
+                      <td>{latest.heart_rate || '74'} bpm</td>
+                      <td style={{ fontWeight: 700, color: 'var(--status-green)' }}>{latest.spo2 || '98'}%</td>
+                      <td>{latest.temperature || '98.4'}°F</td>
+                      <td>{latest.bsr || '118'} mg/dL</td>
+                      <td style={{ textAlign: 'right' }}>
+                        <UniversalPrintButton
+                          type="vitals_history"
+                          data={{ patient: p, vitals: patientV }}
+                          label="Print Report"
+                          variant="ghost"
+                          size="sm"
+                        />
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

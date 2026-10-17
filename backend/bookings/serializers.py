@@ -1,7 +1,24 @@
 from rest_framework import serializers
-from .models import Booking
+from .models import Booking, ServiceCatalogItem
 from patients.serializers import PatientSummarySerializer
 from staff.serializers import StaffSummarySerializer
+
+CATEGORY_DISPLAY_MAP = {
+    'doctors': 'Doctors',
+    'short_service': 'Nursing Short Term',
+    'nursing_short_term': 'Nursing Short Term',
+    'long_term': 'Nursing Long Term',
+    'nursing_long_term': 'Nursing Long Term',
+    'physiotherapy': 'Physiotherapy',
+    'psychology': 'Psychology',
+    'lab': 'Lab',
+    'lab_test': 'Lab',
+    'pharmacy': 'Pharmacy',
+    'medicine_delivery': 'Pharmacy',
+    'equipment_rental': 'Equipment Rental',
+    'nutrition': 'Nutrition',
+    'baby_sitter': 'Baby Sitter',
+}
 
 
 class BookingListSerializer(serializers.ModelSerializer):
@@ -17,6 +34,10 @@ class BookingListSerializer(serializers.ModelSerializer):
     backup_staff_employee_id = serializers.CharField(source='backup_staff.employee_id', read_only=True)
     backup_staff_designation = serializers.SerializerMethodField()
     service_type_display = serializers.CharField(source='get_service_type_display', read_only=True)
+    service_mode_display = serializers.CharField(source='get_service_mode_display', read_only=True)
+    provider_level_display = serializers.CharField(source='get_provider_level_display', read_only=True)
+    shift_role_display = serializers.CharField(source='get_shift_role_display', read_only=True)
+    rental_period_display = serializers.CharField(source='get_rental_period_display', read_only=True)
     shift_duration_display = serializers.CharField(source='get_shift_duration_display', read_only=True)
     shift_frequency_display = serializers.CharField(source='get_shift_frequency_display', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
@@ -47,6 +68,9 @@ class BookingListSerializer(serializers.ModelSerializer):
             'address', 'latitude', 'longitude',
             'diagnosis', 'allergies', 'has_prescription', 'consult_doctor_needed',
             'service_type', 'service_type_display',
+            'requested_item', 'service_mode', 'service_mode_display',
+            'provider_level', 'provider_level_display', 'shift_role', 'shift_role_display',
+            'rental_period', 'rental_period_display', 'estimated_price',
             'scheduled_time', 'actual_start_time', 'actual_end_time',
             'shift_duration', 'shift_duration_display',
             'shift_frequency', 'shift_frequency_display',
@@ -83,6 +107,10 @@ class BookingDetailSerializer(serializers.ModelSerializer):
     duration_minutes = serializers.ReadOnlyField()
     balance_due = serializers.ReadOnlyField()
     service_type_display = serializers.CharField(source='get_service_type_display', read_only=True)
+    service_mode_display = serializers.CharField(source='get_service_mode_display', read_only=True)
+    provider_level_display = serializers.CharField(source='get_provider_level_display', read_only=True)
+    shift_role_display = serializers.CharField(source='get_shift_role_display', read_only=True)
+    rental_period_display = serializers.CharField(source='get_rental_period_display', read_only=True)
     shift_duration_display = serializers.CharField(source='get_shift_duration_display', read_only=True)
     shift_frequency_display = serializers.CharField(source='get_shift_frequency_display', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
@@ -91,3 +119,33 @@ class BookingDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = Booking
         fields = '__all__'
+
+
+class ServiceCatalogItemSerializer(serializers.ModelSerializer):
+    category_display = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ServiceCatalogItem
+        fields = [
+            'id', 'category', 'category_display', 'name', 'caption',
+            'price_min', 'price_max', 'price_text', 'sort_order',
+            'is_active', 'created_at', 'updated_at',
+        ]
+
+    def get_category_display(self, obj):
+        return CATEGORY_DISPLAY_MAP.get(obj.category, obj.category.replace('_', ' ').title())
+
+
+class PublicServiceCatalogItemSerializer(serializers.ModelSerializer):
+    category_display = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ServiceCatalogItem
+        fields = [
+            'id', 'category', 'category_display', 'name', 'caption',
+            'price_min', 'price_max', 'price_text',
+        ]
+
+    def get_category_display(self, obj):
+        return CATEGORY_DISPLAY_MAP.get(obj.category, obj.category.replace('_', ' ').title())
+

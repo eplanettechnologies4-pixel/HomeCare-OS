@@ -3,50 +3,62 @@ import useStore from '../store/useStore';
 import { ROLE_CONFIG } from '../data/mockData';
 import {
   LayoutDashboard, Calendar, MapPin, Users, UserCog,
-  Heart, Settings, DollarSign, BarChart2, Menu, X,
-  Activity, Receipt, Kanban, PieChart, Shield, GraduationCap,
-  Pill, Truck, FlaskConical, FileText
+  Heart, Receipt, DollarSign, BarChart2, X,
+  Activity, Kanban, PieChart, Shield, GraduationCap,
+  Pill, Truck, FlaskConical, FileText, LogOut
 } from 'lucide-react';
 
-const NAV = [
-  { section: 'Core', items: [
-    { id: 'overview',      label: 'Overview',       icon: LayoutDashboard },
-    { id: 'bookings',      label: 'Bookings',       icon: Calendar },
-    { id: 'live-tracking', label: 'Live Tracking',  icon: MapPin, live: true },
-  ]},
-  { section: 'People', items: [
-    { id: 'staff',    label: 'Staff',    icon: Users },
-    { id: 'patients', label: 'Patients', icon: Heart },
-  ]},
-  { section: 'Clinical', items: [
-    { id: 'therapy',  label: 'Therapy Services', icon: Activity },
-  ]},
-  { section: 'Services', items: [
-    { id: 'pharmacy',   label: 'Pharmacy Orders',   icon: Pill },
-    { id: 'equipment',  label: 'Equipment Rentals', icon: Truck },
-    { id: 'lab-orders', label: 'Lab Orders',        icon: FlaskConical },
-  ]},
-  { section: 'Operations', items: [
-    { id: 'crm',       label: 'CRM Leads',   icon: Kanban },
-    { id: 'billing',   label: 'Billing',     icon: Receipt },
-    { id: 'accounts',  label: 'Accounts',    icon: DollarSign },
-    { id: 'forms',     label: 'Form Builder', icon: FileText },
-    { id: 'admin-hr',  label: 'Admin / HR',  icon: UserCog },
-    { id: 'lms',       label: 'Training / LMS', icon: GraduationCap },
-    { id: 'reports',   label: 'Reports',     icon: BarChart2 },
-    { id: 'analytics', label: 'Analytics',   icon: PieChart },
-    { id: 'users',     label: 'Users & Roles', icon: Shield },
-  ]},
+// Grouped navigation hierarchy according to enterprise system architecture
+const NAV_GROUPS = [
+  {
+    title: 'Care',
+    items: [
+      { id: 'overview',   label: 'Overview',          icon: LayoutDashboard },
+      { id: 'bookings',   label: 'Bookings',          icon: Calendar },
+      { id: 'patients',   label: 'Patients',          icon: Heart },
+      { id: 'therapy',    label: 'Therapy Services',  icon: Activity },
+      { id: 'pharmacy',   label: 'Pharmacy Orders',   icon: Pill },
+      { id: 'lab-orders', label: 'Lab Orders',        icon: FlaskConical },
+      { id: 'equipment',  label: 'Equipment Rentals', icon: Truck },
+    ]
+  },
+  {
+    title: 'Operations',
+    items: [
+      { id: 'live-tracking', label: 'Live Tracking',  icon: MapPin, live: true },
+      { id: 'staff',         label: 'Staff Directory',icon: Users },
+      { id: 'crm',           label: 'CRM Leads',      icon: Kanban },
+      { id: 'lms',           label: 'Training / LMS', icon: GraduationCap },
+    ]
+  },
+  {
+    title: 'Finance',
+    items: [
+      { id: 'billing',   label: 'Billing & Invoices', icon: Receipt },
+      { id: 'accounts',  label: 'Accounts Ledger',    icon: DollarSign },
+      { id: 'reports',   label: 'Reports',            icon: BarChart2 },
+      { id: 'analytics', label: 'Analytics',          icon: PieChart },
+    ]
+  },
+  {
+    title: 'Admin',
+    items: [
+      { id: 'forms',    label: 'Form Builder',   icon: FileText },
+      { id: 'admin-hr', label: 'Admin / HR',     icon: UserCog },
+      { id: 'users',    label: 'Users & Roles',  icon: Shield },
+    ]
+  }
 ];
 
 export default function Sidebar() {
   const [isHovered, setIsHovered] = useState(false);
   const activePage    = useStore((s) => s.activePage);
-  const setActivePage  = useStore((s) => s.setActivePage);
+  const setActivePage = useStore((s) => s.setActivePage);
   const sidebarOpen   = useStore((s) => s.sidebarOpen);
-  const toggleSidebar  = useStore((s) => s.toggleSidebar);
+  const toggleSidebar = useStore((s) => s.toggleSidebar);
   const currentRole   = useStore((s) => s.currentRole);
   const currentUser   = useStore((s) => s.currentUser);
+  const logout        = useStore((s) => s.logout);
 
   const allowedNav = ROLE_CONFIG[currentRole]?.nav || ['overview'];
 
@@ -62,7 +74,7 @@ export default function Sidebar() {
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
       >
-        {/* Logo */}
+        {/* Logo Header */}
         <div className="sidebar-logo">
           <div className="sidebar-logo-inner">
             <img
@@ -89,22 +101,25 @@ export default function Sidebar() {
           </div>
         </div>
 
-        {/* Navigation */}
+        {/* Grouped Navigation */}
         <nav className="sidebar-nav">
-          {NAV.map((section) => {
-            const filteredItems = section.items.filter(item => allowedNav.includes(item.id));
+          {NAV_GROUPS.map((group) => {
+            const filteredItems = group.items.filter((item) => allowedNav.includes(item.id));
             if (filteredItems.length === 0) return null;
 
             return (
-              <div key={section.section} className="nav-section">
-                <p className="nav-section-label">{section.section}</p>
+              <div key={group.title} className="nav-section">
+                <p className="nav-section-label">{group.title}</p>
                 {filteredItems.map(({ id, label, icon: Icon, live }) => {
                   const isActive = activePage === id;
                   return (
                     <button
                       key={id}
                       className={`nav-item${isActive ? ' active' : ''}`}
-                      onClick={() => { setActivePage(id); if (sidebarOpen) toggleSidebar(); }}
+                      onClick={() => {
+                        setActivePage(id);
+                        if (sidebarOpen) toggleSidebar();
+                      }}
                       title={label}
                       aria-label={label}
                     >
@@ -126,13 +141,15 @@ export default function Sidebar() {
           })}
         </nav>
 
-        {/* Footer */}
+        {/* Footer with User Details and Logout */}
         <div className="sidebar-footer">
-          <div className="sidebar-footer-inner">
+          <div className="sidebar-footer-inner" style={{ display: 'flex', alignItems: 'center', width: '100%', gap: 10 }}>
             <div className="avatar sidebar-avatar" title={currentUser?.full_name || 'Staff Member'}>
-              {currentUser?.full_name ? currentUser.full_name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase() : 'HC'}
+              {currentUser?.full_name
+                ? currentUser.full_name.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase()
+                : 'HC'}
             </div>
-            <div className="sidebar-user-details">
+            <div className="sidebar-user-details" style={{ flex: 1, minWidth: 0 }}>
               <div className="sidebar-user-name">
                 {currentUser?.full_name || 'Staff Member'}
               </div>
@@ -140,6 +157,24 @@ export default function Sidebar() {
                 {currentUser?.role_display || ROLE_CONFIG[currentRole]?.label || currentRole}
               </div>
             </div>
+            <button
+              onClick={() => logout && logout()}
+              className="btn btn-ghost btn-icon btn-sm"
+              title="Sign Out"
+              aria-label="Sign Out"
+              style={{
+                color: '#F87171',
+                padding: 4,
+                width: 28,
+                height: 28,
+                borderRadius: 6,
+                flexShrink: 0,
+                opacity: isHovered || sidebarOpen ? 1 : 0,
+                transition: 'opacity 150ms ease',
+              }}
+            >
+              <LogOut size={15} />
+            </button>
           </div>
         </div>
       </aside>

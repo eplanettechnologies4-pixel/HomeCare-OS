@@ -15,6 +15,7 @@ class FormTemplate(models.Model):
     audience    = models.CharField(max_length=20, choices=AUDIENCE_CHOICES, default='all')
     is_active   = models.BooleanField(default=True)
     version     = models.IntegerField(default=1)
+    paper_config = models.JSONField(default=dict, blank=True)
     created_by  = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='created_forms')
     created_at  = models.DateTimeField(auto_now_add=True)
     updated_at  = models.DateTimeField(auto_now=True)
@@ -55,6 +56,7 @@ class FormField(models.Model):
     options          = models.JSONField(default=list, blank=True)
     order            = models.IntegerField(default=0)
     help_text        = models.CharField(max_length=255, blank=True)
+    width            = models.CharField(max_length=20, default='12', blank=True)
     conditional_rule = models.JSONField(default=dict, blank=True)
 
     class Meta:

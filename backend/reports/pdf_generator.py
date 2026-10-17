@@ -31,9 +31,11 @@ class HomeCarePDFGenerator:
             from reportlab.lib.pagesizes import letter, A4
             from reportlab.lib import colors
             from reportlab.lib.units import inch
-            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable, Image as RLImage
             from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
             from reportlab.lib.enums import TA_CENTER, TA_LEFT
+            import os
+            from django.conf import settings
 
             doc = SimpleDocTemplate(
                 buffer,
@@ -50,26 +52,47 @@ class HomeCarePDFGenerator:
             title_style = ParagraphStyle(
                 'DocTitle',
                 parent=styles['Heading1'],
-                fontSize=20,
+                fontSize=18,
                 textColor=colors.HexColor(self.PRIMARY_TEAL),
-                spaceAfter=6
+                spaceAfter=4
             )
             sub_style = ParagraphStyle(
                 'DocSub',
                 parent=styles['Normal'],
-                fontSize=9,
+                fontSize=8.5,
                 textColor=colors.HexColor("#6b7280"),
-                spaceAfter=15
+                spaceAfter=12
             )
 
             # ── CERTIFICATE branch (Official eHealth Landscape A4 Template) ────
             if self.report_type == 'certificate':
                 return self._generate_official_certificate(buffer)
 
+            # ── Official Brand Logo Header for all standard reports ───────────
+            logo_path = os.path.join(settings.BASE_DIR, '..', 'frontend', 'public', 'ehealth-logo.png')
+            if not os.path.exists(logo_path):
+                logo_path = r"C:\Users\Administrator\Desktop\health\frontend\public\ehealth-logo.png"
+
+            if os.path.exists(logo_path):
+                hdr_logo = RLImage(logo_path, width=44, height=44)
+                hdr_brand = [
+                    Paragraph("<b><font size='14' color='#0f766e'>eHealth Hospital At Home</font></b>", styles['Normal']),
+                    Paragraph("<font size='7.5' color='#64748b'>Digital Hospital & Home Healthcare Network · SECP # 0192834 · IHRA Licensed # IHRA-2024-089</font>", styles['Normal'])
+                ]
+                hdr_tbl = Table([[hdr_logo, hdr_brand]], colWidths=[52, 488])
+                hdr_tbl.setStyle(TableStyle([
+                    ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                    ('LEFTPADDING', (0,0), (-1,-1), 0),
+                    ('RIGHTPADDING', (0,0), (-1,-1), 0),
+                    ('BOTTOMPADDING', (0,0), (-1,-1), 6),
+                ]))
+                elements.append(hdr_tbl)
+                elements.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor(self.ACCENT_AMBER), spaceAfter=12))
+
             # ── INVOICE branch ────────────────────────────────────────────────
-            elif self.report_type == 'invoice':
-                elements.append(Paragraph("<b>HomeCare OS</b> — Healthcare PDF Report", title_style))
-                elements.append(Paragraph(f"Report Type: {self.report_type.upper()} | Generated: {self.timestamp} by {self.generated_by}", sub_style))
+            if self.report_type == 'invoice':
+                elements.append(Paragraph("<b>Invoice Statement</b>", title_style))
+                elements.append(Paragraph(f"Report Type: INVOICE | Generated: {self.timestamp} by {self.generated_by}", sub_style))
                 elements.append(Paragraph(f"<b>Invoice #:</b> {self.data.get('invoice_number', 'INV-001')}", styles['Heading2']))
                 elements.append(Paragraph(f"<b>Patient:</b> {self.data.get('patient_name', 'N/A')}", styles['Normal']))
                 elements.append(Paragraph(f"<b>Total Due:</b> PKR {self.data.get('total', 0)}", styles['Normal']))

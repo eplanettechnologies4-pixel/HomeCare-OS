@@ -21,13 +21,13 @@ const STATUS_BADGE = {
 };
 
 const ROLE_COLORS = {
-  nurse:        '#611F8C',
-  doctor:       '#441365',
-  physio:       '#7529a7',
-  speech:       '#8b36c4',
-  psychologist: '#a855f7',
+  nurse:        '#6D28D9',
+  doctor:       '#5B21B6',
+  physio:       '#7C3AED',
+  speech:       '#8B5CF6',
+  psychologist: '#A78BFA',
   dietician:    '#DE9A3C',
-  care_manager: '#b87320',
+  care_manager: '#2E8B57',
 };
 
 function Stars({ rating }) {

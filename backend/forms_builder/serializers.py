@@ -7,7 +7,7 @@ class FormFieldSerializer(serializers.ModelSerializer):
         model = FormField
         fields = [
             'id', 'template', 'label', 'key', 'type', 'required',
-            'options', 'order', 'help_text', 'conditional_rule'
+            'options', 'order', 'help_text', 'width', 'conditional_rule'
         ]
         read_only_fields = ['id']
 
@@ -21,7 +21,7 @@ class FormTemplateSerializer(serializers.ModelSerializer):
         model = FormTemplate
         fields = [
             'id', 'title', 'description', 'audience', 'is_active',
-            'version', 'created_by', 'created_at', 'updated_at',
+            'version', 'paper_config', 'created_by', 'created_at', 'updated_at',
             'fields', 'submission_count', 'has_submissions'
         ]
         read_only_fields = ['id', 'version', 'created_at', 'updated_at', 'created_by']

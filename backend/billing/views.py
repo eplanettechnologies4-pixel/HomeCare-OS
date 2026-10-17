@@ -4,8 +4,8 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.db.models import Sum
 from homecareOS.permissions import IsFinancialStaff
-from .models import Invoice, BillingPayment
-from .serializers import InvoiceListSerializer, InvoiceDetailSerializer, BillingPaymentSerializer
+from .models import Invoice, BillingPayment, InvoiceLineItem
+from .serializers import InvoiceListSerializer, InvoiceDetailSerializer, BillingPaymentSerializer, InvoiceLineItemSerializer
 
 
 class InvoiceViewSet(viewsets.ModelViewSet):
@@ -185,3 +185,31 @@ class InvoiceViewSet(viewsets.ModelViewSet):
 class BillingPaymentViewSet(viewsets.ModelViewSet):
     queryset           = BillingPayment.objects.select_related('patient', 'invoice').all()
     serializer_class   = BillingPaymentSerializer
+
+
+class InvoiceLineItemViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsFinancialStaff]
+    queryset = InvoiceLineItem.objects.select_related('invoice').all()
+    serializer_class = InvoiceLineItemSerializer
+
+    def perform_create(self, serializer):
+        item = serializer.save()
+        invoice = item.invoice
+        subtotal = sum(li.amount for li in invoice.line_items.all())
+        invoice.subtotal = subtotal
+        invoice.save()
+
+    def perform_update(self, serializer):
+        item = serializer.save()
+        invoice = item.invoice
+        subtotal = sum(li.amount for li in invoice.line_items.all())
+        invoice.subtotal = subtotal
+        invoice.save()
+
+    def perform_destroy(self, instance):
+        invoice = instance.invoice
+        super().perform_destroy(instance)
+        subtotal = sum(li.amount for li in invoice.line_items.all())
+        invoice.subtotal = subtotal
+        invoice.save()
+

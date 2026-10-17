@@ -1,54 +1,32 @@
 import React from 'react';
+import { StatusPill } from './ui/StatusPill';
 
 /**
  * Small badge indicating patient origin source:
  * - 'public_website'    -> "Public Website" (blue badge)
- * - 'public_mobile_app' -> "Public App" (teal/green badge)
- * - 'admin_dashboard'   -> "Admin" (slate/grey badge)
+ * - 'public_mobile_app' -> "Public App" (green badge)
+ * - 'admin_dashboard'   -> "Admin" (grey badge)
  */
 export default function PatientSourceBadge({ source, style = {} }) {
   let label = 'Admin';
-  let badgeStyle = {
-    background: '#f1f5f9',
-    color: '#475569',
-    border: '1px solid #cbd5e1',
-  };
+  let variant = 'grey';
 
   if (source === 'public_website') {
     label = 'Public Website';
-    badgeStyle = {
-      background: '#eff6ff',
-      color: '#1d4ed8',
-      border: '1px solid #bfdbfe',
-    };
+    variant = 'blue';
   } else if (source === 'public_mobile_app') {
     label = 'Public App';
-    badgeStyle = {
-      background: '#f0fdf4',
-      color: '#15803d',
-      border: '1px solid #bbf7d0',
-    };
+    variant = 'green';
   }
 
   return (
-    <span
-      className="badge"
+    <StatusPill
+      variant={variant}
+      withDot={false}
+      style={{ fontSize: 11, padding: '2px 8px', ...style }}
       title={`Patient Source: ${label}`}
-      style={{
-        fontSize: '0.68rem',
-        fontWeight: 600,
-        padding: '2px 7px',
-        borderRadius: '9999px',
-        display: 'inline-flex',
-        alignItems: 'center',
-        lineHeight: 1.2,
-        letterSpacing: '0.02em',
-        whiteSpace: 'nowrap',
-        ...badgeStyle,
-        ...style,
-      }}
     >
       {label}
-    </span>
+    </StatusPill>
   );
 }

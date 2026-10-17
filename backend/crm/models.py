@@ -18,6 +18,9 @@ class Lead(models.Model):
     assigned_to    = models.ForeignKey('staff.StaffMember', on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_leads')
     notes          = models.TextField(blank=True)
     service_needed = models.CharField(max_length=100, blank=True)
+    requested_item  = models.CharField(max_length=255, blank=True, default='')
+    service_mode    = models.CharField(max_length=20, blank=True, default='')
+    estimated_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     
     # Linked records if converted
     converted_patient = models.ForeignKey('patients.Patient', on_delete=models.SET_NULL, null=True, blank=True, related_name='originating_leads')

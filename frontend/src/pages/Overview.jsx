@@ -102,12 +102,12 @@ const ALERT_ICONS = { sos: Siren, late: Truck, stock: Package, pending: Users };
 
 // Curated palette for world-class medical operations charts
 const SERVICE_COLORS = [
-  '#611F8C', // Deep Royal Brand Purple
-  '#8B36C4', // Electric Purple
+  '#6D28D9', // Deep Royal Brand Purple (Primary)
+  '#8B5CF6', // Electric Purple
   '#0D9488', // Medical Teal
   '#DE9A3C', // Amber Gold
   '#2563EB', // Royal Cobalt
-  '#10B981', // Emerald Health
+  '#2E8B57', // Emerald Health
 ];
 
 export default function Overview() {
@@ -462,12 +462,12 @@ export default function Overview() {
                     width: 34,
                     height: 34,
                     borderRadius: 8,
-                    background: 'linear-gradient(135deg, #611F8C, #8B36C4)',
+                    background: 'linear-gradient(135deg, #6D28D9, #8B5CF6)',
                     color: '#fff',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    boxShadow: '0 2px 8px rgba(97, 31, 140, 0.25)'
+                    boxShadow: '0 2px 8px rgba(109, 40, 217, 0.25)'
                   }}>
                     {chartMode === 'trajectory' ? <TrendingUp size={18} /> : chartMode === 'hourly' ? <BarChart3 size={18} /> : <Zap size={18} />}
                   </div>
@@ -531,9 +531,9 @@ export default function Overview() {
                           border: 'none',
                           cursor: 'pointer',
                           transition: 'all 0.15s ease',
-                          background: isActive ? '#611F8C' : 'transparent',
-                          color: isActive ? '#ffffff' : '#611F8C',
-                          boxShadow: isActive ? '0 2px 6px rgba(97, 31, 140, 0.25)' : 'none',
+                          background: isActive ? '#6D28D9' : 'transparent',
+                          color: isActive ? '#ffffff' : '#6D28D9',
+                          boxShadow: isActive ? '0 2px 6px rgba(109, 40, 217, 0.25)' : 'none',
                         }}
                       >
                         <BIcon size={13} />
@@ -586,8 +586,8 @@ export default function Overview() {
                   <AreaChart data={chartData} margin={{ top: 12, right: 12, left: 0, bottom: 0 }}>
                     <defs>
                       <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#611F8C" stopOpacity={0.35} />
-                        <stop offset="95%" stopColor="#611F8C" stopOpacity={0.0} />
+                        <stop offset="5%" stopColor="#6D28D9" stopOpacity={0.35} />
+                        <stop offset="95%" stopColor="#6D28D9" stopOpacity={0.0} />
                       </linearGradient>
                       <linearGradient id="colorVisits" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="5%" stopColor="#0D9488" stopOpacity={0.38} />
@@ -633,11 +633,11 @@ export default function Overview() {
                       <Area
                         type="monotone"
                         dataKey="revenue"
-                        stroke="#611F8C"
+                        stroke="#6D28D9"
                         strokeWidth={2.8}
                         fill="url(#colorRevenue)"
                         name="Daily Revenue (PKR)"
-                        activeDot={{ r: 6, stroke: '#611F8C', strokeWidth: 2, fill: '#ffffff' }}
+                        activeDot={{ r: 6, stroke: '#6D28D9', strokeWidth: 2, fill: '#ffffff' }}
                       />
                     ) : (
                       <Area
@@ -685,7 +685,7 @@ export default function Overview() {
                       }}
                     />
                     <Legend wrapperStyle={{ paddingTop: 8, fontSize: '0.82rem' }} />
-                    <Bar dataKey="completed" name="Completed Visits" fill="#611F8C" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="completed" name="Completed Visits" fill="#6D28D9" radius={[4, 4, 0, 0]} />
                     <Bar dataKey="enRoute" name="En Route / Active" fill="#0D9488" radius={[4, 4, 0, 0]} />
                     <Bar dataKey="scheduled" name="Upcoming Scheduled" fill="#DE9A3C" radius={[4, 4, 0, 0]} />
                     <Line type="monotone" dataKey="nurses" name="Clinicians Deployed" stroke="#2563EB" strokeWidth={2.5} dot={{ r: 4 }} />
@@ -708,7 +708,7 @@ export default function Overview() {
                       formatter={(val, name) => [`${val} visits`, name]}
                     />
                     <Legend wrapperStyle={{ paddingTop: 8, fontSize: '0.82rem' }} />
-                    <Bar dataKey="completed" name="Actual Completed" fill="#611F8C" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="completed" name="Actual Completed" fill="#6D28D9" radius={[4, 4, 0, 0]} />
                     <Bar dataKey="target" name="Operational Target (+12%)" fill="#DE9A3C" radius={[4, 4, 0, 0]} opacity={0.85} />
                   </BarChart>
                 )}
@@ -853,7 +853,7 @@ export default function Overview() {
                       }}
                     />
                     <PolarRadiusAxis domain={[80, 100]} tick={false} axisLine={false} />
-                    <Radar name="Achieved SLA" dataKey="actual" stroke="#611F8C" fill="#611F8C" fillOpacity={0.38} strokeWidth={2} />
+                    <Radar name="Achieved SLA" dataKey="actual" stroke="#6D28D9" fill="#6D28D9" fillOpacity={0.38} strokeWidth={2} />
                     <Radar name="Benchmark SLA" dataKey="benchmark" stroke="#DE9A3C" fill="#DE9A3C" fillOpacity={0.12} strokeWidth={1.8} strokeDasharray="3 3" />
                     <Tooltip
                       contentStyle={{
@@ -881,7 +881,7 @@ export default function Overview() {
                 fontSize: '0.76rem'
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ width: 12, height: 12, borderRadius: 3, background: '#611F8C', display: 'inline-block' }} />
+                  <span style={{ width: 12, height: 12, borderRadius: 3, background: '#6D28D9', display: 'inline-block' }} />
                   <span style={{ fontWeight: 600, color: '#374151' }}>Achieved SLA</span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>

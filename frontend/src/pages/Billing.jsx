@@ -221,8 +221,8 @@ export default function Billing() {
               {/* Invoice Print Header */}
               <div style={{ borderBottom: '2px solid var(--teal-700)', paddingBottom: 12, marginBottom: 16 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <img src="/ehealth-logo.png" alt="eHealth Logo" style={{ width: 36, height: 36, borderRadius: '50%', objectFit: 'cover' }} />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <img src="/ehealth-logo.png" alt="eHealth Hospital At Home" style={{ width: 48, height: 48, objectFit: 'contain' }} />
                     <div>
                       <h3 style={{ fontFamily: 'var(--font-heading)', margin: 0, color: 'var(--teal-800)', fontSize: '1.3rem', fontWeight: 800 }}>
                         e<span style={{ color: '#DE9A3C' }}>Health</span>

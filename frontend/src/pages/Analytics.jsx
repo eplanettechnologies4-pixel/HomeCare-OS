@@ -8,7 +8,7 @@ import useStore from '../store/useStore';
 import UniversalPrintButton from '../components/UniversalPrintButton';
 import { DAILY_REVENUE, REVENUE_BY_SERVICE } from '../data/mockData';
 
-const DONUT_COLORS = ['#611F8C', '#8B36C4', '#A855F7', '#C084FC', '#DE9A3C'];
+const DONUT_COLORS = ['#6D28D9', '#8B5CF6', '#A78BFA', '#C084FC', '#DE9A3C'];
 
 export default function Analytics() {
   const [dateFrom, setDateFrom] = useState('2026-08-01');
@@ -103,7 +103,7 @@ export default function Analytics() {
                 <XAxis dataKey="date" tick={{ fontSize: 10, fontFamily: 'var(--font-mono)' }} interval={5} />
                 <YAxis tick={{ fontSize: 10, fontFamily: 'var(--font-mono)' }} />
                 <Tooltip formatter={(v) => `PKR ${v.toLocaleString()}`} contentStyle={{ fontSize: 12, borderRadius: 8 }} />
-                <Line type="monotone" dataKey="total" stroke="#611F8C" strokeWidth={2.5} dot={false} name="Revenue" />
+                <Line type="monotone" dataKey="total" stroke="#6D28D9" strokeWidth={2.5} dot={false} name="Revenue" />
               </LineChart>
             </ResponsiveContainer>
           </div>

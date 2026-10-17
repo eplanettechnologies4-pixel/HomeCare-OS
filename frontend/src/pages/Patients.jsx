@@ -5,6 +5,7 @@ import AddPatientModal from '../components/AddPatientModal';
 import EditPatientModal from '../components/EditPatientModal';
 import PatientSourceBadge from '../components/PatientSourceBadge';
 import PermanentPatientModal from '../components/PermanentPatientModal';
+import UniversalPrintButton from '../components/UniversalPrintButton';
 import { format, formatDistanceToNow } from 'date-fns';
 
 export default function Patients() {
@@ -97,7 +98,7 @@ export default function Patients() {
           <p className="page-subtitle">{filtered.length} patients · {patients.filter(p=>p.is_active).length} active</p>
         </div>
         {canAddPatient && (
-          <button className="btn btn-primary" onClick={() => setShowAddModal(true)} style={{ background: '#611F8C' }}>
+          <button className="btn btn-primary" onClick={() => setShowAddModal(true)}>
             <Plus size={16} /> Add Patient (A)
           </button>
         )}
@@ -211,10 +212,18 @@ export default function Patients() {
                             className="btn btn-ghost btn-sm"
                             title="View Patient 360 Profile (V)"
                             onClick={() => handlePatientClick(p)}
-                            style={{ padding: '4px 8px', fontSize: '0.75rem', gap: 4, color: '#611F8C', borderColor: '#e9d5ff' }}
+                            style={{ padding: '4px 8px', fontSize: '0.75rem', gap: 4, color: 'var(--primary)' }}
                           >
                             <Eye size={13} /> View
                           </button>
+                          {/* Print Vitals Report Button */}
+                          <UniversalPrintButton
+                            type="vitals_history"
+                            data={{ patient: p, vitals: (useStore.getState().vitals || []).filter(v => v.patient_id === p.id) }}
+                            label="Vitals"
+                            variant="ghost"
+                            size="sm"
+                          />
                           {/* Edit Button */}
                           {canEditPatient && (
                             <button
@@ -314,6 +323,8 @@ function PatientDetail({ patient, bookings, onClose }) {
             <span className={`badge ${patient.is_active ? 'badge-green' : 'badge-grey'}`}>
               {patient.is_active ? 'Active' : 'Inactive'}
             </span>
+            <UniversalPrintButton type="patient_summary" data={patient} label="Print Summary" variant="ghost" size="sm" />
+            <UniversalPrintButton type="vitals_history" data={{ patient, vitals: patientVitals }} label="Print Vitals Report" variant="ghost" size="sm" />
             <button className="btn btn-ghost btn-icon btn-sm" onClick={onClose} style={{ color: 'white', borderColor: 'rgba(255,255,255,0.3)' }}><X size={14} /></button>
           </div>
         </div>
@@ -395,6 +406,12 @@ function PatientDetail({ patient, bookings, onClose }) {
           {/* ── Vitals ────────────────────────────────────────────────────── */}
           {tab === 'vitals' && (
             <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                <span style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--teal-800)' }}>
+                  Frequent Vitals Monitoring Flowsheet
+                </span>
+                <UniversalPrintButton type="vitals_history" data={{ patient, vitals: patientVitals }} label="Print Vitals Report" variant="ghost" size="sm" />
+              </div>
               {patientVitals.map(v => (
                 <div key={v.id} style={{ padding: 14, borderRadius: 10, border: '1px solid var(--sage-200)', marginBottom: 12 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>

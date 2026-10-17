@@ -350,7 +350,7 @@ export default function UserManagement() {
               </p>
             </div>
             <div style={{ display: 'flex', gap: 8, fontSize: '0.75rem', fontWeight: 600 }}>
-              <span className="badge" style={{ background: '#f3e8ff', color: '#611F8C', border: '1px solid #e9d5ff' }}><strong>V</strong> = View</span>
+              <span className="badge" style={{ background: 'var(--primary-soft)', color: 'var(--primary)', border: '1px solid rgba(109, 40, 217, 0.2)' }}><strong>V</strong> = View</span>
               <span className="badge" style={{ background: '#d1fae5', color: '#065f46', border: '1px solid #a7f3d0' }}><strong>A</strong> = Add</span>
               <span className="badge" style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a' }}><strong>E</strong> = Edit</span>
               <span className="badge" style={{ background: '#fee2e2', color: '#991b1b', border: '1px solid #fca5a5' }}><strong>D</strong> = Delete</span>
