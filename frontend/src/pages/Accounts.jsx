@@ -1,5 +1,5 @@
-import React from 'react';
-import { Download } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Download, CheckCircle2, DollarSign } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   PieChart, Pie, Cell, ResponsiveContainer,
@@ -7,12 +7,34 @@ import {
 import useStore from '../store/useStore';
 import { REVENUE_BY_SERVICE, DAILY_REVENUE } from '../data/mockData';
 import { format } from 'date-fns';
+import apiFetch from '../services/api';
 
 const PIE_COLORS = ['#6D28D9', '#8B5CF6', '#A78BFA', '#DE9A3C'];
 const PAYMENT_BADGE = { advance: 'badge-green', pending: 'badge-red', partial: 'badge-amber', waived: 'badge-grey' };
 
 export default function Accounts() {
   const bookings = useStore((s) => s.bookings);
+  const [approvedClaims, setApprovedClaims] = useState([]);
+  const [loadingClaims, setLoadingClaims] = useState(false);
+
+  useEffect(() => {
+    async function loadClaims() {
+      try {
+        setLoadingClaims(true);
+        const res = await apiFetch('/staff-portal/overtime-claims/');
+        if (res.ok) {
+          const json = await res.json();
+          const allClaims = json.results || json || [];
+          setApprovedClaims(allClaims.filter((c) => c.status === 'approved' || c.status === 'paid'));
+        }
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setLoadingClaims(false);
+      }
+    }
+    loadClaims();
+  }, []);
 
   const totalBilled = bookings.reduce((s, b) => s + b.amount, 0);
   const totalPaid   = bookings.reduce((s, b) => s + b.amount_paid, 0);
@@ -126,6 +148,57 @@ export default function Accounts() {
               ))}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      {/* Approved Overtime Claims for Payroll */}
+      <div className="card" style={{ marginTop: 24 }}>
+        <div className="card-header">
+          <div>
+            <h3 className="card-title">Approved Clinical Overtime (Payroll Ready)</h3>
+            <p className="ts">Verified by supervisors & care coordinators; ready for payroll disbursement</p>
+          </div>
+          <button className="btn btn-ghost btn-sm"><Download size={13} /> Export Payroll CSV</button>
+        </div>
+        <div className="data-table-wrap">
+          {approvedClaims.length > 0 ? (
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Staff Member</th>
+                  <th>Shift Date</th>
+                  <th>Approved Hours</th>
+                  <th>Overtime Rate</th>
+                  <th>Total Payable</th>
+                  <th>Reviewer</th>
+                  <th>Payroll Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {approvedClaims.map((c) => (
+                  <tr key={c.id}>
+                    <td style={{ fontWeight: 600 }}>{c.staff_name}</td>
+                    <td className="ts">{c.date}</td>
+                    <td className="ts"><strong style={{ color: 'var(--primary)' }}>{c.hours} hrs</strong></td>
+                    <td className="ts">PKR 650/hr</td>
+                    <td className="ts" style={{ color: 'var(--status-green)', fontWeight: 700 }}>
+                      PKR {(Number(c.hours) * 650).toLocaleString()}
+                    </td>
+                    <td className="ts">{c.reviewer_name || 'Care Coordinator'}</td>
+                    <td>
+                      <span className={`badge ${c.status === 'paid' ? 'badge-blue' : 'badge-green'}`}>
+                        {c.status === 'paid' ? 'Disbursed' : 'Approved for Payroll'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--muted)', fontSize: '0.84rem' }}>
+              No approved overtime claims awaiting payroll processing.
+            </div>
+          )}
         </div>
       </div>
     </div>

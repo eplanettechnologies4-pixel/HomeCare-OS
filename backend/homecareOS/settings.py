@@ -63,6 +63,7 @@ INSTALLED_APPS = [
     'lab',
     'documents',
     'forms_builder',
+    'staff_portal',
 ]
 
 MIDDLEWARE = [
@@ -247,6 +248,8 @@ REST_FRAMEWORK = {
         'anon': '100/day',
         'user': '1000/day',
         'public_booking': PUBLIC_BOOKING_THROTTLE_RATE,
+        'staff_portal_post': '60/minute',
+        'staff_verify': '30/minute',
     },
 }
 
@@ -352,4 +355,29 @@ SPECTACULAR_SETTINGS = {
     'TITLE': 'HomeCare OS API',
     'DESCRIPTION': 'Admin dashboard API for home healthcare platform',
     'VERSION': '1.0.0',
+}
+
+# ── Staff Portal Configuration ───────────────────────────────────────────────
+OFFICE_HOURS_START = config('OFFICE_HOURS_START', default='09:00').strip()
+OFFICE_HOURS_END = config('OFFICE_HOURS_END', default='17:00').strip()
+OFFICE_TIMEZONE = config('OFFICE_TIMEZONE', default='Asia/Karachi').strip()
+OVERTIME_CLAIM_WINDOW_DAYS = config('OVERTIME_CLAIM_WINDOW_DAYS', default=2, cast=int)
+RESIGNATION_NOTICE_PERIOD_DAYS = config('RESIGNATION_NOTICE_PERIOD_DAYS', default=30, cast=int)
+SHIFT_NOTE_TIMEOUT_HOURS = config('SHIFT_NOTE_TIMEOUT_HOURS', default=2, cast=int)
+NURSE_PATIENT_ACCESS_DAYS_AFTER_VISIT = config('NURSE_PATIENT_ACCESS_DAYS_AFTER_VISIT', default=7, cast=int)
+
+VITALS_THRESHOLDS = {
+    'systolic_max': 140,
+    'systolic_min': 90,
+    'diastolic_max': 90,
+    'diastolic_min': 60,
+    'heart_rate_max': 100,
+    'heart_rate_min': 50,
+    'spo2_min': 92,
+    'temperature_max': 38.0,
+    'temperature_min': 35.5,
+    'blood_glucose_max': 180,
+    'blood_glucose_min': 70,
+    'intake_min_ml': 500,
+    'output_min_ml': 400,
 }

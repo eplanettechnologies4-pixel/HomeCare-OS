@@ -13,6 +13,7 @@ URL layout (registered in patients/urls.py and staff/urls.py):
   GET    /api/staff/{id}/feedback/                → list feedback received by staff
   GET    /api/staff/{id}/manager-checklist/       → list checklists for staff
 """
+from django.http import Http404
 from django.utils import timezone
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
@@ -54,18 +55,22 @@ class PatientFeedbackView(APIView):
 
     def get(self, request, patient_pk=None):
         from patients.models import Patient
+        from patients.scoping import check_nurse_patient_access
         try:
             patient = Patient.objects.get(pk=patient_pk)
-        except Patient.DoesNotExist:
+            check_nurse_patient_access(request.user, patient)
+        except (Patient.DoesNotExist, Http404):
             return Response({'error': 'Patient not found.'}, status=status.HTTP_404_NOT_FOUND)
         qs = VisitFeedback.objects.filter(patient=patient).select_related('staff', 'patient')
         return Response(VisitFeedbackListSerializer(qs, many=True, context={'request': request}).data)
 
     def post(self, request, patient_pk=None):
         from patients.models import Patient
+        from patients.scoping import check_nurse_patient_access
         try:
             patient = Patient.objects.get(pk=patient_pk)
-        except Patient.DoesNotExist:
+            check_nurse_patient_access(request.user, patient)
+        except (Patient.DoesNotExist, Http404):
             return Response({'error': 'Patient not found.'}, status=status.HTTP_404_NOT_FOUND)
 
         staff_member, err = _get_staff_member(request.user)
@@ -145,18 +150,22 @@ class PatientManagerChecklistView(APIView):
 
     def get(self, request, patient_pk=None):
         from patients.models import Patient
+        from patients.scoping import check_nurse_patient_access
         try:
             patient = Patient.objects.get(pk=patient_pk)
-        except Patient.DoesNotExist:
+            check_nurse_patient_access(request.user, patient)
+        except (Patient.DoesNotExist, Http404):
             return Response({'error': 'Patient not found.'}, status=status.HTTP_404_NOT_FOUND)
         qs = ManagerVisitChecklist.objects.filter(patient=patient).select_related('staff', 'manager')
         return Response(ManagerVisitChecklistSerializer(qs, many=True, context={'request': request}).data)
 
     def post(self, request, patient_pk=None):
         from patients.models import Patient
+        from patients.scoping import check_nurse_patient_access
         try:
             patient = Patient.objects.get(pk=patient_pk)
-        except Patient.DoesNotExist:
+            check_nurse_patient_access(request.user, patient)
+        except (Patient.DoesNotExist, Http404):
             return Response({'error': 'Patient not found.'}, status=status.HTTP_404_NOT_FOUND)
 
         manager_member, err = _get_staff_member(request.user)

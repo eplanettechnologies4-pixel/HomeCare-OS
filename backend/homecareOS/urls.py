@@ -22,6 +22,7 @@ from homecareOS.auth_views import (
 )
 from homecareOS.location_resolver import ResolveLocationLinkView
 from lms.views import CertificateVerifyView
+from lms.media_views import ProtectedLMSMediaView
 
 urlpatterns = [
     path('django-admin/', admin.site.urls),
@@ -57,6 +58,7 @@ urlpatterns = [
     path('api/services/',      include('bookings.service_urls')),
     # Quality forms (manager-sign standalone endpoint)
     path('api/feedback/',      include('quality.urls')),
+    path('api/staff-portal/',  include('staff_portal.urls')),
 
     path('api/health/', HealthCheckView.as_view(), name='health-check'),
     path('api/reports/overview/', ReportsOverviewView.as_view(), name='reports-overview'),
@@ -70,6 +72,9 @@ urlpatterns = [
     # ── API Schema ────────────────────────────────────────────────────────────
     path('api/schema/', SpectacularAPIView.as_view(),                       name='schema'),
     path('api/docs/',   SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
+
+    # ── Protected LMS Media Route ─────────────────────────────────────────────
+    path('media/lms/<path:filepath>', ProtectedLMSMediaView.as_view(), name='protected-lms-media'),
 
     # ── Media Serving Fallback (Serves user uploads in production behind ASGI) ──
     re_path(r'^media/(?P<path>.*)$', serve, {'document_root': settings.MEDIA_ROOT}),

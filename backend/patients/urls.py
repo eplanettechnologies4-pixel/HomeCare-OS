@@ -7,11 +7,11 @@ from .views import (
 from quality.views import PatientFeedbackView, PatientManagerChecklistView
 
 router = DefaultRouter()
-router.register(r'', PatientViewSet, basename='patient')
 router.register(r'prescriptions', PrescriptionViewSet, basename='prescription')
 router.register(r'vitals', VitalSignViewSet, basename='vital')
 router.register(r'notes', NurseNoteViewSet, basename='nurse-note')
 router.register(r'labs', LabResultViewSet, basename='lab')
+router.register(r'', PatientViewSet, basename='patient')
 
 urlpatterns = [
     # Nested prescription detail: /api/patients/{id}/prescriptions/{prescription_id}/

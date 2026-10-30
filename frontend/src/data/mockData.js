@@ -571,7 +571,7 @@ export const ROLE_CONFIG = {
   admin:           { label: 'Admin',           nav: ['overview', 'bookings', 'live-tracking', 'patients', 'patient-360', 'therapy', 'pharmacy', 'equipment', 'lab-orders', 'forms', 'admin-hr', 'crm', 'lms', 'reports', 'analytics'] },
   branch_manager:  { label: 'Branch Manager',  nav: ['overview', 'bookings', 'live-tracking', 'patients', 'patient-360', 'pharmacy', 'equipment', 'lab-orders', 'lms', 'reports', 'analytics'] },
   care_manager:    { label: 'Care Manager',    nav: ['overview', 'bookings', 'live-tracking', 'patients', 'patient-360', 'therapy', 'pharmacy', 'equipment', 'lab-orders'] },
-  nurse:           { label: 'Nurse / Doctor',  nav: ['overview', 'bookings', 'live-tracking', 'patients', 'patient-360', 'pharmacy', 'equipment', 'lab-orders'] },
+  nurse:           { label: 'Nurse',           nav: ['overview', 'my-docs', 'my-reviews', 'my-trainings', 'my-complaints', 'call-help', 'leave-application', 'permission', 'resignation', 'my-timesheet', 'company-policies', 'nurse-patient-detail', 'bookings', 'live-tracking', 'patients', 'patient-360', 'pharmacy', 'equipment', 'lab-orders'] },
   accountant:      { label: 'Accountant',      nav: ['overview', 'accounts', 'billing', 'reports', 'analytics'] },
   crm_executive:   { label: 'CRM Executive',   nav: ['overview', 'crm', 'reports', 'analytics'] },
   patient_family:  { label: 'Patient / Family',nav: ['family-portal'] },

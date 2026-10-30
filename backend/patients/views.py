@@ -17,7 +17,7 @@ from homecareOS.permissions import (
 )
 from .models import (
     Patient, Prescription, VitalSign, NurseNote, LabResult,
-    DailyReport, ReportPhoto, MARAdministration,
+    DailyReport, ReportPhoto, MARAdministration, DoctorNote, PhysioNote,
 )
 from .serializers import (
     PatientListSerializer, PatientDetailSerializer,
@@ -25,6 +25,7 @@ from .serializers import (
     NurseNoteSerializer, LabResultSerializer,
     DailyReportSerializer, MARAdministrationSerializer,
 )
+from .scoping import check_nurse_patient_access, filter_queryset_for_nurse
 
 
 class PatientViewSet(viewsets.ModelViewSet):
@@ -36,7 +37,7 @@ class PatientViewSet(viewsets.ModelViewSet):
         user = self.request.user
         if is_family_user(user):
             return qs.filter(portal_user=user)
-        return qs
+        return filter_queryset_for_nurse(qs, user, patient_field=None)
 
     def get_object(self):
         user = self.request.user
@@ -48,7 +49,9 @@ class PatientViewSet(viewsets.ModelViewSet):
                 if target and target.portal_user_id != user.id:
                     from rest_framework.exceptions import PermissionDenied
                     raise PermissionDenied("You do not have permission to access this patient's records.")
-        return super().get_object()
+        obj = super().get_object()
+        check_nurse_patient_access(user, obj)
+        return obj
 
     def get_permissions(self):
         if self.action in ['create_portal_user', 'reset_portal_password']:
@@ -106,7 +109,6 @@ class PatientViewSet(viewsets.ModelViewSet):
             reports = LabReport.objects.filter(lab_order__patient=patient).select_related('lab_order')
             for rep in reports:
                 for test in rep.lab_order.tests.all():
-                    # If not already present
                     val = str(rep.result_data.get(test.name, 'Completed'))
                     data.append({
                         'id': f"rep-{rep.id}-{test.id}",
@@ -123,6 +125,20 @@ class PatientViewSet(viewsets.ModelViewSet):
         except Exception:
             pass
         return Response(data)
+
+    @action(detail=True, methods=['get'], url_path='doctor-notes')
+    def doctor_notes(self, request, pk=None):
+        patient = self.get_object()
+        from staff_portal.serializers import DoctorNoteSerializer
+        notes = patient.doctor_notes.select_related('doctor').order_by('-created_at')
+        return Response(DoctorNoteSerializer(notes, many=True).data)
+
+    @action(detail=True, methods=['get'], url_path='physio-notes')
+    def physio_notes(self, request, pk=None):
+        patient = self.get_object()
+        from staff_portal.serializers import PhysioNoteSerializer
+        notes = patient.physio_notes.select_related('physio').order_by('-created_at')
+        return Response(PhysioNoteSerializer(notes, many=True).data)
 
     @action(
         detail=True,
@@ -148,45 +164,31 @@ class PatientViewSet(viewsets.ModelViewSet):
 
         # Attach staff member if available from authenticated user
         staff = None
-        if hasattr(request.user, 'staffmember'):
-            staff = request.user.staffmember
+        try:
+            from staff.models import StaffMember
+            staff = StaffMember.objects.filter(user=request.user).first()
+        except Exception:
+            pass
 
-        # Check if booking is provided in request
-        booking_id = request.data.get('booking') or request.data.get('booking_id')
-        booking = None
-        if booking_id:
-            from bookings.models import Booking
-            booking = Booking.objects.filter(pk=booking_id, patient=patient).first()
-
-        prescription = serializer.save(
-            patient=patient,
-            uploaded_by=staff,
-            booking=booking or serializer.validated_data.get('booking')
-        )
+        prescription = serializer.save(patient=patient, uploaded_by=staff)
         return Response(
             PrescriptionSerializer(prescription, context={'request': request}).data,
-            status=status.HTTP_201_CREATED
+            status=status.HTTP_201_CREATED,
         )
 
-    # ── Mobile actions ────────────────────────────────────────────────────────
+    # ── Mobile: Daily Report Submission ───────────────────────────────────────
 
     @action(
-        detail=True, methods=['post'],
-        url_path='daily-report',
+        detail=True,
+        methods=['post'],
         parser_classes=[MultiPartParser, FormParser, JSONParser],
+        url_path='daily_report'
     )
     def daily_report(self, request, pk=None):
         """
-        POST /api/patients/{id}/daily-report/
-
-        Multipart form body:
-          - booking_id        (int, required)
-          - care_items_checked (JSON string, e.g. '["BP Check","Medication Given"]')
-          - notes             (text)
-          - photos            (multiple file fields, key='photos')
-
-        Server-side actions (atomic):
-          1. Resolve the submitting staff member from the JWT
+        POST /api/patients/{id}/daily_report/
+        Consolidated mobile daily report submission:
+          1. Parse care_items_checked
           2. Create a NurseNote from the notes text
           3. Create a DailyReport linking booking, patient, care items, and nurse note
           4. Attach uploaded photos as ReportPhoto objects
@@ -211,7 +213,6 @@ class PatientViewSet(viewsets.ModelViewSet):
         care_items_raw = request.data.get('care_items_checked', '[]')
         photo_files = request.FILES.getlist('photos')
 
-        # Parse care_items_checked — accept both JSON string and Python list
         if isinstance(care_items_raw, str):
             try:
                 care_items = json.loads(care_items_raw)
@@ -223,7 +224,6 @@ class PatientViewSet(viewsets.ModelViewSet):
         else:
             care_items = care_items_raw
 
-        # Resolve the booking (must belong to this patient)
         booking = None
         if booking_id:
             try:
@@ -234,9 +234,6 @@ class PatientViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_404_NOT_FOUND,
                 )
 
-        now = timezone.now()
-
-        # 1. Auto-create a NurseNote so Form A is populated
         nurse_note = NurseNote.objects.create(
             patient=patient,
             recorded_by=staff,
@@ -244,7 +241,6 @@ class PatientViewSet(viewsets.ModelViewSet):
             note=notes_text or 'Daily visit report submitted via mobile.',
         )
 
-        # 2. Create the DailyReport record
         report = DailyReport.objects.create(
             patient=patient,
             booking=booking,
@@ -254,7 +250,6 @@ class PatientViewSet(viewsets.ModelViewSet):
             nurse_note=nurse_note,
         )
 
-        # 3. Attach uploaded photos
         for photo_file in photo_files:
             photo = ReportPhoto.objects.create(image=photo_file)
             report.photos.add(photo)
@@ -274,11 +269,6 @@ class PatientViewSet(viewsets.ModelViewSet):
         """
         POST /api/patients/{id}/mar/administer/
         Body: {"prescription_id": <int>, "day_number": <int>}
-
-        Records a single dose as administered.
-        - administered_by comes from the JWT (never client-supplied)
-        - administered_at is set server-side (never trust client clock)
-        - Idempotent: returns 409 if the dose was already recorded today
         """
         from staff.models import StaffMember
 
@@ -305,7 +295,6 @@ class PatientViewSet(viewsets.ModelViewSet):
 
         now = timezone.now()
 
-        # Idempotency: check if already administered today for this day_number
         already_administered = MARAdministration.objects.filter(
             prescription=prescription,
             day_number=day_number,
@@ -338,14 +327,6 @@ class PatientViewSet(viewsets.ModelViewSet):
     def mar_due_today(self, request, pk=None):
         """
         GET /api/patients/{id}/mar/due-today/
-
-        Returns today's due (and overdue) medications for this patient.
-        Pre-filters server-side so the mobile TodaysMedsScreen doesn't need
-        to download all prescriptions and filter locally.
-
-        Each item includes:
-          - prescription details
-          - administered (bool) — whether it's already been ticked today
         """
         patient = self.get_object()
         now = timezone.now()
@@ -382,15 +363,6 @@ class PatientViewSet(viewsets.ModelViewSet):
         url_path='create_portal_user'
     )
     def create_portal_user(self, request, pk=None):
-        """
-        POST /api/patients/{id}/create_portal_user/
-        Body: {"username": "...", "password": "..."}
-
-        Creates a Django User account with role=patient_family and links it
-        to this Patient via Patient.portal_user.  Idempotent: if the patient
-        already has a portal account an error is returned so the caller can
-        handle the duplicate gracefully.
-        """
         from accounts.models import UserProfile, UserRole
 
         patient = self.get_object()
@@ -415,7 +387,6 @@ class PatientViewSet(viewsets.ModelViewSet):
                 suffix += 1
 
         if not password:
-            import secrets, string
             alphabet = string.ascii_letters + string.digits + "@#!"
             password = ''.join(secrets.choice(alphabet) for _ in range(12))
 
@@ -465,13 +436,6 @@ class PatientViewSet(viewsets.ModelViewSet):
         url_path='reset_portal_password'
     )
     def reset_portal_password(self, request, pk=None):
-        """
-        POST /api/patients/{id}/reset_portal_password/
-
-        Generates a new random 12-character password for the linked portal
-        user account and returns it in plaintext so the admin can share it
-        with the patient / family.  Mirrors the staff reset-password flow.
-        """
         patient = self.get_object()
 
         if not patient.portal_user_id:
@@ -480,7 +444,6 @@ class PatientViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Generate a secure random password (letters + digits + safe symbols)
         alphabet = string.ascii_letters + string.digits + '@#!'
         new_password = ''.join(secrets.choice(alphabet) for _ in range(12))
 
@@ -509,7 +472,17 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
         user = self.request.user
         if is_family_user(user):
             return qs.filter(patient__portal_user=user)
-        return qs
+        patient_param = self.request.query_params.get('patient') or self.request.query_params.get('patient_id')
+        if patient_param:
+            check_nurse_patient_access(user, patient_param)
+            qs = qs.filter(patient_id=patient_param)
+        return filter_queryset_for_nurse(qs, user, patient_field='patient')
+
+    def perform_create(self, serializer):
+        patient = serializer.validated_data.get('patient')
+        if patient:
+            check_nurse_patient_access(self.request.user, patient)
+        serializer.save()
 
     def get_object(self):
         user = self.request.user
@@ -521,7 +494,10 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
                 if target and (not target.patient or target.patient.portal_user_id != user.id):
                     from rest_framework.exceptions import PermissionDenied
                     raise PermissionDenied("You do not have permission to access this prescription.")
-        return super().get_object()
+        obj = super().get_object()
+        if hasattr(obj, 'patient') and obj.patient:
+            check_nurse_patient_access(user, obj.patient)
+        return obj
 
 
 class PatientPrescriptionDetailView(APIView):
@@ -537,6 +513,7 @@ class PatientPrescriptionDetailView(APIView):
 
     def get_object(self, patient_pk, prescription_pk):
         user = self.request.user
+        check_nurse_patient_access(user, patient_pk)
         if is_family_user(user):
             target_patient = Patient.objects.filter(pk=patient_pk).first()
             if target_patient and target_patient.portal_user_id != user.id:
@@ -567,7 +544,6 @@ class PatientPrescriptionDetailView(APIView):
         return Response({'detail': 'Prescription deleted successfully.'}, status=status.HTTP_204_NO_CONTENT)
 
 
-
 class VitalSignViewSet(viewsets.ModelViewSet):
     queryset = VitalSign.objects.select_related('patient', 'recorded_by').all()
     serializer_class = VitalSignSerializer
@@ -578,7 +554,17 @@ class VitalSignViewSet(viewsets.ModelViewSet):
         user = self.request.user
         if is_family_user(user):
             return qs.filter(patient__portal_user=user)
-        return qs
+        patient_param = self.request.query_params.get('patient') or self.request.query_params.get('patient_id')
+        if patient_param:
+            check_nurse_patient_access(user, patient_param)
+            qs = qs.filter(patient_id=patient_param)
+        return filter_queryset_for_nurse(qs, user, patient_field='patient')
+
+    def perform_create(self, serializer):
+        patient = serializer.validated_data.get('patient')
+        if patient:
+            check_nurse_patient_access(self.request.user, patient)
+        serializer.save()
 
     def get_object(self):
         user = self.request.user
@@ -590,7 +576,10 @@ class VitalSignViewSet(viewsets.ModelViewSet):
                 if target and (not target.patient or target.patient.portal_user_id != user.id):
                     from rest_framework.exceptions import PermissionDenied
                     raise PermissionDenied("You do not have permission to access these vitals.")
-        return super().get_object()
+        obj = super().get_object()
+        if hasattr(obj, 'patient') and obj.patient:
+            check_nurse_patient_access(user, obj.patient)
+        return obj
 
 
 class NurseNoteViewSet(viewsets.ModelViewSet):
@@ -603,7 +592,17 @@ class NurseNoteViewSet(viewsets.ModelViewSet):
         user = self.request.user
         if is_family_user(user):
             return qs.filter(patient__portal_user=user)
-        return qs
+        patient_param = self.request.query_params.get('patient') or self.request.query_params.get('patient_id')
+        if patient_param:
+            check_nurse_patient_access(user, patient_param)
+            qs = qs.filter(patient_id=patient_param)
+        return filter_queryset_for_nurse(qs, user, patient_field='patient')
+
+    def perform_create(self, serializer):
+        patient = serializer.validated_data.get('patient')
+        if patient:
+            check_nurse_patient_access(self.request.user, patient)
+        serializer.save()
 
     def get_object(self):
         user = self.request.user
@@ -615,7 +614,10 @@ class NurseNoteViewSet(viewsets.ModelViewSet):
                 if target and (not target.patient or target.patient.portal_user_id != user.id):
                     from rest_framework.exceptions import PermissionDenied
                     raise PermissionDenied("You do not have permission to access this note.")
-        return super().get_object()
+        obj = super().get_object()
+        if hasattr(obj, 'patient') and obj.patient:
+            check_nurse_patient_access(user, obj.patient)
+        return obj
 
 
 class LabResultViewSet(viewsets.ModelViewSet):
@@ -628,7 +630,17 @@ class LabResultViewSet(viewsets.ModelViewSet):
         user = self.request.user
         if is_family_user(user):
             return qs.filter(patient__portal_user=user)
-        return qs
+        patient_param = self.request.query_params.get('patient') or self.request.query_params.get('patient_id')
+        if patient_param:
+            check_nurse_patient_access(user, patient_param)
+            qs = qs.filter(patient_id=patient_param)
+        return filter_queryset_for_nurse(qs, user, patient_field='patient')
+
+    def perform_create(self, serializer):
+        patient = serializer.validated_data.get('patient')
+        if patient:
+            check_nurse_patient_access(self.request.user, patient)
+        serializer.save()
 
     def get_object(self):
         user = self.request.user
@@ -640,6 +652,7 @@ class LabResultViewSet(viewsets.ModelViewSet):
                 if target and (not target.patient or target.patient.portal_user_id != user.id):
                     from rest_framework.exceptions import PermissionDenied
                     raise PermissionDenied("You do not have permission to access this lab result.")
-        return super().get_object()
-
-
+        obj = super().get_object()
+        if hasattr(obj, 'patient') and obj.patient:
+            check_nurse_patient_access(user, obj.patient)
+        return obj

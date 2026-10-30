@@ -207,11 +207,12 @@ class BookingViewSet(viewsets.ModelViewSet):
     ordering = ['-scheduled_time']
 
     def get_queryset(self):
-        qs = Booking.objects.select_related('patient', 'assigned_staff').all()
+        qs = Booking.objects.select_related('patient', 'assigned_staff', 'supervisor', 'buddy_staff').all()
         user = self.request.user
         if is_family_user(user):
             return qs.filter(patient__portal_user=user)
-        return qs
+        from patients.scoping import filter_queryset_for_nurse
+        return filter_queryset_for_nurse(qs, user, patient_field='patient')
 
     def get_object(self):
         user = self.request.user
@@ -223,7 +224,11 @@ class BookingViewSet(viewsets.ModelViewSet):
                 if target and (not target.patient or target.patient.portal_user_id != user.id):
                     from rest_framework.exceptions import PermissionDenied
                     raise PermissionDenied("You do not have permission to access this booking.")
-        return super().get_object()
+        obj = super().get_object()
+        from patients.scoping import check_nurse_patient_access
+        if obj.patient:
+            check_nurse_patient_access(user, obj.patient)
+        return obj
 
     def get_serializer_class(self):
         if self.action in ['list']:
@@ -396,6 +401,30 @@ class BookingViewSet(viewsets.ModelViewSet):
         else:
             booking.backup_staff = None
         
+        # Optional supervisor
+        supervisor_id = request.data.get('supervisor_id')
+        if supervisor_id:
+            try:
+                booking.supervisor = StaffMember.objects.get(pk=supervisor_id)
+            except StaffMember.DoesNotExist:
+                pass
+
+        # Optional buddy staff
+        buddy_staff_id = request.data.get('buddy_staff_id')
+        if buddy_staff_id:
+            try:
+                booking.buddy_staff = StaffMember.objects.get(pk=buddy_staff_id)
+            except StaffMember.DoesNotExist:
+                pass
+
+        # Shift-level transport fields
+        if 'transport_driver_name' in request.data:
+            booking.transport_driver_name = request.data.get('transport_driver_name') or ''
+        if 'transport_driver_phone' in request.data:
+            booking.transport_driver_phone = request.data.get('transport_driver_phone') or ''
+        if 'transport_pickup_time' in request.data:
+            booking.transport_pickup_time = request.data.get('transport_pickup_time') or ''
+
         if request.data.get('care_manager_name'):
             booking.care_manager_name = request.data.get('care_manager_name')
         if request.data.get('clinical_requirements'):

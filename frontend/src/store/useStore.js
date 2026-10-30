@@ -414,6 +414,11 @@ const useStore = create((set, get) => ({
           body: JSON.stringify({
             staff_id: assignmentData.staff.id,
             backup_staff_id: assignmentData.backupStaff?.id || null,
+            supervisor_id: assignmentData.supervisorId || assignmentData.supervisor?.id || null,
+            buddy_staff_id: assignmentData.buddyStaffId || assignmentData.buddyStaff?.id || null,
+            transport_driver_name: assignmentData.transportDriverName || '',
+            transport_driver_phone: assignmentData.transportDriverPhone || '',
+            transport_pickup_time: assignmentData.transportPickupTime || '',
             care_manager_name: assignmentData.careManagerName || '',
             clinical_requirements: assignmentData.clinicalRequirements || '',
             instructions: assignmentData.instructions || '',
@@ -468,16 +473,17 @@ const useStore = create((set, get) => ({
   },
   createStaffMember: async (staffData) => {
     try {
+      const isFormData = typeof FormData !== 'undefined' && staffData instanceof FormData;
       const res = await apiFetch('/staff/members/', {
         method: 'POST',
-        body: JSON.stringify(staffData),
+        body: isFormData ? staffData : JSON.stringify(staffData),
       });
       const data = await res.json();
       if (res.ok) {
         await get().fetchStaff();
         return { success: true, data };
       } else {
-        const errorMsg = data.username?.[0] || data.password?.[0] || data.password_confirm?.[0] || data.non_field_errors?.[0] || data.detail || (typeof data === 'string' ? data : JSON.stringify(data));
+        const errorMsg = data.username?.[0] || data.password?.[0] || data.password_confirm?.[0] || data.non_field_errors?.[0] || data.photo?.[0] || data.id_card_front?.[0] || data.id_card_back?.[0] || data.detail || (typeof data === 'string' ? data : JSON.stringify(data));
         return { success: false, error: errorMsg };
       }
     } catch (err) {
@@ -516,9 +522,10 @@ const useStore = create((set, get) => ({
   },
   updateStaffMember: async (staffId, updatedFields) => {
     try {
+      const isFormData = typeof FormData !== 'undefined' && updatedFields instanceof FormData;
       const res = await apiFetch(`/staff/members/${staffId}/`, {
         method: 'PATCH',
-        body: JSON.stringify(updatedFields),
+        body: isFormData ? updatedFields : JSON.stringify(updatedFields),
       });
       if (res.ok) {
         await get().fetchStaff();
@@ -728,11 +735,11 @@ const useStore = create((set, get) => ({
     }
   },
 
-  assignCourse: async (courseId, staffIds, dueDate = null) => {
+  assignCourse: async (courseId, staffIds, dueDate = null, isMandatory = false) => {
     try {
       const res = await apiFetch(`/lms/courses/${courseId}/assign/`, {
         method: 'POST',
-        body: JSON.stringify({ staff_ids: staffIds, due_date: dueDate }),
+        body: JSON.stringify({ staff_ids: staffIds, due_date: dueDate, is_mandatory: isMandatory }),
       });
       const data = await res.json();
       if (res.ok) { await get().fetchLmsAssignments(); return { success: true, data }; }

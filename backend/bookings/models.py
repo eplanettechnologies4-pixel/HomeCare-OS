@@ -103,6 +103,29 @@ class Booking(models.Model):
         'staff.StaffMember', on_delete=models.SET_NULL,
         null=True, blank=True, related_name='backup_bookings'
     )
+    supervisor = models.ForeignKey(
+        'staff.StaffMember', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='supervised_bookings'
+    )
+    buddy = models.ForeignKey(
+        'staff.StaffMember', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='buddy_bookings'
+    )
+    buddy_staff = models.ForeignKey(
+        'staff.StaffMember', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='shift_buddy_bookings',
+        verbose_name='Shift Buddy Staff'
+    )
+    driver_name = models.CharField(max_length=150, blank=True, default='')
+    driver_phone = models.CharField(max_length=50, blank=True, default='')
+    pickup_time = models.DateTimeField(null=True, blank=True)
+    transport_driver_name = models.CharField(max_length=150, blank=True, default='', verbose_name='Shift Transport Driver')
+    transport_driver_phone = models.CharField(max_length=50, blank=True, default='', verbose_name='Shift Transport Phone')
+    transport_pickup_time = models.CharField(max_length=50, blank=True, default='', verbose_name='Shift Pickup Time')
+    handover_notes = models.TextField(blank=True, default='')
+    break_minutes = models.IntegerField(default=0)
+    shift_type = models.CharField(max_length=50, blank=True, default='')
+    shift_end_time = models.DateTimeField(null=True, blank=True)
     service_type = models.CharField(max_length=30, choices=ServiceType.choices)
     status = models.CharField(max_length=20, choices=BookingStatus.choices, default=BookingStatus.PENDING)
     payment_status = models.CharField(max_length=20, choices=PaymentStatus.choices, default=PaymentStatus.PENDING)

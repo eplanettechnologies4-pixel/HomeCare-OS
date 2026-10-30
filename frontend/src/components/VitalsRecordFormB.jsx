@@ -300,8 +300,11 @@ export default function VitalsRecordFormB({ patient, isReadOnly = false }) {
         <div className="modal-backdrop" onClick={(e) => e.target === e.currentTarget && setShowAddModal(false)}>
           <div className="modal" style={{ width: 660, maxHeight: '90vh', overflowY: 'auto' }}>
             <div className="modal-header">
-              <h3 className="modal-title">Form B — Add Frequent Vitals Reading</h3>
-              <button className="btn btn-ghost btn-icon" onClick={() => setShowAddModal(false)}>✕</button>
+              <div>
+                <h3 className="modal-title">Form B — Add Frequent Vitals Reading</h3>
+                <p className="modal-subtitle">Document South East Hospital vital signs and fluid intake/output</p>
+              </div>
+              <button type="button" className="modal-close-btn" onClick={() => setShowAddModal(false)} aria-label="Close">✕</button>
             </div>
 
             <form onSubmit={handleSaveVitals}>
@@ -412,8 +415,8 @@ export default function VitalsRecordFormB({ patient, isReadOnly = false }) {
               </div>
 
               <div className="modal-footer">
-                <button type="button" className="btn btn-ghost" onClick={() => setShowAddModal(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary">Save Vitals & Run AI Check →</button>
+                <button type="button" className="btn btn-secondary" onClick={() => setShowAddModal(false)}>Cancel</button>
+                <button type="submit" className="btn btn-primary btn-pill">Save Vitals & Run AI Check →</button>
               </div>
             </form>
           </div>

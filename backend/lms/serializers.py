@@ -72,20 +72,21 @@ class CourseAssignmentSerializer(serializers.ModelSerializer):
     lecture_progresses = LectureProgressSerializer(many=True, read_only=True)
     certificate  = CertificateSerializer(read_only=True)
     progress_pct = serializers.SerializerMethodField()
+    mandatory    = serializers.BooleanField(source='is_mandatory', read_only=True)
 
     class Meta:
         model = CourseAssignment
         fields = [
             'id', 'staff', 'staff_id', 'staff_name', 'staff_role',
             'course', 'course_title', 'course_category',
-            'assigned_by', 'assigned_date', 'due_date', 'status',
+            'assigned_by', 'assigned_date', 'due_date', 'is_mandatory', 'mandatory', 'status',
             'completed_date', 'lecture_progresses', 'certificate', 'progress_pct',
         ]
         read_only_fields = [
             'id', 'staff_id', 'staff_name', 'staff_role',
             'course_title', 'course_category', 'assigned_by',
             'assigned_date', 'completed_date', 'lecture_progresses',
-            'certificate', 'progress_pct',
+            'certificate', 'progress_pct', 'mandatory',
         ]
 
     def get_progress_pct(self, obj):
@@ -106,9 +107,10 @@ class CourseLectureInlineSerializer(serializers.ModelSerializer):
 
 
 class CourseSerializer(serializers.ModelSerializer):
+    is_active     = serializers.BooleanField(default=True, required=False)
     lectures      = CourseLectureInlineSerializer(many=True, read_only=True)
     lecture_count = serializers.ReadOnlyField()
-    enrolled_count = serializers.ReadOnlyField()
+    enrolled_count = serializers.SerializerMethodField()
     category_display = serializers.CharField(source='get_category_display', read_only=True)
     created_by_name = serializers.SerializerMethodField()
 
@@ -120,6 +122,13 @@ class CourseSerializer(serializers.ModelSerializer):
             'lectures', 'lecture_count', 'enrolled_count',
         ]
         read_only_fields = ['id', 'created_by', 'created_at', 'updated_at', 'lectures', 'lecture_count', 'enrolled_count']
+
+    def get_enrolled_count(self, obj):
+        from .permissions import is_lms_manager
+        request = self.context.get('request')
+        if request and hasattr(request, 'user') and not is_lms_manager(request.user):
+            return 0
+        return obj.assignments.count()
 
     def get_created_by_name(self, obj):
         if obj.created_by:
@@ -137,12 +146,13 @@ class StaffTrainingSerializer(serializers.ModelSerializer):
     progress_pct    = serializers.SerializerMethodField()
     total_lectures  = serializers.SerializerMethodField()
     completed_lectures = serializers.SerializerMethodField()
+    mandatory       = serializers.BooleanField(source='is_mandatory', read_only=True)
 
     class Meta:
         model = CourseAssignment
         fields = [
             'id', 'course', 'course_title', 'course_category',
-            'assigned_date', 'due_date', 'status', 'completed_date',
+            'assigned_date', 'due_date', 'is_mandatory', 'mandatory', 'status', 'completed_date',
             'progress_pct', 'total_lectures', 'completed_lectures',
             'lectures', 'lecture_progresses', 'certificate',
         ]

@@ -206,12 +206,27 @@ export default function UniversalPrintButton({
                     )}
 
                     {type === 'id_card' && (
-                      <div style={{ padding: 10, background: '#611F8C', color: 'white', borderRadius: 10, maxWidth: 360, margin: '0 auto' }}>
-                        <div style={{ fontWeight: 700, fontSize: '1rem', color: '#DE9A3C' }}>eHealth Staff Digital ID Card</div>
-                        <div style={{ fontSize: '0.9rem', marginTop: 4 }}>Name: {rec.full_name || 'Sarah Mitchell'}</div>
-                        <div style={{ fontSize: '0.8rem', opacity: 0.9 }}>Role: {rec.role_display || 'Registered Nurse'}</div>
-                        <div style={{ fontSize: '0.8rem', opacity: 0.9 }}>Staff ID: {rec.employee_id || 'HC-N-000123'}</div>
-                        <div style={{ fontSize: '0.7rem', color: '#DE9A3C', marginTop: 8 }}>Real-Time QR Verification Encoded ✓</div>
+                      <div style={{ padding: 16, background: '#611F8C', color: 'white', borderRadius: 10, maxWidth: 380, margin: '0 auto', border: '2px solid #DE9A3C' }}>
+                        <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+                          <div style={{ width: 68, height: 68, borderRadius: 8, overflow: 'hidden', border: '2px solid #DE9A3C', background: '#fff', flexShrink: 0 }}>
+                            {rec.photo ? (
+                              <img src={rec.photo} alt={rec.full_name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                            ) : (
+                              <div style={{ width: '100%', height: '100%', background: '#0F766E', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '1.2rem' }}>
+                                {(rec.full_name || 'Staff').split(' ').map(n=>n[0]).join('')}
+                              </div>
+                            )}
+                          </div>
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: '0.95rem', color: '#DE9A3C' }}>eHealth Hospital at Home</div>
+                            <div style={{ fontSize: '0.95rem', fontWeight: 600, marginTop: 2 }}>{rec.full_name || 'Sarah Mitchell'}</div>
+                            <div style={{ fontSize: '0.8rem', opacity: 0.9 }}>{rec.role_display || 'Registered Nurse'}</div>
+                            <div style={{ fontSize: '0.8rem', opacity: 0.9 }}>ID: {rec.employee_id || 'HC-N-000123'}</div>
+                          </div>
+                        </div>
+                        <div style={{ fontSize: '0.7rem', color: '#DE9A3C', marginTop: 10, borderTop: '1px solid rgba(255,255,255,0.2)', paddingTop: 6 }}>
+                          Official Medical Credential · Islamabad Operations Center ✓
+                        </div>
                       </div>
                     )}
 

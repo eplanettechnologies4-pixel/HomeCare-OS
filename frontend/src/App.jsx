@@ -21,10 +21,22 @@ import UserManagement from './pages/UserManagement';
 import FamilyPortal  from './pages/FamilyPortal';
 import Login         from './pages/Login';
 import LMS            from './pages/LMS';
+import MyTrainings    from './pages/MyTrainings';
 import Pharmacy       from './pages/Pharmacy';
 import Equipment      from './pages/Equipment';
 import LabOrders      from './pages/LabOrders';
 import FormBuilder    from './pages/FormBuilder';
+import NurseHome      from './pages/NurseHome';
+import NursePatientDetail from './pages/NursePatientDetail';
+import NurseDocs      from './pages/NurseDocs';
+import NurseReviews   from './pages/NurseReviews';
+import NurseComplaints from './pages/NurseComplaints';
+import NurseLeave     from './pages/NurseLeave';
+import NursePermission from './pages/NursePermission';
+import NurseResignation from './pages/NurseResignation';
+import NurseTimesheet from './pages/NurseTimesheet';
+import NursePolicies  from './pages/NursePolicies';
+import NurseCallHelp  from './pages/NurseCallHelp';
 import { useRealtimeEvents } from './hooks/useRealtimeEvents';
 
 const PAGE_META = {
@@ -47,6 +59,17 @@ const PAGE_META = {
   'reports':        { title: 'Reports',             subtitle: 'Operational reports and export' },
   'analytics':      { title: 'Analytics',           subtitle: 'Executive KPIs, trends, and service breakdown' },
   'users':          { title: 'Users & Permissions', subtitle: 'User accounts, role matrix, and audit trail' },
+  'nurse-patient-detail': { title: 'Patient Clinical Chart', subtitle: 'Bedside care, MAR, vitals & doctor notes' },
+  'my-docs':        { title: 'My Documents',        subtitle: 'Digital staff card, credentials & SOPs' },
+  'my-reviews':     { title: 'My Reviews',          subtitle: 'Patient and family feedback ratings' },
+  'my-trainings':   { title: 'My Trainings',        subtitle: 'Mandatory clinical courses & certifications' },
+  'my-complaints':  { title: 'My Complaints',       subtitle: 'Confidential workplace & operational feedback' },
+  'call-help':      { title: 'Call Help',           subtitle: 'Shift supervisor & emergency clinical hotline' },
+  'leave-application': { title: 'Leave Application',subtitle: 'Annual, sick, and emergency leave requests' },
+  'permission':     { title: 'Permission Request',  subtitle: 'Short partial-shift leave by time range' },
+  'resignation':    { title: 'Resignation Notice',  subtitle: 'Employment transition & notice period' },
+  'my-timesheet':   { title: 'My Timesheet',        subtitle: 'Electronic attendance and overtime records' },
+  'company-policies': { title: 'Company Policies',  subtitle: 'Clinical hygiene & standard operating procedures' },
 };
 
 const PAGE_COMPONENTS = {
@@ -69,6 +92,17 @@ const PAGE_COMPONENTS = {
   'reports':        Reports,
   'analytics':      Analytics,
   'users':          UserManagement,
+  'nurse-patient-detail': NursePatientDetail,
+  'my-docs':        NurseDocs,
+  'my-reviews':     NurseReviews,
+  'my-trainings':   MyTrainings,
+  'my-complaints':  NurseComplaints,
+  'call-help':      NurseCallHelp,
+  'leave-application': NurseLeave,
+  'permission':     NursePermission,
+  'resignation':    NurseResignation,
+  'my-timesheet':   NurseTimesheet,
+  'company-policies': NursePolicies,
 };
 
 export default function App() {
@@ -87,6 +121,13 @@ export default function App() {
       fetchAllData();
     }
   }, [isAuthenticated, fetchAllData]);
+
+  // Route guard: if a nurse attempts to open admin LMS directly, redirect to My Trainings
+  React.useEffect(() => {
+    if (currentRole === 'nurse' && activePage === 'lms') {
+      useStore.getState().setActivePage('my-trainings');
+    }
+  }, [currentRole, activePage]);
 
   // Unauthenticated → Login Screen directly (no public website)
   if (!isAuthenticated) {
@@ -157,8 +198,10 @@ export default function App() {
     );
   }
 
-  const meta = PAGE_META[activePage] || { title: 'eHealth', subtitle: 'Hospital at Home' };
-  const PageComponent = PAGE_COMPONENTS[activePage] || Overview;
+  const meta = (currentRole === 'nurse' && activePage === 'overview')
+    ? { title: 'Nurses Portal', subtitle: 'Live Clinical Duty Dashboard & Schedule' }
+    : (PAGE_META[activePage] || { title: 'eHealth', subtitle: 'Hospital at Home' });
+  const PageComponent = (currentRole === 'nurse' && activePage === 'overview') ? NurseHome : (PAGE_COMPONENTS[activePage] || Overview);
 
   return (
     <div className="app-shell">

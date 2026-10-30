@@ -17,9 +17,26 @@ class ServiceCatalogItemAdmin(admin.ModelAdmin):
 @admin.register(Booking)
 class BookingAdmin(admin.ModelAdmin):
     list_display = [
-        'reference_code', 'patient', 'service_type', 'requested_item',
-        'service_mode', 'provider_level', 'shift_role', 'rental_period',
-        'estimated_price', 'amount', 'status', 'scheduled_time'
+        'reference_code', 'patient', 'service_type', 'assigned_staff',
+        'supervisor', 'buddy_staff', 'transport_driver_name',
+        'amount', 'status', 'scheduled_time'
     ]
-    list_filter = ['service_type', 'status', 'service_mode', 'provider_level', 'shift_role', 'rental_period']
-    search_fields = ['reference_code', 'patient__first_name', 'patient__last_name', 'requested_item']
+    list_filter = ['service_type', 'status', 'service_mode', 'provider_level', 'shift_role']
+    search_fields = ['reference_code', 'patient__first_name', 'patient__last_name', 'transport_driver_name']
+    fieldsets = (
+        ('Patient & Service', {
+            'fields': ('patient', 'service_type', 'status', 'scheduled_time', 'shift_duration', 'shift_end_time')
+        }),
+        ('Shift Staffing & Coordination', {
+            'fields': ('assigned_staff', 'supervisor', 'buddy_staff', 'backup_staff', 'care_manager_name')
+        }),
+        ('Shift Transport & Driver', {
+            'fields': ('transport_driver_name', 'transport_driver_phone', 'transport_pickup_time')
+        }),
+        ('Financials', {
+            'fields': ('amount', 'amount_paid', 'payment_status', 'payment_method')
+        }),
+        ('Clinical & Notes', {
+            'fields': ('address', 'diagnosis', 'allergies', 'notes', 'handover_notes')
+        }),
+    )

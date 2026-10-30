@@ -177,6 +177,17 @@ class IsPatientOrFamilyOwner(BasePermission):
         if not request.user or not request.user.is_authenticated:
             return False
         if not is_family_user(request.user):
+            # Resolve patient from obj and enforce nurse assigned-patient scoping
+            patient = getattr(obj, 'patient', None)
+            if patient is None and hasattr(obj, 'portal_user'):
+                patient = obj
+            if patient is None and hasattr(obj, 'booking'):
+                booking = getattr(obj, 'booking', None)
+                patient = getattr(booking, 'patient', None) if booking else None
+
+            if patient is not None:
+                from patients.scoping import check_nurse_patient_access
+                check_nurse_patient_access(request.user, patient)
             return True
 
         # Resolve patient from obj (Patient, Prescription, VitalSign, NurseNote, Booking, LiveVisit, etc.)

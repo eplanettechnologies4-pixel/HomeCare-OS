@@ -263,8 +263,11 @@ export default function MarSheetFormC({ patient, isReadOnly = false }) {
         <div className="modal-backdrop" onClick={(e) => e.target === e.currentTarget && setShowAddModal(false)}>
           <div className="modal" style={{ width: 560 }}>
             <div className="modal-header">
-              <h3 className="modal-title">Form C — Add Medication to Patient MAR Sheet</h3>
-              <button className="btn btn-ghost btn-icon" onClick={() => setShowAddModal(false)}>✕</button>
+              <div>
+                <h3 className="modal-title">Form C — Add Medication to Patient MAR Sheet</h3>
+                <p className="modal-subtitle">Document prescription order, dosage, and 7-day administration schedule</p>
+              </div>
+              <button type="button" className="modal-close-btn" onClick={() => setShowAddModal(false)} aria-label="Close">✕</button>
             </div>
 
             <form onSubmit={handleSaveDrug}>
@@ -332,8 +335,8 @@ export default function MarSheetFormC({ patient, isReadOnly = false }) {
               </div>
 
               <div className="modal-footer">
-                <button type="button" className="btn btn-ghost" onClick={() => setShowAddModal(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary">Add Drug to Active MAR →</button>
+                <button type="button" className="btn btn-secondary" onClick={() => setShowAddModal(false)}>Cancel</button>
+                <button type="submit" className="btn btn-primary btn-pill">Add Drug to Active MAR →</button>
               </div>
             </form>
           </div>

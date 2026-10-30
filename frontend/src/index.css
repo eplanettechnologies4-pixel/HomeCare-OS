@@ -2284,4 +2284,591 @@ input[type="radio"],
   }
 }
 
+/* ═════════════════════════════════════════════════════════════════════════════
+   UNIFIED MODAL & FORM DESIGN SYSTEM TOKENS (Nurse Portal & System-wide)
+   Tokens: Primary #6D28D9, Surface #FFFFFF, Text #1F2937, Muted #6B7280,
+   Border #E5E7EB, Radius 12-20px, 8px Grid, Inter Typography.
+   ═════════════════════════════════════════════════════════════════════════════ */
+
+/* ── 1. Modals & Drawers ─────────────────────────────────────────────────── */
+.modal-backdrop,
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background-color: rgba(17, 24, 39, 0.45);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+  animation: modalFadeIn 150ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.modal,
+.modal-card {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  border: 1px solid var(--border);
+  width: 520px;
+  max-width: 92vw;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+  animation: modalScaleIn 150ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.modal-lg {
+  width: 640px !important;
+}
+
+.modal-header,
+.drawer-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+}
+
+.modal-header .modal-title,
+.modal-header h2,
+.modal-header h3 {
+  font-size: 18px !important;
+  font-weight: 600 !important;
+  color: var(--text);
+  line-height: 1.3;
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+
+.modal-header .modal-subtitle,
+.modal-header p.text-muted,
+.modal-header p {
+  font-size: 13px !important;
+  color: var(--muted);
+  line-height: 1.4;
+  margin: 4px 0 0 0;
+}
+
+.modal-close-btn {
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  transition: all var(--transition-fast);
+  padding: 0;
+  margin: -4px -6px 0 0;
+}
+
+.modal-close-btn:hover {
+  background: var(--gray-100);
+  color: var(--text);
+}
+
+.modal-close-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.modal-body,
+.drawer-body {
+  padding: 24px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+}
+
+.modal-footer,
+.drawer-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 16px 24px;
+  border-top: 1px solid var(--border);
+  background: var(--gray-50);
+  flex-shrink: 0;
+}
+
+@keyframes modalFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes modalScaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* ── 2. Form Controls & Fields ───────────────────────────────────────────── */
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 16px;
+  width: 100%;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  width: 100%;
+}
+
+@media (max-width: 640px) {
+  .form-row {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+}
+
+.form-label {
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  color: var(--text);
+  line-height: 1.25;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  user-select: none;
+}
+
+.required-marker {
+  color: var(--danger);
+  font-weight: 700;
+  margin-left: 2px;
+}
+
+.form-input,
+.form-select,
+.form-control {
+  height: 40px !important;
+  width: 100%;
+  border-radius: var(--radius-control) !important;
+  border: 1px solid var(--border) !important;
+  padding: 0 14px !important;
+  font-size: 14px !important;
+  font-family: var(--font-ui) !important;
+  background-color: #FFFFFF !important;
+  color: var(--text) !important;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  outline: none;
+  box-sizing: border-box;
+}
+
+.form-input::placeholder,
+.form-control::placeholder,
+.form-textarea::placeholder {
+  color: var(--gray-400);
+}
+
+.form-input:focus,
+.form-select:focus,
+.form-textarea:focus,
+.form-control:focus {
+  border-color: var(--primary) !important;
+  box-shadow: var(--focus-ring) !important;
+}
+
+.form-input.has-error,
+.form-select.has-error,
+.form-textarea.has-error,
+.form-control.has-error {
+  border-color: var(--danger) !important;
+}
+
+.form-input.has-error:focus,
+.form-select.has-error:focus,
+.form-textarea.has-error:focus,
+.form-control.has-error:focus {
+  box-shadow: var(--focus-ring-danger) !important;
+}
+
+.form-select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236B7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  background-size: 16px;
+  padding-right: 38px !important;
+  cursor: pointer;
+}
+
+.form-textarea {
+  min-height: 112px !important;
+  width: 100%;
+  border-radius: var(--radius-control) !important;
+  border: 1px solid var(--border) !important;
+  padding: 10px 14px !important;
+  font-size: 14px !important;
+  font-family: var(--font-ui) !important;
+  background-color: #FFFFFF !important;
+  color: var(--text) !important;
+  resize: vertical !important;
+  line-height: 1.5 !important;
+  outline: none;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  box-sizing: border-box;
+}
+
+.form-helper {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.3;
+  margin-top: 2px;
+}
+
+.form-error {
+  font-size: 12px;
+  color: var(--danger);
+  line-height: 1.3;
+  margin-top: 2px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.char-counter {
+  font-size: 11px;
+  color: var(--muted);
+  text-align: right;
+  margin-top: 2px;
+}
+
+/* ── 3. Buttons Design System ────────────────────────────────────────────── */
+.btn {
+  height: 40px;
+  padding: 0 16px;
+  border-radius: var(--radius-control);
+  font-size: 14px;
+  font-weight: 500;
+  font-family: var(--font-ui);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  border: 1px solid transparent;
+  outline: none;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.btn-sm {
+  height: 32px !important;
+  padding: 0 12px !important;
+  font-size: 13px !important;
+  border-radius: var(--radius-sm) !important;
+}
+
+.btn-lg {
+  height: 46px !important;
+  padding: 0 20px !important;
+  font-size: 15px !important;
+  border-radius: var(--radius-md) !important;
+}
+
+.btn-pill {
+  border-radius: var(--radius-pill) !important;
+}
+
+.btn-primary {
+  background-color: var(--primary) !important;
+  color: #FFFFFF !important;
+  border-color: var(--primary) !important;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background-color: var(--primary-dark) !important;
+  border-color: var(--primary-dark) !important;
+}
+
+.btn-primary:disabled {
+  opacity: 0.55 !important;
+  cursor: not-allowed !important;
+}
+
+.btn-secondary,
+.btn-outline {
+  background-color: #FFFFFF !important;
+  color: var(--text) !important;
+  border-color: var(--border) !important;
+}
+
+.btn-secondary:hover:not(:disabled),
+.btn-outline:hover:not(:disabled) {
+  background-color: var(--gray-50) !important;
+  border-color: var(--border-hover) !important;
+}
+
+.btn-ghost {
+  background-color: transparent !important;
+  color: var(--muted) !important;
+  border-color: transparent !important;
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background-color: var(--gray-100) !important;
+  color: var(--text) !important;
+}
+
+.btn-danger {
+  background-color: var(--danger) !important;
+  color: #FFFFFF !important;
+  border-color: var(--danger) !important;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background-color: #B91C1C !important;
+  border-color: #B91C1C !important;
+}
+
+.btn:focus-visible {
+  box-shadow: var(--focus-ring);
+}
+
+/* ── 4. Chip Selectors & Segmented Controls ──────────────────────────────── */
+.chip-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 100%;
+}
+
+.chip-btn {
+  padding: 7px 14px;
+  border-radius: var(--radius-pill);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: #FFFFFF;
+  color: var(--text);
+  transition: all var(--transition-fast);
+  user-select: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1.2;
+}
+
+.chip-btn:hover {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.chip-btn.active {
+  background: var(--primary);
+  color: #FFFFFF;
+  border-color: var(--primary);
+  font-weight: 600;
+  box-shadow: 0 2px 6px rgba(109, 40, 217, 0.22);
+}
+
+.segmented-control {
+  display: inline-flex;
+  background: var(--gray-100);
+  padding: 3px;
+  border-radius: var(--radius-control);
+  gap: 2px;
+  border: 1px solid var(--border);
+  width: 100%;
+}
+
+.segmented-control-btn {
+  flex: 1;
+  padding: 7px 12px;
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 500;
+  text-align: center;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.segmented-control-btn:hover:not(.active) {
+  color: var(--text);
+}
+
+.segmented-control-btn.active {
+  background: #FFFFFF;
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: var(--shadow-xs);
+}
+
+.segmented-control-btn.active-urgent {
+  background: #FFFBEB;
+  color: #B45309;
+  border: 1px solid #FDE68A;
+  font-weight: 700;
+}
+
+.segmented-control-btn.active-emergency {
+  background: #FEF2F2;
+  color: #DC2626;
+  border: 1px solid #FECACA;
+  font-weight: 700;
+}
+
+/* ── 5. Alert & Callout Panels ───────────────────────────────────────────── */
+.alert-callout {
+  padding: 12px 16px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  line-height: 1.45;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.alert-callout-info {
+  background: var(--primary-soft);
+  color: var(--primary-dark);
+  border: 1px solid #DDD6FE;
+}
+
+.alert-callout-warning {
+  background: #FFFBEB;
+  color: #92400E;
+  border: 1px solid #FDE68A;
+}
+
+.alert-callout-danger {
+  background: #FEF2F2;
+  color: #991B1B;
+  border: 1px solid #FECACA;
+}
+
+.alert-callout-success {
+  background: #ECFDF5;
+  color: #065F46;
+  border: 1px solid #A7F3D0;
+}
+
+/* ── 6. Status Badges & Pills ────────────────────────────────────────────── */
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.25;
+  text-transform: capitalize;
+}
+
+.status-pill .badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.badge-green {
+  background: #ECFDF5;
+  color: #065F46;
+}
+.badge-green .badge-dot { background: #10B981; }
+
+.badge-amber {
+  background: #FFFBEB;
+  color: #92400E;
+}
+.badge-amber .badge-dot { background: #F59E0B; }
+
+.badge-red {
+  background: #FEF2F2;
+  color: #991B1B;
+}
+.badge-red .badge-dot { background: #EF4444; }
+
+.badge-grey {
+  background: var(--gray-100);
+  color: var(--gray-700);
+}
+.badge-grey .badge-dot { background: var(--gray-400); }
+
+.badge-purple {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+.badge-purple .badge-dot { background: var(--primary); }
+
+.badge-blue {
+  background: #EFF6FF;
+  color: #1E40AF;
+}
+.badge-blue .badge-dot { background: #3B82F6; }
+
+/* ── 7. Shift Selectable Card (Overtime Claims) ───────────────────────────── */
+.selectable-shift-card {
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: #FFFFFF;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.selectable-shift-card:hover {
+  border-color: var(--primary);
+  background: var(--gray-50);
+}
+
+.selectable-shift-card.selected {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  box-shadow: 0 0 0 2px var(--primary);
+}
+
+/* ── 8. Skeleton Loaders ─────────────────────────────────────────────────── */
+.skeleton-line {
+  height: 14px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #F3F4F6 25%, #E5E7EB 50%, #F3F4F6 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
 

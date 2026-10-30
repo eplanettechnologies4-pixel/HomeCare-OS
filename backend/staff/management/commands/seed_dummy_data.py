@@ -170,9 +170,33 @@ PATIENTS_DATA = [
 
 
 class Command(BaseCommand):
-    help = 'Seed database with dummy staff and patient records'
+    help = 'Seed database with dummy staff and patient records (Dev only)'
+
+    def add_arguments(self, parser):
+        parser.add_argument(
+            '--dev',
+            action='store_true',
+            default=False,
+            help='Seed dummy accounts and records. (Defaults to OFF; DO NOT USE IN PRODUCTION)',
+        )
 
     def handle(self, *args, **options):
+        if not options.get('dev'):
+            self.stdout.write(self.style.WARNING(
+                "Notice: --dev flag not passed. Skipping creation of dummy accounts and test passwords.\n"
+                "Run with 'python manage.py seed_dummy_data --dev' to seed local development records."
+            ))
+            return
+
+        import os
+        dev_password = os.environ.get('DEV_TEST_PASSWORD')
+        if not dev_password:
+            self.stdout.write(self.style.ERROR(
+                "Error: DEV_TEST_PASSWORD environment variable is not set.\n"
+                "Please set DEV_TEST_PASSWORD before running --dev seeding."
+            ))
+            return
+
         # 1. Ensure Super Admin
         sa, created = User.objects.get_or_create(username='superadmin', defaults={
             'email': 'superadmin@homecareos.com',
@@ -181,11 +205,11 @@ class Command(BaseCommand):
             'is_staff': True,
             'is_superuser': True,
         })
-        sa.set_password('Admin@1234')
+        sa.set_password(dev_password)
         sa.is_staff = True
         sa.is_superuser = True
         sa.save()
-        self.stdout.write(self.style.SUCCESS(f"Super Admin ready: superadmin / Admin@1234"))
+        self.stdout.write(self.style.SUCCESS(f"Super Admin ready: superadmin"))
 
         # 2. Seed Staff Members
         care_mgr = None
@@ -195,7 +219,7 @@ class Command(BaseCommand):
                 'first_name': item['first_name'],
                 'last_name': item['last_name'],
             })
-            u.set_password('Staff@1234')
+            u.set_password(dev_password)
             u.save()
 
             sm, sm_created = StaffMember.objects.get_or_create(

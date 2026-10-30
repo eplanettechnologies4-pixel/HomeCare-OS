@@ -33,6 +33,8 @@ class BookingListSerializer(serializers.ModelSerializer):
     backup_staff_name = serializers.CharField(source='backup_staff.full_name', read_only=True)
     backup_staff_employee_id = serializers.CharField(source='backup_staff.employee_id', read_only=True)
     backup_staff_designation = serializers.SerializerMethodField()
+    supervisor_name = serializers.CharField(source='supervisor.full_name', read_only=True)
+    buddy_staff_name = serializers.CharField(source='buddy_staff.full_name', read_only=True)
     service_type_display = serializers.CharField(source='get_service_type_display', read_only=True)
     service_mode_display = serializers.CharField(source='get_service_mode_display', read_only=True)
     provider_level_display = serializers.CharField(source='get_provider_level_display', read_only=True)
@@ -79,6 +81,9 @@ class BookingListSerializer(serializers.ModelSerializer):
             # Assignment Required
             'staff_name', 'staff_employee_id', 'staff_designation',
             'backup_staff_name', 'backup_staff_employee_id', 'backup_staff_designation',
+            'supervisor', 'supervisor_name',
+            'buddy_staff', 'buddy_staff_name',
+            'transport_driver_name', 'transport_driver_phone', 'transport_pickup_time',
             'care_manager_name', 'clinical_requirements', 'assigned_on',
             'status', 'status_display',
             # Financials
@@ -92,6 +97,8 @@ class BookingDetailSerializer(serializers.ModelSerializer):
     patient = PatientSummarySerializer(read_only=True)
     assigned_staff = StaffSummarySerializer(read_only=True)
     backup_staff = StaffSummarySerializer(read_only=True)
+    supervisor = StaffSummarySerializer(read_only=True)
+    buddy_staff = StaffSummarySerializer(read_only=True)
     patient_id = serializers.PrimaryKeyRelatedField(
         queryset=__import__('patients').models.Patient.objects.all(),
         source='patient', write_only=True
@@ -103,6 +110,14 @@ class BookingDetailSerializer(serializers.ModelSerializer):
     backup_staff_id = serializers.PrimaryKeyRelatedField(
         queryset=__import__('staff').models.StaffMember.objects.all(),
         source='backup_staff', write_only=True, required=False, allow_null=True
+    )
+    supervisor_id = serializers.PrimaryKeyRelatedField(
+        queryset=__import__('staff').models.StaffMember.objects.all(),
+        source='supervisor', write_only=True, required=False, allow_null=True
+    )
+    buddy_staff_id = serializers.PrimaryKeyRelatedField(
+        queryset=__import__('staff').models.StaffMember.objects.all(),
+        source='buddy_staff', write_only=True, required=False, allow_null=True
     )
     duration_minutes = serializers.ReadOnlyField()
     balance_due = serializers.ReadOnlyField()

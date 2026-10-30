@@ -1,8 +1,29 @@
+import base64
+import uuid
+from django.core.files.base import ContentFile
 from django.contrib.auth.models import User
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import serializers
 from .models import StaffMember, StaffRole, LeaveRequest, AttendanceRecord, Certification, FeedbackRating
+
+
+class Base64OrImageField(serializers.ImageField):
+    """Allows uploading an image either as a standard file or a Base64 data URL."""
+    def to_internal_value(self, data):
+        if isinstance(data, str) and data.startswith('data:image'):
+            try:
+                header, imgstr = data.split(';base64,')
+                ext = header.split('/')[-1]
+                if ext == 'jpeg':
+                    ext = 'jpg'
+                file_name = f"{uuid.uuid4().hex[:10]}.{ext}"
+                data = ContentFile(base64.b64decode(imgstr), name=file_name)
+            except Exception as e:
+                raise serializers.ValidationError(f"Invalid base64 image data: {str(e)}")
+        elif data == '' or data is None:
+            return None
+        return super().to_internal_value(data)
 
 
 class StaffSummarySerializer(serializers.ModelSerializer):
@@ -33,7 +54,8 @@ class StaffListSerializer(serializers.ModelSerializer):
             'id', 'full_name', 'first_name', 'last_name', 'employee_id',
             'role', 'role_display', 'specialization',
             'status', 'status_display', 'phone', 'email',
-            'photo', 'rating', 'hire_date', 'is_active',
+            'photo', 'id_card_front', 'id_card_back',
+            'rating', 'hire_date', 'is_active',
             'username', 'last_login', 'platform_allowed', 'platform_allowed_display',
         ]
 
@@ -42,6 +64,9 @@ class StaffDetailSerializer(serializers.ModelSerializer):
     full_name = serializers.ReadOnlyField()
     role_display = serializers.CharField(source='get_role_display', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
+    photo = Base64OrImageField(required=False, allow_null=True)
+    id_card_front = Base64OrImageField(required=False, allow_null=True)
+    id_card_back = Base64OrImageField(required=False, allow_null=True)
     certifications = serializers.SerializerMethodField()
     recent_feedback = serializers.SerializerMethodField()
     attendance_summary = serializers.SerializerMethodField()
@@ -78,6 +103,9 @@ class StaffCreateSerializer(serializers.ModelSerializer):
     employee_id = serializers.CharField(required=False, allow_blank=True)
     hire_date = serializers.DateField(required=False)
     hourly_rate = serializers.DecimalField(max_digits=8, decimal_places=2, required=False, default=0)
+    photo = Base64OrImageField(required=False, allow_null=True)
+    id_card_front = Base64OrImageField(required=False, allow_null=True)
+    id_card_back = Base64OrImageField(required=False, allow_null=True)
     platform_allowed = serializers.ChoiceField(
         choices=StaffMember.PlatformAllowed.choices,
         required=False,
@@ -90,6 +118,7 @@ class StaffCreateSerializer(serializers.ModelSerializer):
             'id', 'username', 'password', 'password_confirm',
             'first_name', 'last_name', 'role', 'specialization',
             'phone', 'email', 'employee_id', 'hire_date', 'hourly_rate',
+            'photo', 'id_card_front', 'id_card_back',
             'platform_allowed'
         ]
 
@@ -99,17 +128,17 @@ class StaffCreateSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(f'Username "{cleaned_username}" is already taken. Please choose another username.')
         return cleaned_username
 
-    def validate(self, data):
-        password = data.get('password')
-        password_confirm = data.get('password_confirm')
+    def validate(self, attrs):
+        password = attrs.get('password')
+        password_confirm = attrs.get('password_confirm')
 
-        if len(password) < 8:
+        if password and len(password) < 8:
             raise serializers.ValidationError({'password': 'Password must be at least 8 characters long.'})
 
         if password != password_confirm:
             raise serializers.ValidationError({'password_confirm': 'Passwords do not match.'})
 
-        return data
+        return attrs
 
     def create(self, validated_data):
         username = validated_data.pop('username')

@@ -11,6 +11,7 @@ import CertificateHistoryTable from '../components/CertificateHistoryTable';
 import EditStaffModal from '../components/EditStaffModal';
 import VisitFeedbackTab from '../components/VisitFeedbackTab';
 import ManagerChecklistTab from '../components/ManagerChecklistTab';
+import FullHdImageViewerModal from '../components/FullHdImageViewerModal';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay } from 'date-fns';
 
 const STATUS_BADGE = {
@@ -90,6 +91,7 @@ export default function Staff() {
   const [showAddModal, setShowAddModal]             = useState(false);
   const [editingStaff, setEditingStaff]             = useState(null);
   const [createdStaffConfirmation, setCreatedStaffConfirmation] = useState(null);
+  const [hdViewer, setHdViewer]                     = useState({ open: false, url: '', title: '', badge: '' });
 
   const handleDeleteStaff = (s, e) => {
     if (e) e.stopPropagation();
@@ -390,11 +392,45 @@ export default function Staff() {
               {filteredStaff.map(s => (
                 <div key={s.id} className="card" style={{ padding: 18, cursor: 'pointer' }} onClick={() => setSelectedStaff(s)}>
                   <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', marginBottom: 12 }}>
-                    <div className="avatar avatar-lg" style={{ background: ROLE_COLORS[s.role] + '22', color: ROLE_COLORS[s.role] }}>
-                      {(s.full_name || s.username || 'Staff').split(' ').map(n=>n[0]).join('')}
-                    </div>
-                    <div>
-                      <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--teal-800)' }}>{s.full_name}</div>
+                    {s.photo ? (
+                      <div
+                        style={{
+                          width: 48,
+                          height: 48,
+                          borderRadius: 8,
+                          overflow: 'hidden',
+                          border: '2px solid var(--amber-500)',
+                          background: '#f8fafc',
+                          boxShadow: '0 2px 6px rgba(0,0,0,0.1)',
+                          flexShrink: 0,
+                          cursor: 'pointer',
+                        }}
+                        title="Click to inspect Full HD Photo"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setHdViewer({ open: true, url: s.photo, title: `${s.full_name}'s Profile DP`, badge: 'Square Full HD' });
+                        }}
+                      >
+                        <img
+                          src={s.photo}
+                          alt={s.full_name}
+                          style={{ width: '100%', height: '100%', objectFit: 'cover', imageRendering: '-webkit-optimize-contrast' }}
+                        />
+                      </div>
+                    ) : (
+                      <div className="avatar avatar-lg" style={{ background: ROLE_COLORS[s.role] + '22', color: ROLE_COLORS[s.role], borderRadius: 8 }}>
+                        {(s.full_name || s.username || 'Staff').split(' ').map(n=>n[0]).join('')}
+                      </div>
+                    )}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--teal-800)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.full_name}</span>
+                        {(s.id_card_front || s.id_card_back) && (
+                          <span className="badge badge-amber" style={{ fontSize: '0.62rem', padding: '1px 5px', marginLeft: 6 }} title="National ID Card Attached">
+                            🪪 ID
+                          </span>
+                        )}
+                      </div>
                       <div style={{ fontSize: '0.78rem', color: 'var(--status-grey)' }}>{s.role_display}</div>
                       <Stars rating={s.rating || 5.0} />
                     </div>
@@ -748,12 +784,43 @@ export default function Staff() {
         <div className="modal-backdrop" onClick={(e) => e.target === e.currentTarget && setSelectedStaff(null)}>
           <div className="modal" style={{ width: profileModalTab === 'training' ? 920 : 620, maxWidth: '95vw', transition: 'width 0.2s' }}>
             <div className="modal-header">
-              <div>
-                <h3 style={{ margin: 0, fontFamily: 'var(--font-heading)', color: 'var(--teal-800)' }}>
-                  {selectedStaff.full_name} — Profile &amp; Credentials
-                </h3>
-                <div style={{ fontSize: '0.78rem', color: 'var(--status-grey)' }}>
-                  {selectedStaff.role_display} · ID: {selectedStaff.employee_id}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                {selectedStaff.photo ? (
+                  <div
+                    style={{
+                      width: 46,
+                      height: 46,
+                      borderRadius: 8,
+                      overflow: 'hidden',
+                      border: '2px solid var(--amber-500)',
+                      boxShadow: '0 2px 6px rgba(0,0,0,0.12)',
+                      flexShrink: 0,
+                      cursor: 'pointer',
+                    }}
+                    title="Click to inspect Full HD Photo"
+                    onClick={() => setHdViewer({ open: true, url: selectedStaff.photo, title: `${selectedStaff.full_name}'s Profile DP`, badge: 'Square Full HD' })}
+                  >
+                    <img
+                      src={selectedStaff.photo}
+                      alt={selectedStaff.full_name}
+                      style={{ width: '100%', height: '100%', objectFit: 'cover', imageRendering: '-webkit-optimize-contrast' }}
+                    />
+                  </div>
+                ) : (
+                  <div
+                    className="avatar avatar-md"
+                    style={{ background: 'var(--teal-700)', color: 'white', fontWeight: 700, borderRadius: 8 }}
+                  >
+                    {(selectedStaff.full_name || 'Staff').split(' ').map((n) => n[0]).join('')}
+                  </div>
+                )}
+                <div>
+                  <h3 style={{ margin: 0, fontFamily: 'var(--font-heading)', color: 'var(--teal-800)' }}>
+                    {selectedStaff.full_name} — Profile &amp; Credentials
+                  </h3>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--status-grey)' }}>
+                    {selectedStaff.role_display} · ID: {selectedStaff.employee_id}
+                  </div>
                 </div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -899,9 +966,37 @@ export default function Staff() {
               <button className="btn btn-ghost btn-icon" onClick={() => setCreatedStaffConfirmation(null)}><X size={14} /></button>
             </div>
             <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <p style={{ margin: 0, fontSize: '0.9rem', color: '#374151' }}>
-                Account created for <strong>{createdStaffConfirmation.full_name}</strong> ({createdStaffConfirmation.role_display}).
-              </p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                {createdStaffConfirmation.photo && (
+                  <div
+                    style={{
+                      width: 52,
+                      height: 52,
+                      borderRadius: 8,
+                      overflow: 'hidden',
+                      border: '2px solid var(--amber-500)',
+                      flexShrink: 0,
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+                    }}
+                  >
+                    <img
+                      src={createdStaffConfirmation.photo}
+                      alt={createdStaffConfirmation.full_name}
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    />
+                  </div>
+                )}
+                <div>
+                  <p style={{ margin: 0, fontSize: '0.9rem', color: '#374151' }}>
+                    Account created for <strong>{createdStaffConfirmation.full_name}</strong> ({createdStaffConfirmation.role_display}).
+                  </p>
+                  {(createdStaffConfirmation.id_card_front || createdStaffConfirmation.id_card_back) && (
+                    <span className="badge badge-amber" style={{ fontSize: '0.68rem', marginTop: 4 }}>
+                      National ID Card Attached ✓
+                    </span>
+                  )}
+                </div>
+              </div>
               <div style={{ padding: '14px 16px', background: 'var(--sage-50)', borderRadius: 8, border: '1px solid var(--sage-200)' }}>
                 <div style={{ fontSize: '0.8rem', color: 'var(--status-grey)', marginBottom: 4 }}>Staff ID</div>
                 <div style={{ fontWeight: 700, fontFamily: 'var(--font-mono)', fontSize: '0.95rem', color: 'var(--teal-900)', marginBottom: 12 }}>
@@ -936,6 +1031,15 @@ export default function Staff() {
           }}
         />
       )}
+
+      {/* Full HD Photo / Document Viewer Modal */}
+      <FullHdImageViewerModal
+        isOpen={hdViewer.open}
+        onClose={() => setHdViewer({ ...hdViewer, open: false })}
+        imageUrl={hdViewer.url}
+        title={hdViewer.title}
+        badgeText={hdViewer.badge}
+      />
     </div>
   );
 }

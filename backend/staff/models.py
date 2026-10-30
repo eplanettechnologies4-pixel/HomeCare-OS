@@ -35,10 +35,13 @@ class StaffMember(models.Model):
     phone = models.CharField(max_length=20, blank=True)
     email = models.EmailField(blank=True)
     photo = models.ImageField(upload_to='staff_photos/', null=True, blank=True)
+    id_card_front = models.ImageField(upload_to='staff_id_cards/', null=True, blank=True)
+    id_card_back = models.ImageField(upload_to='staff_id_cards/', null=True, blank=True)
     employee_id = models.CharField(max_length=20, unique=True)
     hire_date = models.DateField()
     hourly_rate = models.DecimalField(max_digits=8, decimal_places=2, default=0)
     rating = models.DecimalField(max_digits=3, decimal_places=2, default=5.0)
+    designation = models.CharField(max_length=100, blank=True, default='')
     is_active = models.BooleanField(default=True)
 
     # Current location (updated via WebSocket)
@@ -46,6 +49,12 @@ class StaffMember(models.Model):
     current_longitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
     # Verification token for QR code lookup
     verification_token = models.CharField(max_length=64, blank=True, null=True)
+
+    # Default transport & buddy fallback fields (used if not set on shift level)
+    transport_driver_name = models.CharField(max_length=150, blank=True, default='', verbose_name='Default Transport Driver Name')
+    transport_driver_phone = models.CharField(max_length=50, blank=True, default='', verbose_name='Default Transport Driver Phone')
+    transport_pickup_time = models.CharField(max_length=50, blank=True, default='', verbose_name='Default Transport Pickup Time')
+    buddy_staff = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True, related_name='default_buddies_for', verbose_name='Default Buddy Staff')
 
     class PlatformAllowed(models.TextChoices):
         WEB = 'web', 'Web Only'
@@ -93,6 +102,9 @@ class LeaveRequest(models.Model):
     leave_type = models.CharField(max_length=20, choices=LeaveType.choices)
     start_date = models.DateField()
     end_date = models.DateField()
+    is_permission = models.BooleanField(default=False)
+    start_time = models.TimeField(null=True, blank=True)
+    end_time = models.TimeField(null=True, blank=True)
     reason = models.TextField()
     status = models.CharField(max_length=20, choices=LeaveStatus.choices, default=LeaveStatus.PENDING)
     reviewed_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)

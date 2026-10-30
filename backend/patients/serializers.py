@@ -232,5 +232,12 @@ class MARAdministrationSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'administered_by', 'administered_by_name', 'administered_at']
 
     def get_day_name(self, obj):
-        return ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][obj.day_number]
+        try:
+            day_idx = int(obj.day_number)
+            days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+            if 0 <= day_idx < len(days):
+                return days[day_idx]
+            return f"Day {day_idx}"
+        except Exception:
+            return str(obj.day_number)
 

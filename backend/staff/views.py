@@ -2,6 +2,7 @@ from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from homecareOS.permissions import IsStaffManagementAllowed, IsCareManagerOrAdmin
 from .models import StaffMember, LeaveRequest, AttendanceRecord
 from .serializers import (
@@ -13,6 +14,7 @@ from .serializers import (
 class StaffViewSet(viewsets.ModelViewSet):
     queryset = StaffMember.objects.all().order_by('-created_at')
     permission_classes = [IsStaffManagementAllowed]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get_serializer_class(self):
         if self.action in ['list']:

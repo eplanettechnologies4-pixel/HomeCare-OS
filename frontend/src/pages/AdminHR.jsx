@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Megaphone, BookOpen, GraduationCap, DollarSign, Send, CheckCircle, Clock, FileText, Download, Trash2, Upload, AlertCircle, X, Check } from 'lucide-react';
+import { Plus, Megaphone, BookOpen, GraduationCap, DollarSign, Send, CheckCircle, Clock, FileText, Download, Trash2, Upload, AlertCircle, X, Check, Inbox } from 'lucide-react';
 import useStore from '../store/useStore';
 import { ANNOUNCEMENTS, SALARY_DATA } from '../data/mockData';
 import { format, formatDistanceToNow } from 'date-fns';
 import { apiFetch, getAuthToken, API_BASE } from '../services/api';
+import ManagerStaffInbox from '../components/ManagerStaffInbox';
 
 const PRIORITY_BADGE = { high: 'badge-red', normal: 'badge-teal' };
 const TRAINING = [
@@ -228,11 +229,12 @@ export default function AdminHR() {
 
       <div className="tabs-bar">
         {[
-          { id: 'announcements', label: 'Announcements',  icon: Megaphone },
-          { id: 'docs',          label: 'Documentation',  icon: BookOpen },
-          { id: 'training',      label: 'Training',       icon: GraduationCap },
-          { id: 'salaries',      label: 'Salaries',       icon: DollarSign },
-          { id: 'content',       label: 'Public Content / CMS', icon: FileText },
+          { id: 'inbox',          label: 'Staff Requests & HR Inbox', icon: Inbox },
+          { id: 'announcements',  label: 'Announcements',  icon: Megaphone },
+          { id: 'docs',           label: 'Documentation',  icon: BookOpen },
+          { id: 'training',       label: 'Training',       icon: GraduationCap },
+          { id: 'salaries',       label: 'Salaries',       icon: DollarSign },
+          { id: 'content',        label: 'Public Content / CMS', icon: FileText },
         ].map(({ id, label, icon: Icon }) => (
           <button key={id} className={`tab-item${tab===id?' active':''}`}
             onClick={() => setTab(id)}
@@ -241,6 +243,9 @@ export default function AdminHR() {
           </button>
         ))}
       </div>
+
+      {/* ── Staff Requests & HR Inbox ────────────────────────────────────── */}
+      {tab === 'inbox' && <ManagerStaffInbox />}
 
       {/* ── Documentation Library ──────────────────────────────────────────── */}
       {tab === 'docs' && (

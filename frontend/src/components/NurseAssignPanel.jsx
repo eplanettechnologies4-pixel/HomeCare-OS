@@ -67,6 +67,23 @@ export default function NurseAssignPanel({ booking, staffList, onConfirmAssignme
   const [isAssigned, setIsAssigned]         = useState(!!booking?.assigned_staff);
   const [validationError, setValidationError] = useState('');
 
+  // Per-shift Supervisor, Buddy Staff & Transport Fields
+  const [supervisorId, setSupervisorId] = useState(
+    booking?.supervisor?.id || booking?.supervisor_id || ''
+  );
+  const [buddyStaffId, setBuddyStaffId] = useState(
+    booking?.buddy_staff?.id || booking?.buddy_staff_id || ''
+  );
+  const [transportDriverName, setTransportDriverName] = useState(
+    booking?.transport_driver_name || ''
+  );
+  const [transportDriverPhone, setTransportDriverPhone] = useState(
+    booking?.transport_driver_phone || ''
+  );
+  const [transportPickupTime, setTransportPickupTime] = useState(
+    booking?.transport_pickup_time || ''
+  );
+
   const primaryNurse = allStaff.find(s => String(s.id) === String(primaryNurseId));
   const backupNurse  = allStaff.find(s => String(s.id) === String(backupNurseId));
 
@@ -123,6 +140,11 @@ export default function NurseAssignPanel({ booking, staffList, onConfirmAssignme
       onConfirmAssignment({
         staff: primaryNurse,
         backupStaff: backupNurse || null,
+        supervisorId: supervisorId || null,
+        buddyStaffId: buddyStaffId || null,
+        transportDriverName: transportDriverName.trim(),
+        transportDriverPhone: transportDriverPhone.trim(),
+        transportPickupTime: transportPickupTime.trim(),
         careManagerName: careManagerName.trim(),
         clinicalRequirements: selectedReqs.join('; '),
         instructions: instructions.trim(),
@@ -427,6 +449,83 @@ export default function NurseAssignPanel({ booking, staffList, onConfirmAssignme
               onChange={e => setCareManagerName(e.target.value)}
               placeholder="e.g. Hina Malik (Care Coordinator)"
             />
+          </div>
+
+          {/* Shift Supervisor & Buddy Staff (Per-shift) */}
+          <div className="grid-2" style={{ gap: 10, marginBottom: 12 }}>
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label className="form-label">Shift Supervisor</label>
+              <select
+                className="form-select"
+                value={supervisorId}
+                onChange={e => setSupervisorId(e.target.value)}
+              >
+                <option value="">Default Supervisor (Auto)</option>
+                {allStaff.filter(s => s.is_active !== false).map(s => (
+                  <option key={s.id} value={s.id}>
+                    {s.full_name} ({s.role_display || s.role})
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label className="form-label">Shift Buddy Staff</label>
+              <select
+                className="form-select"
+                value={buddyStaffId}
+                onChange={e => setBuddyStaffId(e.target.value)}
+              >
+                <option value="">None (Single Staff Shift)</option>
+                {allStaff.filter(s => s.is_active !== false && String(s.id) !== String(primaryNurseId)).map(s => (
+                  <option key={s.id} value={s.id}>
+                    {s.full_name} ({s.role_display || s.role})
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Shift Transport & Pickup Details (Per-shift override) */}
+          <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: 12, marginBottom: 14 }}>
+            <div style={{ fontSize: '0.78rem', fontWeight: 800, color: 'var(--teal-900)', marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span>Shift Transport & Logistics</span>
+              <span style={{ fontSize: '0.7rem', color: '#64748b', fontWeight: 500 }}>Falls back to staff default if empty</span>
+            </div>
+            <div className="grid-3" style={{ gap: 8 }}>
+              <div>
+                <label style={{ fontSize: '0.72rem', color: '#475569', fontWeight: 600 }}>Driver Name</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  style={{ fontSize: '0.8rem', padding: '6px 8px' }}
+                  value={transportDriverName}
+                  onChange={e => setTransportDriverName(e.target.value)}
+                  placeholder="e.g. Aslam Khan"
+                />
+              </div>
+              <div>
+                <label style={{ fontSize: '0.72rem', color: '#475569', fontWeight: 600 }}>Driver Phone</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  style={{ fontSize: '0.8rem', padding: '6px 8px' }}
+                  value={transportDriverPhone}
+                  onChange={e => setTransportDriverPhone(e.target.value)}
+                  placeholder="e.g. +92 300 1234567"
+                />
+              </div>
+              <div>
+                <label style={{ fontSize: '0.72rem', color: '#475569', fontWeight: 600 }}>Pickup Time</label>
+                <input
+                  type="text"
+                  className="form-input"
+                  style={{ fontSize: '0.8rem', padding: '6px 8px' }}
+                  value={transportPickupTime}
+                  onChange={e => setTransportPickupTime(e.target.value)}
+                  placeholder="e.g. 06:45 AM"
+                />
+              </div>
+            </div>
           </div>
 
           {/* Clinical Requirements Checklist */}

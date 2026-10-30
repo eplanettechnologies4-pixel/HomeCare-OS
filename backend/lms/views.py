@@ -33,6 +33,7 @@ from .serializers import (
     CourseSerializer, LectureSerializer, CourseAssignmentSerializer,
     LectureProgressSerializer, CertificateSerializer, StaffTrainingSerializer,
 )
+from .permissions import IsLMSManager, is_lms_manager
 
 
 # ── 1. COURSES ────────────────────────────────────────────────────────────────
@@ -40,10 +41,24 @@ from .serializers import (
 class CourseViewSet(viewsets.ModelViewSet):
     """
     Full CRUD for courses.  POST /courses/{id}/assign/ assigns to staff.
+    Mutations and assigning require LMS manager privileges (admin, super_admin, branch_manager, care_manager).
+    Nurses see only courses assigned to them, with no all-staff counts.
     """
     queryset = Course.objects.prefetch_related('lectures', 'assignments').filter(is_active=True)
     serializer_class = CourseSerializer
     permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        if self.action in ('create', 'update', 'partial_update', 'destroy', 'assign', 'report'):
+            return [IsAuthenticated(), IsLMSManager()]
+        return [IsAuthenticated()]
+
+    def get_queryset(self):
+        if is_lms_manager(self.request.user):
+            return Course.objects.prefetch_related('lectures', 'assignments').filter(is_active=True)
+        return Course.objects.prefetch_related('lectures').filter(
+            assignments__staff__user=self.request.user, is_active=True
+        ).distinct()
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
@@ -65,6 +80,7 @@ class CourseViewSet(viewsets.ModelViewSet):
         role = request.data.get('role')
         assign_all = request.data.get('all', False)
         due_date  = request.data.get('due_date', None) or None
+        is_mandatory = request.data.get('is_mandatory', request.data.get('mandatory', False))
 
         from staff.models import StaffMember
         from homecareOS.event_broadcaster import broadcast_event
@@ -86,7 +102,11 @@ class CourseViewSet(viewsets.ModelViewSet):
             assignment, was_created = CourseAssignment.objects.get_or_create(
                 staff=staff_member,
                 course=course,
-                defaults={'assigned_by': request.user, 'due_date': due_date},
+                defaults={
+                    'assigned_by': request.user,
+                    'due_date': due_date,
+                    'is_mandatory': bool(is_mandatory),
+                },
             )
             if was_created:
                 created.append(staff_member.id)
@@ -99,17 +119,18 @@ class CourseViewSet(viewsets.ModelViewSet):
                         'course_title': course.title,
                         'assigned_by': request.user.get_full_name() or request.user.username,
                         'due_date': str(assignment.due_date) if assignment.due_date else None,
+                        'is_mandatory': assignment.is_mandatory,
                         'status': assignment.status,
                     },
                     groups=[f'staff_{staff_member.id}']
                 )
-                # Push / in-app notification
+                # Push / in-app notification: no clinical data
                 if staff_member.user:
                     try:
                         from notifications.views import create_notification
                         create_notification(
                             recipient_user=staff_member.user,
-                            message=f"🎓 New Course Assigned: '{course.title}' is now available in your Learning center.",
+                            message=f"🎓 New training assigned: '{course.title}'",
                             icon_key='graduation-cap',
                             target_screen='Learning',
                             target_params={'course_id': course.id},
@@ -117,6 +138,16 @@ class CourseViewSet(viewsets.ModelViewSet):
                     except Exception:
                         pass
             else:
+                # If already assigned, update due_date and is_mandatory if explicitly provided
+                update_fields = []
+                if due_date is not None and assignment.due_date != due_date:
+                    assignment.due_date = due_date
+                    update_fields.append('due_date')
+                if is_mandatory is not None and assignment.is_mandatory != bool(is_mandatory):
+                    assignment.is_mandatory = bool(is_mandatory)
+                    update_fields.append('is_mandatory')
+                if update_fields:
+                    assignment.save(update_fields=update_fields)
                 skipped.append(staff_member.id)
 
         return Response({
@@ -168,11 +199,18 @@ class LectureViewSet(viewsets.ModelViewSet):
     CRUD for lectures within a course.
     Accepts multipart uploads for video_file (up to 2GB).
     Triggers automated HLS multi-bitrate ffmpeg transcoding on upload.
+    Mutations restricted to LMS Managers (admin, super_admin, branch_manager, care_manager).
+    Nurses can only view lectures belonging to courses assigned to them.
     """
     queryset = Lecture.objects.select_related('course').all()
     serializer_class = LectureSerializer
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def get_permissions(self):
+        if self.action in ('create', 'update', 'partial_update', 'destroy'):
+            return [IsAuthenticated(), IsLMSManager()]
+        return [IsAuthenticated()]
 
     def perform_create(self, serializer):
         lecture = serializer.save()
@@ -188,6 +226,8 @@ class LectureViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
+        if not is_lms_manager(self.request.user):
+            qs = qs.filter(course__assignments__staff__user=self.request.user)
         course_id = self.request.query_params.get('course')
         if course_id:
             qs = qs.filter(course_id=course_id)
@@ -216,7 +256,6 @@ class LectureProgressView(APIView):
         try:
             staff = StaffMember.objects.get(user=request.user)
         except StaffMember.DoesNotExist:
-            # Admin/super_admin calling directly (e.g. for testing)
             staff = None
 
         try:
@@ -227,8 +266,8 @@ class LectureProgressView(APIView):
         watched_seconds = int(request.data.get('watched_seconds', 0))
         percentage      = float(request.data.get('percentage', 0))
 
-        # For admin testing: allow specifying staff_id override
-        staff_id_override = request.data.get('staff_id')
+        # Only admins/managers may test with staff_id override; nurses cannot spoof staff_id
+        staff_id_override = request.data.get('staff_id') if is_lms_manager(request.user) else None
         if staff is None and staff_id_override:
             try:
                 staff = StaffMember.objects.get(pk=staff_id_override)
@@ -236,7 +275,7 @@ class LectureProgressView(APIView):
                 return Response({'error': 'Staff member not found.'}, status=404)
 
         if staff is None:
-            return Response({'error': 'No StaffMember profile found for this user. Pass staff_id to override.'}, status=403)
+            return Response({'error': 'No StaffMember profile found for this user.'}, status=403)
 
         # Find the assignment for this staff + course
         try:
@@ -244,11 +283,13 @@ class LectureProgressView(APIView):
         except CourseAssignment.DoesNotExist:
             return Response({'error': 'This course has not been assigned to this staff member.'}, status=404)
 
-        # Upsert progress (mirrors LocationPing.objects.create pattern but uses get_or_create for idempotency)
+        # Upsert progress
         progress, _ = LectureProgress.objects.get_or_create(
             assignment=assignment,
             lecture=lecture,
+            defaults={'staff': staff}
         )
+        progress.staff = staff
         # Only advance (never rewind)
         if watched_seconds > progress.watched_seconds:
             progress.watched_seconds = watched_seconds
@@ -279,8 +320,17 @@ class CourseAssignmentViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = CourseAssignmentSerializer
     permission_classes = [IsAuthenticated]
 
+    def get_permissions(self):
+        if self.action in ('create', 'update', 'partial_update', 'destroy'):
+            return [IsAuthenticated(), IsLMSManager()]
+        return [IsAuthenticated()]
+
     def get_queryset(self):
         qs = super().get_queryset()
+        if not is_lms_manager(self.request.user):
+            # Nurse / field-staff: scoped strictly to own assignments
+            return qs.filter(staff__user=self.request.user)
+
         staff_id  = self.request.query_params.get('staff')
         course_id = self.request.query_params.get('course')
         status_f  = self.request.query_params.get('status')
@@ -342,10 +392,19 @@ class StaffTrainingView(APIView):
     GET /api/lms/staff/{staff_id}/training/
     Returns all CourseAssignments for a staff member, with nested progress data.
     Used by the Staff Profile Training tab.
+    Non-managers cannot view other staff records (403).
     """
     permission_classes = [IsAuthenticated]
 
     def get(self, request, staff_id):
+        if not is_lms_manager(request.user):
+            user_staff = getattr(request.user, 'staffmember', None)
+            if not user_staff or user_staff.id != int(staff_id):
+                return Response(
+                    {'detail': 'You do not have permission to view other staff training records.'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
         assignments = CourseAssignment.objects.filter(
             staff_id=staff_id
         ).select_related('course').prefetch_related(
@@ -360,8 +419,8 @@ class StaffTrainingView(APIView):
 class CertificateViewSet(viewsets.ModelViewSet):
     """
     General Certificate Management:
-    - GET  /api/lms/certificates/             — list certificates (optional ?staff_id=X or ?search=...)
-    - POST /api/lms/certificates/             — manually generate certificate for staff or custom recipient
+    - GET  /api/lms/certificates/             — list certificates (scoped for nurses, full for managers)
+    - POST /api/lms/certificates/             — manually generate certificate (LMS Managers only)
     - GET  /api/lms/certificates/{id}/        — retrieve certificate details
     - GET  /api/lms/certificates/{id}/download/ — stream PDF directly (inline or download)
     """
@@ -369,8 +428,18 @@ class CertificateViewSet(viewsets.ModelViewSet):
     serializer_class = CertificateSerializer
     permission_classes = [IsAuthenticated]
 
+    def get_permissions(self):
+        if self.action in ('create', 'update', 'partial_update', 'destroy'):
+            return [IsAuthenticated(), IsLMSManager()]
+        if self.action == 'download':
+            return [AllowAny()]
+        return [IsAuthenticated()]
+
     def get_queryset(self):
         qs = super().get_queryset()
+        if not is_lms_manager(self.request.user):
+            return qs.filter(staff__user=self.request.user)
+
         staff_id = self.request.query_params.get('staff_id')
         if staff_id:
             qs = qs.filter(staff_id=staff_id)
@@ -448,10 +517,19 @@ class StaffCertificatesView(APIView):
     GET /api/lms/staff/{staff_id}/certificates/
     Returns all certificates ever issued to this staff member (both course-auto-generated
     and manually-generated standalone awards/recognitions).
+    Non-managers cannot view other staff records (403).
     """
     permission_classes = [IsAuthenticated]
 
     def get(self, request, staff_id):
+        if not is_lms_manager(request.user):
+            user_staff = getattr(request.user, 'staffmember', None)
+            if not user_staff or user_staff.id != int(staff_id):
+                return Response(
+                    {'detail': 'You do not have permission to view other staff certificates.'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
         certs = Certificate.objects.filter(staff_id=staff_id).select_related('staff', 'generated_by', 'assignment', 'assignment__course')
         serializer = CertificateSerializer(certs, many=True, context={'request': request})
         return Response(serializer.data)

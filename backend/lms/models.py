@@ -109,6 +109,7 @@ class CourseAssignment(models.Model):
     )
     assigned_date = models.DateTimeField(auto_now_add=True)
     due_date      = models.DateField(null=True, blank=True)
+    is_mandatory  = models.BooleanField(default=False, null=True, blank=True)
     status        = models.CharField(max_length=15, choices=Status.choices, default=Status.NOT_STARTED)
     completed_date = models.DateTimeField(null=True, blank=True)
 
@@ -118,6 +119,10 @@ class CourseAssignment(models.Model):
 
     def __str__(self):
         return f"{self.staff} → {self.course} [{self.status}]"
+
+    @property
+    def mandatory(self):
+        return bool(self.is_mandatory)
 
     def recalculate_status(self):
         """

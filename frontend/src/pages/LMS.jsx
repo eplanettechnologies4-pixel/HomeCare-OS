@@ -179,6 +179,7 @@ function AssignCourseModal({ course, onClose }) {
   const assignCourse = useStore((s) => s.assignCourse);
   const [selected, setSelected] = useState([]);
   const [dueDate, setDueDate] = useState("");
+  const [isMandatory, setIsMandatory] = useState(false);
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState(null);
 
@@ -187,7 +188,7 @@ function AssignCourseModal({ course, onClose }) {
   const handleAssign = async () => {
     if (selected.length === 0) return;
     setSaving(true);
-    const res = await assignCourse(course.id, selected, dueDate || null);
+    const res = await assignCourse(course.id, selected, dueDate || null, isMandatory);
     setSaving(false);
     setResult(res);
   };
@@ -232,6 +233,18 @@ function AssignCourseModal({ course, onClose }) {
               <div className="form-group">
                 <label className="form-label">Due Date (optional)</label>
                 <input type="date" className="form-input" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginTop: 4 }}>
+                  <input
+                    type="checkbox"
+                    checked={isMandatory}
+                    onChange={(e) => setIsMandatory(e.target.checked)}
+                  />
+                  <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--teal-900)" }}>
+                    Mandatory Training (Required Clinical Compliance)
+                  </span>
+                </label>
               </div>
             </>
           )}

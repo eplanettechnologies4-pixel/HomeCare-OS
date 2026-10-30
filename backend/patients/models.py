@@ -33,6 +33,7 @@ class Patient(models.Model):
 
     # ── Identifiers (unencrypted — used for lookup/filtering) ─────────────────
     mr_number = models.CharField(max_length=20, unique=True, verbose_name='MR Number')
+    patient_code = models.CharField(max_length=50, blank=True, default='', verbose_name='Special Patient Code')
     first_name = models.CharField(max_length=100)
     last_name = models.CharField(max_length=100)
     date_of_birth = models.DateField()
@@ -293,4 +294,39 @@ class MARAdministration(models.Model):
             f'{self.prescription.medication} — {day_label} '
             f'— by {self.administered_by}'
         )
+
+
+class DoctorNote(models.Model):
+    patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name='doctor_notes')
+    doctor = models.ForeignKey('staff.StaffMember', on_delete=models.SET_NULL, null=True, blank=True, related_name='authored_doctor_notes')
+    booking = models.ForeignKey('bookings.Booking', on_delete=models.SET_NULL, null=True, blank=True, related_name='doctor_notes')
+    notes = models.TextField(help_text='Clinical assessment, impression, and management notes')
+    plan = models.TextField(blank=True, help_text='Treatment and follow-up plan')
+    addenda = models.JSONField(default=list, blank=True, help_text='List of addendum objects [{"text": ..., "added_by": ..., "timestamp": ...}]')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"DoctorNote #{self.pk} — {self.patient} by {self.doctor} ({self.created_at:%Y-%m-%d})"
+
+
+class PhysioNote(models.Model):
+    patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name='physio_notes')
+    physio = models.ForeignKey('staff.StaffMember', on_delete=models.SET_NULL, null=True, blank=True, related_name='authored_physio_notes')
+    booking = models.ForeignKey('bookings.Booking', on_delete=models.SET_NULL, null=True, blank=True, related_name='physio_notes')
+    session_notes = models.TextField()
+    mobility_status = models.CharField(max_length=150, blank=True, default='')
+    goals = models.TextField(blank=True, default='')
+    exercises = models.JSONField(default=list, blank=True, help_text='List of prescribed or performed exercises')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"PhysioNote #{self.pk} — {self.patient} by {self.physio} ({self.created_at:%Y-%m-%d})"
 

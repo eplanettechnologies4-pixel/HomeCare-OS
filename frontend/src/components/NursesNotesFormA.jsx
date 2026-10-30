@@ -193,8 +193,11 @@ export default function NursesNotesFormA({ patient, isReadOnly = false }) {
         <div className="modal-backdrop" onClick={(e) => e.target === e.currentTarget && setShowAddModal(false)}>
           <div className="modal" style={{ width: 560 }}>
             <div className="modal-header">
-              <h3 className="modal-title">Form A — Add Nurse Note Entry</h3>
-              <button className="btn btn-ghost btn-icon" onClick={() => setShowAddModal(false)}>✕</button>
+              <div>
+                <h3 className="modal-title">Form A — Add Nurse Note Entry</h3>
+                <p className="modal-subtitle">Append immutable clinical observation to patient electronic chart</p>
+              </div>
+              <button type="button" className="modal-close-btn" onClick={() => setShowAddModal(false)} aria-label="Close">✕</button>
             </div>
 
             <form onSubmit={handleSaveNote}>
@@ -262,8 +265,8 @@ export default function NursesNotesFormA({ patient, isReadOnly = false }) {
               </div>
 
               <div className="modal-footer">
-                <button type="button" className="btn btn-ghost" onClick={() => setShowAddModal(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary">Save Immutable Note →</button>
+                <button type="button" className="btn btn-secondary" onClick={() => setShowAddModal(false)}>Cancel</button>
+                <button type="submit" className="btn btn-primary btn-pill">Save Immutable Note →</button>
               </div>
             </form>
           </div>
@@ -275,8 +278,11 @@ export default function NursesNotesFormA({ patient, isReadOnly = false }) {
         <div className="modal-backdrop" onClick={(e) => e.target === e.currentTarget && setShowAddendumModal(null)}>
           <div className="modal" style={{ width: 500 }}>
             <div className="modal-header">
-              <h3 className="modal-title">Append Addendum to Clinical Note</h3>
-              <button className="btn btn-ghost btn-icon" onClick={() => setShowAddendumModal(null)}>✕</button>
+              <div>
+                <h3 className="modal-title">Append Addendum to Clinical Note</h3>
+                <p className="modal-subtitle">Permanent clinical clarification appended below existing entry</p>
+              </div>
+              <button type="button" className="modal-close-btn" onClick={() => setShowAddendumModal(null)} aria-label="Close">✕</button>
             </div>
 
             <form onSubmit={handleSaveAddendum}>
@@ -303,8 +309,8 @@ export default function NursesNotesFormA({ patient, isReadOnly = false }) {
               </div>
 
               <div className="modal-footer">
-                <button type="button" className="btn btn-ghost" onClick={() => setShowAddendumModal(null)}>Cancel</button>
-                <button type="submit" className="btn btn-primary">Append Addendum →</button>
+                <button type="button" className="btn btn-secondary" onClick={() => setShowAddendumModal(null)}>Cancel</button>
+                <button type="submit" className="btn btn-primary btn-pill">Append Addendum →</button>
               </div>
             </form>
           </div>
