@@ -116,11 +116,21 @@ export default function App() {
   // Wire unified WebSocket events channel (ws://<host>/ws/events/?token=<JWT>)
   useRealtimeEvents(isAuthenticated ? userToken : null);
 
+  // Dev-only shell remount tracker: logs if App shell unmounts and remounts
   React.useEffect(() => {
-    if (isAuthenticated) {
+    if (import.meta.env.DEV) {
+      window.__appShellMountCount = (window.__appShellMountCount || 0) + 1;
+      if (window.__appShellMountCount > 1) {
+        console.warn(`[DEV] <AppShell> remounted! (Total mounts: ${window.__appShellMountCount})`);
+      }
+    }
+  }, []);
+
+  React.useEffect(() => {
+    if (isAuthenticated && currentRole !== 'nurse') {
       fetchAllData();
     }
-  }, [isAuthenticated, fetchAllData]);
+  }, [isAuthenticated, currentRole, fetchAllData]);
 
   // Route guard: if a nurse attempts to open admin LMS directly, redirect to My Trainings
   React.useEffect(() => {

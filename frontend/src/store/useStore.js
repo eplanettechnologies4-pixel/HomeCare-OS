@@ -14,6 +14,9 @@ let savedUser = null;
 try {
   savedUser = typeof window !== 'undefined' ? JSON.parse(localStorage.getItem('currentUser') || 'null') : null;
 } catch (e) { }
+const savedRole = typeof window !== 'undefined'
+  ? (localStorage.getItem('currentRole') || savedUser?.role || 'nurse')
+  : 'nurse';
 
 const useStore = create((set, get) => ({
   // ── Authentication State ──────────────────────────────────────────────────
@@ -59,6 +62,9 @@ const useStore = create((set, get) => ({
           localStorage.setItem('refresh_token', data.refresh);
         }
         localStorage.setItem('currentUser', JSON.stringify(user));
+        if (user.role) {
+          try { localStorage.setItem('currentRole', user.role); } catch (e) { }
+        }
         set({
           isAuthenticated: true,
           currentUser: user,
@@ -88,6 +94,7 @@ const useStore = create((set, get) => ({
       localStorage.removeItem('access_token');
       localStorage.removeItem('refresh_token');
       localStorage.removeItem('currentUser');
+      localStorage.removeItem('currentRole');
     } catch (e) { }
     set({
       isAuthenticated: false,
@@ -105,11 +112,12 @@ const useStore = create((set, get) => ({
   },
 
   // ── Role RBAC (defaults to rehydrated user's role, or safest restricted role 'nurse') ───────
-  currentRole: savedUser?.role || 'nurse',
+  currentRole: savedRole,
   setCurrentRole: (role) => {
     const user = get().currentUser;
     // Only allow Super Admins to freely switch roles via dev selector
     if (user?.role === 'super_admin') {
+      try { localStorage.setItem('currentRole', role); } catch (e) { }
       set({ currentRole: role });
     } else {
       console.warn('Role switching is restricted to Super Administrators.');
@@ -136,6 +144,7 @@ const useStore = create((set, get) => ({
   setWsConnected: (wsConnected) => set({ wsConnected }),
 
   fetchLiveVisits: async () => {
+    if (get().currentRole === 'nurse') return;
     try {
       const res = await apiFetch('/tracking/live-visits/');
       if (res.ok) {
@@ -236,6 +245,7 @@ const useStore = create((set, get) => ({
   activeSosAlerts: [],
 
   fetchActiveSOS: async () => {
+    if (get().currentRole === 'nurse') return;
     try {
       const res = await apiFetch('/tracking/sos/active/');
       if (res.ok) {
@@ -297,6 +307,7 @@ const useStore = create((set, get) => ({
   alertRules: ALERT_RULES,
 
   fetchAlertRules: async () => {
+    if (get().currentRole === 'nurse') return;
     try {
       const res = await apiFetch('/tracking/alert-rules/');
       if (res.ok) {
@@ -343,6 +354,7 @@ const useStore = create((set, get) => ({
   selectedBooking: null,
   setSelectedBooking: (b) => set({ selectedBooking: b }),
   fetchBookings: async () => {
+    if (get().currentRole === 'nurse') return get().bookings;
     try {
       const res = await apiFetch('/bookings/');
       if (res.ok) {
@@ -458,6 +470,7 @@ const useStore = create((set, get) => ({
   selectedStaff: null,
   setSelectedStaff: (s_) => set({ selectedStaff: s_ }),
   fetchStaff: async () => {
+    if (get().currentRole === 'nurse') return get().staff;
     try {
       const res = await apiFetch('/staff/members/');
       if (res.ok) {
@@ -952,6 +965,7 @@ const useStore = create((set, get) => ({
     set({ selectedPatient: p });
   },
   fetchPatients: async () => {
+    if (get().currentRole === 'nurse') return get().patients;
     try {
       const res = await apiFetch('/patients/');
       if (res.ok) {
@@ -1034,6 +1048,12 @@ const useStore = create((set, get) => ({
 
   // ── Load All Active Data ──────────────────────────────────────────────────
   fetchAllData: async () => {
+    const role = get().currentRole;
+    if (role === 'nurse') {
+      // Nurse portal overview calls staff-portal endpoints only.
+      // Global admin stores must not fetch or poll for the nurse role.
+      return;
+    }
     await Promise.allSettled([
       get().fetchStaff(),
       get().fetchPatients(),
@@ -1051,6 +1071,7 @@ const useStore = create((set, get) => ({
   catalog: SERVICE_CATALOG_ITEMS,
   catalogLoaded: false,
   fetchCatalog: async () => {
+    if (get().currentRole === 'nurse') return get().catalog;
     try {
       let res = await apiFetch('/services/catalog/');
       if (!res.ok) {
@@ -1095,20 +1116,6 @@ const useStore = create((set, get) => ({
 
   // ── Billing Invoices ──────────────────────────────────────────────────────
   invoices: [],
-  fetchInvoices: async () => {
-    try {
-      const res = await apiFetch('/billing/invoices/');
-      if (res.ok) {
-        const data = await res.json();
-        const items = Array.isArray(data) ? data : (data.results || []);
-        set({ invoices: items });
-        return items;
-      }
-    } catch (err) {
-      console.warn('[Store] fetchInvoices error:', err);
-    }
-    return get().invoices;
-  },
   addInvoice: (inv) => set((s) => ({ invoices: [inv, ...s.invoices] })),
   recordInvoicePayment: async (invoiceId, payment) => {
     // 1. Optimistic update
@@ -1380,6 +1387,9 @@ const useStore = create((set, get) => ({
   setEventsWsConnected: (connected) => set({ eventsWsConnected: connected }),
 
   fetchInvoices: async () => {
+    if (get().currentRole === 'nurse') {
+      return [];
+    }
     try {
       const res = await apiFetch('/billing/invoices/');
       if (res.ok) {

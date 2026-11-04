@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, memo } from 'react';
 import useStore from '../store/useStore';
 import { ROLE_CONFIG } from '../data/mockData';
 import {
@@ -82,9 +82,14 @@ const NAV_GROUPS = [
   }
 ];
 
-export default function Sidebar() {
+function Sidebar() {
   // Expanded by default on desktop; collapsible to icons with tooltips
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('sidebar_collapsed') === 'true';
+    }
+    return false;
+  });
   const [isHovered, setIsHovered] = useState(false);
   const activePage    = useStore((s) => s.activePage);
   const setActivePage = useStore((s) => s.setActivePage);
@@ -94,7 +99,28 @@ export default function Sidebar() {
   const currentUser   = useStore((s) => s.currentUser);
   const logout        = useStore((s) => s.logout);
 
-  const allowedNav = ROLE_CONFIG[currentRole]?.nav || ['overview'];
+  // Dev-only remount tracker: logs if Sidebar unmounts and remounts
+  useEffect(() => {
+    if (import.meta.env.DEV) {
+      window.__sidebarMountCount = (window.__sidebarMountCount || 0) + 1;
+      if (window.__sidebarMountCount > 1) {
+        console.warn(`[DEV] <Sidebar /> remounted! (Total mounts: ${window.__sidebarMountCount})`);
+      }
+    }
+  }, []);
+
+  const resolvedRole = currentRole || (typeof window !== 'undefined' ? localStorage.getItem('currentRole') : null) || 'nurse';
+  const allowedNav = useMemo(() => {
+    return ROLE_CONFIG[resolvedRole]?.nav || ['overview'];
+  }, [resolvedRole]);
+
+  const nurseNavGroups = useMemo(() => NURSE_NAV_GROUPS, []);
+  const adminNavGroups = useMemo(() => {
+    return NAV_GROUPS.map((group) => ({
+      ...group,
+      items: group.items.filter((item) => allowedNav.includes(item.id)),
+    })).filter((group) => group.items.length > 0);
+  }, [allowedNav]);
 
   // Keep CSS variable synchronized so main-area adjusts smoothly
   useEffect(() => {
@@ -114,7 +140,7 @@ export default function Sidebar() {
       )}
 
       <aside
-        className={`sidebar${sidebarOpen ? ' open' : ''}${isHovered ? ' is-hovered' : ''}`}
+        className={`sidebar ${isCollapsed ? 'is-collapsed' : 'is-expanded'}${sidebarOpen ? ' open' : ''}${isHovered ? ' is-hovered' : ''}`}
         style={{
           width: isExpanded ? 240 : 68,
           transition: 'width 150ms cubic-bezier(0.4, 0, 0.2, 1)',
@@ -135,7 +161,10 @@ export default function Sidebar() {
                 className="sidebar-brand-text"
                 style={{
                   opacity: isExpanded ? 1 : 0,
-                  transition: 'opacity 150ms ease',
+                  maxWidth: isExpanded ? 180 : 0,
+                  overflow: 'hidden',
+                  pointerEvents: isExpanded ? 'auto' : 'none',
+                  transition: 'opacity 150ms ease, max-width 150ms ease',
                   whiteSpace: 'nowrap',
                 }}
               >
@@ -150,7 +179,11 @@ export default function Sidebar() {
 
             {/* Desktop collapse toggle button */}
             <button
-              onClick={() => setIsCollapsed(!isCollapsed)}
+              onClick={() => {
+                const next = !isCollapsed;
+                setIsCollapsed(next);
+                try { localStorage.setItem('sidebar_collapsed', String(next)); } catch (e) {}
+              }}
               className="btn btn-ghost btn-sm"
               style={{
                 color: '#94A3B8',
@@ -182,20 +215,23 @@ export default function Sidebar() {
 
         {/* Grouped Navigation */}
         <nav className="sidebar-nav" style={{ flex: 1, overflowY: 'auto' }}>
-          {currentRole === 'nurse' ? (
-            NURSE_NAV_GROUPS.map((group) => (
+          {resolvedRole === 'nurse' ? (
+            nurseNavGroups.map((group) => (
               <div key={group.title} className="nav-section" style={{ marginBottom: 12 }}>
                 <p
                   className="nav-section-label"
                   style={{
                     opacity: isExpanded ? 1 : 0,
-                    transition: 'opacity 150ms ease',
+                    maxHeight: isExpanded ? 36 : 0,
+                    overflow: 'hidden',
+                    pointerEvents: isExpanded ? 'auto' : 'none',
+                    transition: 'opacity 150ms ease, max-height 150ms ease',
                     fontSize: '11px',
                     fontWeight: 700,
                     letterSpacing: '0.06em',
                     textTransform: 'uppercase',
                     color: '#94A3B8',
-                    padding: '6px 14px 2px',
+                    padding: isExpanded ? '6px 14px 2px' : '0 14px',
                     margin: 0,
                   }}
                 >
@@ -235,10 +271,14 @@ export default function Sidebar() {
                         className="nav-label"
                         style={{
                           opacity: isExpanded ? 1 : 0,
-                          transition: 'opacity 150ms ease',
+                          maxWidth: isExpanded ? 170 : 0,
+                          overflow: 'hidden',
+                          pointerEvents: isExpanded ? 'auto' : 'none',
+                          transition: 'opacity 150ms ease, max-width 150ms ease',
                           fontSize: '14px',
                           fontWeight: isActive ? 600 : 400,
                           whiteSpace: 'nowrap',
+                          flex: 1,
                         }}
                       >
                         {label}
@@ -249,58 +289,59 @@ export default function Sidebar() {
               </div>
             ))
           ) : (
-            NAV_GROUPS.map((group) => {
-              const filteredItems = group.items.filter((item) => allowedNav.includes(item.id));
-              if (filteredItems.length === 0) return null;
-
-              return (
-                <div key={group.title} className="nav-section">
-                  <p
-                    className="nav-section-label"
-                    style={{
-                      opacity: isExpanded ? 1 : 0,
-                      transition: 'opacity 150ms ease',
-                    }}
-                  >
-                    {group.title}
-                  </p>
-                  {filteredItems.map(({ id, label, icon: Icon, live }) => {
-                    const isActive = activePage === id;
-                    return (
-                      <button
-                        key={id}
-                        className={`nav-item${isActive ? ' active' : ''}`}
-                        onClick={() => {
-                          setActivePage(id);
-                          if (sidebarOpen) toggleSidebar();
+            adminNavGroups.map((group) => (
+              <div key={group.title} className="nav-section">
+                <p
+                  className="nav-section-label"
+                  style={{
+                    opacity: isExpanded ? 1 : 0,
+                    maxHeight: isExpanded ? 36 : 0,
+                    overflow: 'hidden',
+                    pointerEvents: isExpanded ? 'auto' : 'none',
+                    transition: 'opacity 150ms ease, max-height 150ms ease',
+                  }}
+                >
+                  {group.title}
+                </p>
+                {group.items.map(({ id, label, icon: Icon, live }) => {
+                  const isActive = activePage === id;
+                  return (
+                    <button
+                      key={id}
+                      className={`nav-item${isActive ? ' active' : ''}`}
+                      onClick={() => {
+                        setActivePage(id);
+                        if (sidebarOpen) toggleSidebar();
+                      }}
+                      title={label}
+                      aria-label={label}
+                    >
+                      <div className="nav-icon-wrap">
+                        <Icon size={17} className="nav-icon" />
+                        {live && <span className="live-dot-badge" />}
+                      </div>
+                      <span
+                        className="nav-label"
+                        style={{
+                          opacity: isExpanded ? 1 : 0,
+                          maxWidth: isExpanded ? 170 : 0,
+                          overflow: 'hidden',
+                          pointerEvents: isExpanded ? 'auto' : 'none',
+                          transition: 'opacity 150ms ease, max-width 150ms ease',
                         }}
-                        title={label}
-                        aria-label={label}
                       >
-                        <div className="nav-icon-wrap">
-                          <Icon size={17} className="nav-icon" />
-                          {live && <span className="live-dot-badge" />}
-                        </div>
-                        <span
-                          className="nav-label"
-                          style={{
-                            opacity: isExpanded ? 1 : 0,
-                            transition: 'opacity 150ms ease',
-                          }}
-                        >
-                          {label}
+                        {label}
+                      </span>
+                      {live && (
+                        <span className="nav-live-indicator">
+                          <span className="live-dot" style={{ width: 6, height: 6 }} />
                         </span>
-                        {live && (
-                          <span className="nav-live-indicator">
-                            <span className="live-dot" style={{ width: 6, height: 6 }} />
-                          </span>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              );
-            })
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            ))
           )}
         </nav>
 
@@ -317,8 +358,11 @@ export default function Sidebar() {
               style={{
                 flex: 1,
                 minWidth: 0,
+                maxWidth: isExpanded ? 150 : 0,
+                overflow: 'hidden',
+                pointerEvents: isExpanded ? 'auto' : 'none',
                 opacity: isExpanded ? 1 : 0,
-                transition: 'opacity 150ms ease',
+                transition: 'opacity 150ms ease, max-width 150ms ease',
               }}
             >
               <div className="sidebar-user-name" style={{ color: '#F8FAFC', fontSize: '13px', fontWeight: 600 }}>
@@ -352,3 +396,5 @@ export default function Sidebar() {
     </>
   );
 }
+
+export default memo(Sidebar);

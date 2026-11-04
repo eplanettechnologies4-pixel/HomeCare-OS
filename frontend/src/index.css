@@ -74,7 +74,7 @@
 
   /* Layout Dimensions */
   --sidebar-w:          240px;
-  --sidebar-collapsed:  68px;
+  --sidebar-collapsed:  240px;
   --topbar-h:           64px;
 
   /* Transitions & Focus */
@@ -218,9 +218,14 @@ h4 {
 }
 
 .sidebar:hover,
-.sidebar.is-hovered {
+.sidebar.is-hovered,
+.sidebar.is-expanded {
   width: var(--sidebar-w);
   box-shadow: 8px 0 28px rgba(17, 24, 39, 0.25);
+}
+
+.sidebar.is-collapsed:not(:hover):not(.is-hovered) {
+  width: 68px;
 }
 
 .main-area {
@@ -296,7 +301,8 @@ h4 {
 }
 
 .sidebar:hover .sidebar-brand-text,
-.sidebar.is-hovered .sidebar-brand-text {
+.sidebar.is-hovered .sidebar-brand-text,
+.sidebar.is-expanded .sidebar-brand-text {
   opacity: 1;
   max-width: 170px;
   pointer-events: auto;
@@ -369,7 +375,8 @@ h4 {
 }
 
 .sidebar:hover .nav-section-label,
-.sidebar.is-hovered .nav-section-label {
+.sidebar.is-hovered .nav-section-label,
+.sidebar.is-expanded .nav-section-label {
   opacity: 1;
   max-height: 28px;
   padding: 8px 16px 4px;
@@ -471,7 +478,8 @@ h4 {
 }
 
 .sidebar:hover .nav-label,
-.sidebar.is-hovered .nav-label {
+.sidebar.is-hovered .nav-label,
+.sidebar.is-expanded .nav-label {
   opacity: 1;
   max-width: 155px;
   pointer-events: auto;
@@ -485,7 +493,8 @@ h4 {
 }
 
 .sidebar:hover .nav-live-indicator,
-.sidebar.is-hovered .nav-live-indicator {
+.sidebar.is-hovered .nav-live-indicator,
+.sidebar.is-expanded .nav-live-indicator {
   opacity: 1;
 }
 
@@ -529,7 +538,8 @@ h4 {
 }
 
 .sidebar:hover .sidebar-user-details,
-.sidebar.is-hovered .sidebar-user-details {
+.sidebar.is-hovered .sidebar-user-details,
+.sidebar.is-expanded .sidebar-user-details {
   opacity: 1;
   max-width: 155px;
   pointer-events: auto;
@@ -2870,5 +2880,20 @@ input[type="radio"],
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
 }
+
+/* ── 9. Nurse Overview Layout ────────────────────────────────────────────── */
+.nurse-overview-columns {
+  display: grid;
+  grid-template-columns: minmax(360px, 1.25fr) minmax(320px, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 1023px) {
+  .nurse-overview-columns {
+    grid-template-columns: 1fr;
+  }
+}
+
 
 
