@@ -3,6 +3,7 @@ from rest_framework.routers import DefaultRouter
 
 from .views import (
     StaffPortalHomeView,
+    ClinicianPortalHomeView,
     StaffPortalRosterView,
     StaffPortalPatientsListView,
     StaffPortalPatientDetailView,
@@ -33,6 +34,7 @@ router.register(r'family-concerns', FamilyConcernViewSet, basename='staff-portal
 
 urlpatterns = [
     path('home/', StaffPortalHomeView.as_view(), name='staff-portal-home'),
+    path('clinician-home/', ClinicianPortalHomeView.as_view(), name='staff-portal-clinician-home'),
     path('roster/', StaffPortalRosterView.as_view(), name='staff-portal-roster'),
     path('patients/', StaffPortalPatientsListView.as_view(), name='staff-portal-patients-list'),
     path('patients/<int:pk>/', StaffPortalPatientDetailView.as_view(), name='staff-portal-patient-detail'),

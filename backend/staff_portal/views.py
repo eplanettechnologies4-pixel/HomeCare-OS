@@ -557,6 +557,355 @@ class StaffPortalHomeView(APIView):
         })
 
 
+# ── 1b. GET /api/staff-portal/clinician-home/ ─────────────────────────────────
+
+class ClinicianPortalHomeView(APIView):
+    """
+    Clinician Home API (for doctor, physiotherapist, speech_therapist, psychotherapist).
+    Provides greeting, designation, specialities, working hours from settings,
+    digital ID card, today's visits table, pending requests, high-alert patients
+    grouped Critical/Less critical/Mild/Stable, quick links, and disabled placeholders.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        staff = _resolve_staff_member(request.user)
+        user_role = get_user_role(request.user)
+
+        client_platform = (
+            request.headers.get('X-Client-Platform') or
+            request.META.get('HTTP_X_CLIENT_PLATFORM') or
+            request.query_params.get('platform') or
+            'web'
+        ).lower().strip()
+
+        if staff:
+            if staff.platform_allowed == 'mobile' and client_platform != 'mobile':
+                return Response(
+                    {
+                        'error': 'mobile_only',
+                        'detail': 'This account is configured for mobile app access only. Please log in using the HomeCare OS Mobile App.',
+                        'platform_allowed': 'mobile',
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            if staff.platform_allowed == 'web' and client_platform == 'mobile':
+                return Response(
+                    {
+                        'error': 'web_only',
+                        'detail': 'This account is configured for web access only. Please log in at the HomeCare OS web dashboard.',
+                        'platform_allowed': 'web',
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        now = timezone.now()
+        tz_name = getattr(settings, 'OFFICE_TIMEZONE', 'Asia/Karachi')
+        try:
+            local_tz = ZoneInfo(tz_name)
+        except Exception:
+            local_tz = timezone.get_current_timezone()
+
+        local_now = now.astimezone(local_tz)
+
+        # 1. Office hours from settings
+        office_start_str = getattr(settings, 'OFFICE_HOURS_START', '09:00')
+        office_end_str = getattr(settings, 'OFFICE_HOURS_END', '17:00')
+        start_hour, start_min = map(int, office_start_str.split(':')[:2])
+        end_hour, end_min = map(int, office_end_str.split(':')[:2])
+        office_start_time = datetime.time(start_hour, start_min)
+        office_end_time = datetime.time(end_hour, end_min)
+        is_open_now = (office_start_time <= local_now.time() <= office_end_time)
+
+        working_hours = {
+            'start': office_start_str,
+            'end': office_end_str,
+            'timezone': tz_name,
+            'is_open_now': is_open_now,
+            'status_label': 'Open now' if is_open_now else f'Closed, opens {office_start_str} AM',
+        }
+
+        # 2. Clinician Profile / ID Card
+        if staff:
+            name = staff.full_name
+            emp_id = staff.employee_id
+            designation = staff.designation or staff.get_role_display()
+            specialities = staff.specialization or ('Clinical Medicine & Surgery' if staff.role == 'doctor' else staff.get_role_display())
+            contact = staff.phone or staff.email or 'N/A'
+            photo_url = staff.photo.url if staff.photo else None
+            role_key = staff.role
+        else:
+            name = request.user.get_full_name() or request.user.username
+            emp_id = 'STAFF-ADMIN'
+            designation = user_role.replace('_', ' ').title()
+            specialities = 'General Clinical Practice'
+            contact = request.user.email or 'N/A'
+            photo_url = None
+            role_key = user_role
+
+        digital_id = {
+            'name': name,
+            'employee_id': emp_id,
+            'designation': designation,
+            'specialities': specialities,
+            'contact': contact,
+            'photo_url': photo_url,
+            'employment_type': 'Full-time Clinical Staff',
+        }
+
+        # 3. Today's visits table
+        start_of_day = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+        end_of_day = local_now.replace(hour=23, minute=59, second=59, microsecond=999999)
+
+        b_qs = Booking.objects.select_related('patient', 'assigned_staff', 'buddy_staff', 'buddy').filter(
+            scheduled_time__range=(start_of_day, end_of_day)
+        ).exclude(status=BookingStatus.CANCELLED)
+
+        if staff and user_role not in ('super_admin', 'admin', 'care_manager', 'branch_manager'):
+            b_qs = b_qs.filter(
+                Q(assigned_staff=staff) | Q(buddy=staff) | Q(buddy_staff=staff)
+            )
+
+        today_visits = []
+        for b in b_qs.order_by('scheduled_time'):
+            p = b.patient
+            buddy_name = (b.buddy_staff.full_name if b.buddy_staff else (b.buddy.full_name if b.buddy else 'None'))
+            cm_name = p.assigned_care_manager.full_name if p.assigned_care_manager else 'Care Coordinator'
+            today_visits.append({
+                'id': b.id,
+                'patient_id': p.id,
+                'patient_name': p.full_name,
+                'patient_code': p.patient_code or f"PT-{p.id}",
+                'mr_number': p.mr_number,
+                'visit_time': b.scheduled_time.astimezone(local_tz).strftime('%H:%M'),
+                'location': p.address or 'Islamabad, Pakistan',
+                'visit_type': b.get_service_type_display() if hasattr(b, 'get_service_type_display') else b.service_type,
+                'buddy_staff': buddy_name,
+                'care_manager': cm_name,
+                'status': b.status,
+                'status_display': b.get_status_display() if hasattr(b, 'get_status_display') else b.status,
+            })
+
+        # 4. Pending Requests (referrals, consultation requests, procedure requests)
+        sr_qs = StaffRequest.objects.filter(status='pending').select_related('patient', 'staff')
+        if staff and user_role not in ('super_admin', 'admin', 'care_manager', 'branch_manager'):
+            from patients.scoping import get_assigned_patient_ids_for_clinician
+            assigned_ids = get_assigned_patient_ids_for_clinician(request.user)
+            if assigned_ids is not None:
+                sr_qs = sr_qs.filter(Q(patient_id__in=assigned_ids) | Q(staff=staff))
+
+        pending_referrals = []
+        pending_consultations = []
+        pending_procedures = []
+        for r in sr_qs.order_by('-created_at')[:20]:
+            item = {
+                'id': r.id,
+                'patient_name': r.patient.full_name if r.patient else 'Unknown',
+                'patient_code': r.patient.patient_code if r.patient else '',
+                'urgency': r.urgency,
+                'notes': r.notes,
+                'created_at': r.created_at.isoformat(),
+                'type': r.request_type,
+            }
+            if r.request_type == 'referral':
+                pending_referrals.append(item)
+            elif r.request_type == 'appointment':
+                pending_consultations.append(item)
+            elif r.request_type == 'procedure_change':
+                pending_procedures.append(item)
+
+        pending_requests = {
+            'total_pending': len(pending_referrals) + len(pending_consultations) + len(pending_procedures),
+            'referrals': pending_referrals,
+            'consultations': pending_consultations,
+            'procedures': pending_procedures,
+        }
+
+        # 5. High-Alert Patients (Critical, Less critical, Mild, Stable)
+        from patients.scoping import get_assigned_patient_ids_for_clinician
+        assigned_pids = get_assigned_patient_ids_for_clinician(request.user)
+        pt_qs = Patient.objects.filter(is_active=True)
+        if assigned_pids is not None:
+            pt_qs = pt_qs.filter(id__in=assigned_pids)
+
+        recent_window_hrs = getattr(settings, 'RECENT_VITALS_WINDOW_HOURS', 24)
+        vitals_cutoff = now - datetime.timedelta(hours=recent_window_hrs)
+
+        tier_thresholds = getattr(settings, 'CLINICAL_TIER_THRESHOLDS', {})
+        crit_th = tier_thresholds.get('critical', {})
+        less_th = tier_thresholds.get('less_critical', {})
+        mild_th = tier_thresholds.get('mild', {})
+
+        v_th = getattr(settings, 'VITALS_THRESHOLDS', {})
+        sys_max = v_th.get('systolic_max', 140)
+        sys_min = v_th.get('systolic_min', 90)
+        dia_max = v_th.get('diastolic_max', 90)
+        dia_min = v_th.get('diastolic_min', 60)
+        hr_max = v_th.get('heart_rate_max', 100)
+        hr_min = v_th.get('heart_rate_min', 50)
+        spo2_min = v_th.get('spo2_min', 92)
+        temp_max = v_th.get('temperature_max', 38.0)
+        temp_min = v_th.get('temperature_min', 35.5)
+        bg_max = v_th.get('blood_glucose_max', 180)
+        bg_min = v_th.get('blood_glucose_min', 70)
+
+        # Stable systolic upper limit removes overlap with mild (mild starts at 135)
+        stable_sys_max = mild_th.get('systolic_min', 135) - 1
+
+        high_alert_groups = {
+            'critical': [],
+            'less_critical': [],
+            'mild': [],
+            'unclassified': [],       # Outside baseline normal but matches no tier (Needs review)
+            'no_recent_vitals': [],   # No vitals within recent window
+            'stable': [],
+        }
+
+        for pt in pt_qs[:30]:
+            latest_v = VitalSign.objects.filter(patient=pt).order_by('-recorded_at').first()
+            if not latest_v or latest_v.recorded_at < vitals_cutoff:
+                high_alert_groups['no_recent_vitals'].append({
+                    'patient_id': pt.id,
+                    'patient_name': pt.full_name,
+                    'patient_code': pt.patient_code or f"PT-{pt.id}",
+                    'mr_number': pt.mr_number,
+                    'diagnosis': pt.primary_diagnosis or 'Under clinical care',
+                    'last_recorded': latest_v.recorded_at.isoformat() if latest_v else None,
+                    'reason': 'No recent vitals recorded within the past 24 hours' if latest_v else 'No vitals recorded',
+                })
+                continue
+
+            v_dict = {
+                'patient_id': pt.id,
+                'patient_name': pt.full_name,
+                'patient_code': pt.patient_code or f"PT-{pt.id}",
+                'mr_number': pt.mr_number,
+                'diagnosis': pt.primary_diagnosis or 'Under clinical care',
+                'bp': f"{latest_v.blood_pressure_systolic}/{latest_v.blood_pressure_diastolic or '-'}" if latest_v.blood_pressure_systolic else '-',
+                'hr': latest_v.heart_rate,
+                'spo2': latest_v.spo2,
+                'temp': float(latest_v.temperature) if latest_v.temperature else None,
+                'blood_glucose': float(latest_v.blood_glucose) if latest_v.blood_glucose else None,
+                'recorded_at': latest_v.recorded_at.isoformat(),
+            }
+
+            sys = latest_v.blood_pressure_systolic
+            dia = latest_v.blood_pressure_diastolic
+            hr = latest_v.heart_rate
+            spo2 = latest_v.spo2
+            temp = float(latest_v.temperature) if latest_v.temperature else None
+            bg = float(latest_v.blood_glucose) if latest_v.blood_glucose else None
+
+            # 1. Critical Tier Check
+            is_critical = (
+                (spo2 is not None and spo2 <= crit_th.get('spo2_max', -1)) or
+                (sys is not None and (sys >= crit_th.get('systolic_high', 999) or sys <= crit_th.get('systolic_low', -1))) or
+                (hr is not None and (hr >= crit_th.get('heart_rate_high', 999) or hr <= crit_th.get('heart_rate_low', -1))) or
+                (temp is not None and temp >= crit_th.get('temperature_high', 999.0))
+            )
+            # 2. Less Critical Tier Check
+            is_less_critical = (
+                (spo2 is not None and less_th.get('spo2_min', 0) <= spo2 <= less_th.get('spo2_max', 0)) or
+                (sys is not None and (
+                    (less_th.get('systolic_high_min', 999) <= sys <= less_th.get('systolic_high_max', 0)) or
+                    (less_th.get('systolic_low_min', 999) <= sys <= less_th.get('systolic_low_max', 0))
+                )) or
+                (hr is not None and (
+                    (less_th.get('heart_rate_high_min', 999) <= hr <= less_th.get('heart_rate_high_max', 0)) or
+                    (less_th.get('heart_rate_low_min', 999) <= hr <= less_th.get('heart_rate_low_max', 0))
+                )) or
+                (temp is not None and less_th.get('temperature_high_min', 999.0) <= temp <= less_th.get('temperature_high_max', 0.0))
+            )
+            # 3. Mild Tier Check
+            is_mild = (
+                (sys is not None and mild_th.get('systolic_min', 999) <= sys <= mild_th.get('systolic_max', 0)) or
+                (temp is not None and mild_th.get('temperature_min', 999.0) <= temp <= mild_th.get('temperature_max', 0.0))
+            )
+            # 4. Unclassified Safety Check (abnormal in baseline VITALS_THRESHOLDS but unbracketed in acute tiers)
+            is_unclassified = (
+                (sys is not None and (sys < sys_min or sys > stable_sys_max)) or
+                (dia is not None and (dia < dia_min or dia > dia_max)) or
+                (hr is not None and (hr < hr_min or hr > hr_max)) or
+                (spo2 is not None and spo2 < spo2_min) or
+                (temp is not None and (temp < temp_min or temp > temp_max)) or
+                (bg is not None and (bg < bg_min or bg > bg_max))
+            )
+
+            if is_critical:
+                high_alert_groups['critical'].append(v_dict)
+            elif is_less_critical:
+                high_alert_groups['less_critical'].append(v_dict)
+            elif is_mild:
+                high_alert_groups['mild'].append(v_dict)
+            elif is_unclassified:
+                # Value outside normal limits with no clinical acute tier (e.g. glucose 400, diastolic 130, hypothermia)
+                reasons = []
+                if dia is not None and (dia < dia_min or dia > dia_max):
+                    reasons.append(f"Diastolic BP {dia} mmHg outside normal ({dia_min}-{dia_max})")
+                if bg is not None and (bg < bg_min or bg > bg_max):
+                    reasons.append(f"Blood glucose {bg} mg/dL outside normal ({bg_min}-{bg_max})")
+                if temp is not None and temp < temp_min:
+                    reasons.append(f"Hypothermia: Temperature {temp}°C below normal ({temp_min}°C)")
+                if not reasons:
+                    reasons.append("Vital signs outside baseline normal range - unclassified tier")
+                v_dict['unclassified_reasons'] = reasons
+                high_alert_groups['unclassified'].append(v_dict)
+            else:
+                high_alert_groups['stable'].append(v_dict)
+
+        quick_links = [
+            {'id': 'patients', 'label': 'Patient Records', 'page': 'patient-chart', 'icon': 'Folder'},
+            {'id': 'pharmacy', 'label': 'Pharmacy', 'page': 'pharmacy', 'icon': 'Pill'},
+            {'id': 'equipment', 'label': 'Equipment', 'page': 'equipment', 'icon': 'Truck'},
+        ]
+
+        placeholders = [
+            {'id': 'online_consult', 'title': 'Online consultation (audio, video)', 'status': 'Coming soon', 'disabled': True},
+            {'id': 'ai_assistant', 'title': 'AI Assistant', 'status': 'Coming soon', 'disabled': True},
+        ]
+
+        alert_thresholds_used = {
+            'critical': (
+                f"SpO2 <= {crit_th.get('spo2_max', 87)}% | "
+                f"Systolic >= {crit_th.get('systolic_high', 181)} or <= {crit_th.get('systolic_low', 79)} | "
+                f"HR >= {crit_th.get('heart_rate_high', 131)} or <= {crit_th.get('heart_rate_low', 39)} | "
+                f"Temp >= {crit_th.get('temperature_high', 39.1)}°C"
+            ),
+            'less_critical': (
+                f"SpO2 {less_th.get('spo2_min', 88)}-{less_th.get('spo2_max', 91)}% | "
+                f"Systolic {less_th.get('systolic_high_min', 141)}-{less_th.get('systolic_high_max', 180)} or {less_th.get('systolic_low_min', 80)}-{less_th.get('systolic_low_max', 89)} | "
+                f"HR {less_th.get('heart_rate_high_min', 101)}-{less_th.get('heart_rate_high_max', 130)} or {less_th.get('heart_rate_low_min', 40)}-{less_th.get('heart_rate_low_max', 49)} | "
+                f"Temp {less_th.get('temperature_high_min', 38.5)}-{less_th.get('temperature_high_max', 39.0)}°C"
+            ),
+            'mild': (
+                f"Systolic {mild_th.get('systolic_min', 135)}-{mild_th.get('systolic_max', 140)} (Mildly elevated) | "
+                f"Temp {mild_th.get('temperature_min', 38.1)}-{mild_th.get('temperature_max', 38.4)}°C (Mildly elevated)"
+            ),
+            'unclassified': (
+                f"Vital outside baseline normal (Diastolic {dia_min}-{dia_max}, Glucose {bg_min}-{bg_max}, "
+                f"Hypothermia < {temp_min}°C, or unbracketed range) - Needs review"
+            ),
+            'no_recent_vitals': f"No vitals recorded within recent window ({recent_window_hrs} hours)",
+            'stable': (
+                f"All vitals within normal target limits: SpO2 >= {spo2_min}%, "
+                f"Systolic {sys_min}-{stable_sys_max}, Diastolic {dia_min}-{dia_max}, "
+                f"HR {hr_min}-{hr_max}, Temp {temp_min}-{temp_max}°C, Glucose {bg_min}-{bg_max}"
+            ),
+        }
+
+        return Response({
+            'staff': digital_id,
+            'working_hours': working_hours,
+            'today_visits': today_visits,
+            'pending_requests': pending_requests,
+            'high_alert_patients': high_alert_groups,
+            'alert_thresholds_used': alert_thresholds_used,
+            'provisional_note': 'PROVISIONAL - needs clinical sign-off',
+            'quick_links': quick_links,
+            'placeholders': placeholders,
+        })
+
+
 # ── 2. GET /api/staff-portal/roster/ ───────────────────────────────────────────
 
 class StaffPortalRosterView(APIView):
@@ -670,8 +1019,8 @@ class StaffPortalPatientsListView(APIView):
         if not staff and user_role not in ('super_admin', 'admin', 'branch_manager', 'care_manager'):
             return Response({'count': 0, 'results': []})
 
-        from patients.scoping import get_assigned_patient_ids_for_user
-        assigned_ids = get_assigned_patient_ids_for_user(request.user)
+        from patients.scoping import get_assigned_patient_ids_for_clinician
+        assigned_ids = get_assigned_patient_ids_for_clinician(request.user)
         qs = Patient.objects.all()
         if assigned_ids is not None:
             qs = qs.filter(id__in=assigned_ids)
@@ -745,8 +1094,8 @@ class StaffPortalPatientDetailView(APIView):
         user_role = get_user_role(request.user)
 
         patient = get_object_or_404(Patient, pk=pk)
-        from patients.scoping import check_nurse_patient_access
-        check_nurse_patient_access(request.user, patient)
+        from patients.scoping import check_clinician_patient_access
+        check_clinician_patient_access(request.user, patient)
 
         # Security Audit Log entry
         actor_name = staff.full_name if staff else request.user.get_full_name() or request.user.username

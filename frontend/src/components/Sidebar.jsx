@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, memo } from 'react';
 import useStore from '../store/useStore';
 import { ROLE_CONFIG } from '../data/mockData';
+import { isClinicianRole, getClinicianConfig } from '../config/clinicianRoleConfig';
 import {
   LayoutDashboard, Calendar, MapPin, Users, UserCog,
   Heart, Receipt, DollarSign, BarChart2, X,
@@ -114,6 +115,9 @@ function Sidebar() {
     return ROLE_CONFIG[resolvedRole]?.nav || ['overview'];
   }, [resolvedRole]);
 
+  const isClinician = useMemo(() => isClinicianRole(resolvedRole), [resolvedRole]);
+  const clinicianConfig = useMemo(() => getClinicianConfig(resolvedRole), [resolvedRole]);
+  const clinicianNavGroups = useMemo(() => clinicianConfig.sidebarGroups, [clinicianConfig]);
   const nurseNavGroups = useMemo(() => NURSE_NAV_GROUPS, []);
   const adminNavGroups = useMemo(() => {
     return NAV_GROUPS.map((group) => ({
@@ -215,8 +219,8 @@ function Sidebar() {
 
         {/* Grouped Navigation */}
         <nav className="sidebar-nav" style={{ flex: 1, overflowY: 'auto' }}>
-          {resolvedRole === 'nurse' ? (
-            nurseNavGroups.map((group) => (
+          {isClinician ? (
+            clinicianNavGroups.map((group) => (
               <div key={group.title} className="nav-section" style={{ marginBottom: 12 }}>
                 <p
                   className="nav-section-label"

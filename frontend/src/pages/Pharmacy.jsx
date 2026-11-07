@@ -50,6 +50,10 @@ export default function Pharmacy() {
 
   const patients = useStore((s) => s.patients);
   const staff = useStore((s) => s.staff);
+  const currentRole = useStore((s) => s.currentRole);
+  const isClinician = ['doctor', 'physio', 'physiotherapist', 'speech', 'speech_therapist', 'psychologist', 'psychotherapist', 'nurse'].includes(
+    String(currentRole || '').toLowerCase().trim()
+  );
 
   const fetchPharmacyData = async () => {
     setLoading(true);
@@ -233,20 +237,27 @@ export default function Pharmacy() {
         <div>
           <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <Pill size={26} color="var(--teal-700)" /> Pharmacy & Medicine Dispensing
+            {isClinician && (
+              <span className="badge badge-teal" style={{ fontSize: '0.74rem', padding: '3px 8px' }}>
+                Read-Only Clinical View
+              </span>
+            )}
           </h1>
           <p className="page-subtitle">Prescription validation, express home delivery, and cold-chain stock management</p>
         </div>
-        <div style={{ display: 'flex', gap: 10 }}>
-          {activeTab === 'orders' ? (
-            <button className="btn btn-primary" onClick={() => setShowNewOrder(true)}>
-              <Plus size={16} /> New Medicine Order
-            </button>
-          ) : (
-            <button className="btn btn-primary" onClick={() => setShowNewMedicine(true)}>
-              <Plus size={16} /> Add Medicine
-            </button>
-          )}
-        </div>
+        {!isClinician && (
+          <div style={{ display: 'flex', gap: 10 }}>
+            {activeTab === 'orders' ? (
+              <button className="btn btn-primary" onClick={() => setShowNewOrder(true)}>
+                <Plus size={16} /> New Medicine Order
+              </button>
+            ) : (
+              <button className="btn btn-primary" onClick={() => setShowNewMedicine(true)}>
+                <Plus size={16} /> Add Medicine
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* ── KPI Stat Cards ── */}
@@ -448,7 +459,7 @@ export default function Pharmacy() {
                           PKR {Number(ord.total_amount).toLocaleString()}
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 4 }}>
-                          {ord.status === 'pending' && (
+                          {!isClinician && ord.status === 'pending' && (
                             <button
                               className="btn btn-primary btn-sm"
                               style={{ padding: '3px 8px', fontSize: '0.72rem' }}
@@ -460,7 +471,7 @@ export default function Pharmacy() {
                               Confirm
                             </button>
                           )}
-                          {['confirmed', 'out_for_delivery'].includes(ord.status) && (
+                          {!isClinician && ['confirmed', 'out_for_delivery'].includes(ord.status) && (
                             <button
                               className="btn btn-amber btn-sm"
                               style={{ padding: '3px 8px', fontSize: '0.72rem' }}

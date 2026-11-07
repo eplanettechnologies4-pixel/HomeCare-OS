@@ -51,6 +51,10 @@ export default function Equipment() {
 
   const patients = useStore((s) => s.patients);
   const staff = useStore((s) => s.staff);
+  const currentRole = useStore((s) => s.currentRole);
+  const isClinician = ['doctor', 'physio', 'physiotherapist', 'speech', 'speech_therapist', 'psychologist', 'psychotherapist', 'nurse'].includes(
+    String(currentRole || '').toLowerCase().trim()
+  );
 
   const fetchEquipmentData = async () => {
     setLoading(true);
@@ -224,20 +228,27 @@ export default function Equipment() {
         <div>
           <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <Truck size={26} color="var(--teal-700)" /> Equipment Rental & Fleet Management
+            {isClinician && (
+              <span className="badge badge-teal" style={{ fontSize: '0.74rem', padding: '3px 8px' }}>
+                Read-Only Clinical View
+              </span>
+            )}
           </h1>
           <p className="page-subtitle">Hospital at Home equipment leasing, patient deployment, and deposit return cycles</p>
         </div>
-        <div style={{ display: 'flex', gap: 10 }}>
-          {activeTab === 'rentals' ? (
-            <button className="btn btn-primary" onClick={() => setShowNewRental(true)}>
-              <Plus size={16} /> Request Rental
-            </button>
-          ) : (
-            <button className="btn btn-primary" onClick={() => setShowNewEquipment(true)}>
-              <Plus size={16} /> Add Equipment Item
-            </button>
-          )}
-        </div>
+        {!isClinician && (
+          <div style={{ display: 'flex', gap: 10 }}>
+            {activeTab === 'rentals' ? (
+              <button className="btn btn-primary" onClick={() => setShowNewRental(true)}>
+                <Plus size={16} /> Request Rental
+              </button>
+            ) : (
+              <button className="btn btn-primary" onClick={() => setShowNewEquipment(true)}>
+                <Plus size={16} /> Add Equipment Item
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* ── KPI Stat Cards ── */}
@@ -405,7 +416,7 @@ export default function Equipment() {
                       </td>
                       <td style={{ textAlign: 'right' }}>
                         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
-                          {r.status === 'requested' && (
+                          {!isClinician && r.status === 'requested' && (
                             <button
                               className="btn btn-primary btn-sm"
                               style={{ padding: '4px 8px', fontSize: '0.72rem' }}
@@ -414,7 +425,7 @@ export default function Equipment() {
                               <CheckCircle size={12} /> Deliver
                             </button>
                           )}
-                          {['active', 'pickup_pending'].includes(r.status) && (
+                          {!isClinician && ['active', 'pickup_pending'].includes(r.status) && (
                             <button
                               className="btn btn-amber btn-sm"
                               style={{ padding: '4px 8px', fontSize: '0.72rem' }}

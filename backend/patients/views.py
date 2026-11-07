@@ -13,11 +13,13 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from homecareOS.permissions import (
     CanDeletePatient, IsPrescriptionManagementAllowed, CanManagePatientPortal,
-    is_family_user, IsPatientOrFamilyOwner
+    is_family_user, IsPatientOrFamilyOwner, get_user_role,
 )
+from accounts.models import AuditLog
 from .models import (
     Patient, Prescription, VitalSign, NurseNote, LabResult,
     DailyReport, ReportPhoto, MARAdministration, DoctorNote, PhysioNote,
+    TherapyNote, ClinicalConsent,
 )
 from .serializers import (
     PatientListSerializer, PatientDetailSerializer,
@@ -25,7 +27,16 @@ from .serializers import (
     NurseNoteSerializer, LabResultSerializer,
     DailyReportSerializer, MARAdministrationSerializer,
 )
-from .scoping import check_nurse_patient_access, filter_queryset_for_nurse
+from .scoping import (
+    check_nurse_patient_access, filter_queryset_for_nurse,
+    check_clinician_patient_access, filter_queryset_for_clinician,
+    can_view_psychotherapy_note, is_treating_doctor_for_patient,
+)
+from homecareOS.clinician_permissions import (
+    can_user_access_chart_tab, enforce_tab_permission,
+    validate_entry_immutability, log_chart_audit, normalize_clinical_role,
+    enforce_addendum_permission,
+)
 
 
 class PatientViewSet(viewsets.ModelViewSet):
@@ -126,19 +137,440 @@ class PatientViewSet(viewsets.ModelViewSet):
             pass
         return Response(data)
 
-    @action(detail=True, methods=['get'], url_path='doctor-notes')
+    @action(detail=True, methods=['get', 'post'], url_path='doctor-notes')
     def doctor_notes(self, request, pk=None):
         patient = self.get_object()
+        check_clinician_patient_access(request.user, patient)
         from staff_portal.serializers import DoctorNoteSerializer
-        notes = patient.doctor_notes.select_related('doctor').order_by('-created_at')
-        return Response(DoctorNoteSerializer(notes, many=True).data)
+
+        if request.method == 'GET':
+            log_chart_audit(request, patient, 'Read Patient Record', 'Doctor Notes')
+            notes = patient.doctor_notes.select_related('doctor', 'signed_by').order_by('-created_at')
+            return Response(DoctorNoteSerializer(notes, many=True).data)
+
+        # POST: create doctor note
+        enforce_tab_permission(request.user, 'doctor_notes', action='write')
+        staff = getattr(request.user, 'staffmember', None)
+        notes_text = request.data.get('notes', '')
+        plan_text = request.data.get('plan', '')
+        booking_id = request.data.get('booking_id')
+        booking = None
+        if booking_id:
+            from bookings.models import Booking
+            booking = Booking.objects.filter(pk=booking_id, patient=patient).first()
+
+        is_signed = bool(request.data.get('is_signed', False))
+        note = DoctorNote.objects.create(
+            patient=patient,
+            doctor=staff,
+            booking=booking,
+            notes=notes_text,
+            plan=plan_text,
+            is_signed=is_signed,
+            signed_at=timezone.now() if is_signed else None,
+            signed_by=staff if is_signed else None,
+        )
+        log_chart_audit(request, patient, 'Write Clinical Entry', 'Doctor Notes', record_id=note.id)
+        return Response(DoctorNoteSerializer(note).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['get', 'put', 'patch', 'delete'], url_path=r'doctor-notes/(?P<note_id>\d+)')
+    def doctor_note_detail(self, request, pk=None, note_id=None):
+        patient = self.get_object()
+        check_clinician_patient_access(request.user, patient)
+        note = get_object_or_404(DoctorNote, pk=note_id, patient=patient)
+        from staff_portal.serializers import DoctorNoteSerializer
+
+        if request.method == 'GET':
+            log_chart_audit(request, patient, 'Read Patient Record', 'Doctor Notes', record_id=note.id)
+            return Response(DoctorNoteSerializer(note).data)
+
+        if request.method == 'DELETE':
+            enforce_tab_permission(request.user, 'doctor_notes', action='write')
+            if note.is_signed:
+                return Response(
+                    {'error': 'Signed clinical entries are permanently locked and cannot be deleted.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            note.delete()
+            log_chart_audit(request, patient, 'Delete Clinical Entry', 'Doctor Notes', record_id=note_id)
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        # PUT/PATCH: immutable if signed
+        enforce_tab_permission(request.user, 'doctor_notes', action='write')
+        if note.is_signed:
+            return Response(
+                {'error': 'Signed clinical entries are immutable. Submit an addendum with an audit reason instead.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if 'notes' in request.data:
+            note.notes = request.data['notes']
+        if 'plan' in request.data:
+            note.plan = request.data['plan']
+        note.save(update_fields=['notes', 'plan', 'updated_at'])
+        log_chart_audit(request, patient, 'Update Clinical Entry', 'Doctor Notes', record_id=note.id)
+        return Response(DoctorNoteSerializer(note).data)
+
+    @action(detail=True, methods=['post'], url_path=r'doctor-notes/(?P<note_id>\d+)/sign')
+    def sign_doctor_note(self, request, pk=None, note_id=None):
+        patient = self.get_object()
+        check_clinician_patient_access(request.user, patient)
+        enforce_tab_permission(request.user, 'doctor_notes', action='write')
+        note = get_object_or_404(DoctorNote, pk=note_id, patient=patient)
+        staff = getattr(request.user, 'staffmember', None)
+        note.is_signed = True
+        note.signed_at = timezone.now()
+        note.signed_by = staff
+        note.save(update_fields=['is_signed', 'signed_at', 'signed_by', 'updated_at'])
+        log_chart_audit(request, patient, 'Sign Clinical Entry', 'Doctor Notes', record_id=note.id)
+        from staff_portal.serializers import DoctorNoteSerializer
+        return Response(DoctorNoteSerializer(note).data)
+
+    @action(detail=True, methods=['post'], url_path=r'doctor-notes/(?P<note_id>\d+)/addendum')
+    def add_doctor_note_addendum(self, request, pk=None, note_id=None):
+        patient = self.get_object()
+        check_clinician_patient_access(request.user, patient)
+        note = get_object_or_404(DoctorNote, pk=note_id, patient=patient)
+        enforce_addendum_permission(request.user, patient, note)
+
+        text = request.data.get('text', '').strip()
+        reason = request.data.get('reason', '').strip()
+        if not text or not reason:
+            return Response({'error': 'Both addendum text and reason are required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        staff = getattr(request.user, 'staffmember', None)
+        role = staff.role if staff else 'admin'
+        author_name = staff.full_name if staff else (request.user.get_full_name() or request.user.username)
+        addendum = {
+            'text': text,
+            'reason': reason,
+            'author': author_name,
+            'role': role,
+            'timestamp': timezone.now().isoformat(),
+        }
+        note.addenda.append(addendum)
+        note.save(update_fields=['addenda', 'updated_at'])
+        log_chart_audit(request, patient, 'Add Addendum', 'Doctor Notes', record_id=note.id)
+        from staff_portal.serializers import DoctorNoteSerializer
+        return Response(DoctorNoteSerializer(note).data)
 
     @action(detail=True, methods=['get'], url_path='physio-notes')
     def physio_notes(self, request, pk=None):
         patient = self.get_object()
+        check_clinician_patient_access(request.user, patient)
         from staff_portal.serializers import PhysioNoteSerializer
-        notes = patient.physio_notes.select_related('physio').order_by('-created_at')
+        notes = patient.physio_notes.select_related('physio', 'signed_by').order_by('-created_at')
+        log_chart_audit(request, patient, 'Read Patient Record', 'Physio Notes')
         return Response(PhysioNoteSerializer(notes, many=True).data)
+
+    @action(detail=True, methods=['get', 'post'], url_path='therapy-notes')
+    def therapy_notes(self, request, pk=None):
+        patient = self.get_object()
+        check_clinician_patient_access(request.user, patient)
+        from staff_portal.serializers import TherapyNoteSerializer
+
+        if request.method == 'GET':
+            log_chart_audit(request, patient, 'Read Patient Record', 'Therapy Notes')
+            all_notes = patient.therapy_notes.select_related('author', 'signed_by').order_by('-created_at')
+            # Filter psychotherapy notes strictly by confidentiality rule
+            visible_notes = [
+                n for n in all_notes
+                if n.discipline != 'psychotherapy' or can_view_psychotherapy_note(request.user, n)
+            ]
+            # Confidentiality audit: every read of psychotherapy notes by non-author creates an AuditLog entry
+            staff = getattr(request.user, 'staffmember', None)
+            psychotherapy_notes_read = [
+                n for n in visible_notes
+                if n.discipline == 'psychotherapy' and (not staff or n.author_id != staff.id)
+            ]
+            if psychotherapy_notes_read:
+                note_ids_str = ", ".join(str(n.id) for n in psychotherapy_notes_read)
+                user_role = get_user_role(request.user)
+                actor_name = staff.full_name if staff else (request.user.get_full_name() or request.user.username)
+                AuditLog.objects.create(
+                    actor=request.user,
+                    actor_name=actor_name,
+                    action='Read Psychotherapy Notes',
+                    target_user=f"Patient {patient.patient_code or f'PT-{patient.id}'} (ID: {patient.id})",
+                    details=f"Confidential access by non-author | Role: {user_role} | Patient ID: {patient.id} | Note IDs: [{note_ids_str}]",
+                    ip_address=request.META.get('REMOTE_ADDR') if hasattr(request, 'META') else None,
+                    timestamp=timezone.now()
+                )
+            return Response(TherapyNoteSerializer(visible_notes, many=True).data)
+
+        # POST: create therapy note
+        enforce_tab_permission(request.user, 'physiotherapy', action='write')
+        staff = getattr(request.user, 'staffmember', None)
+        discipline = request.data.get('discipline')
+        if not discipline:
+            if staff and staff.role in ('speech', 'speech_therapist'):
+                discipline = 'speech_therapy'
+            elif staff and staff.role in ('psychologist', 'psychotherapist'):
+                discipline = 'psychotherapy'
+            else:
+                discipline = 'physiotherapy'
+
+        booking_id = request.data.get('booking_id')
+        booking = None
+        if booking_id:
+            from bookings.models import Booking
+            booking = Booking.objects.filter(pk=booking_id, patient=patient).first()
+
+        is_signed = bool(request.data.get('is_signed', False))
+        note = TherapyNote.objects.create(
+            patient=patient,
+            author=staff,
+            booking=booking,
+            discipline=discipline,
+            session_notes=request.data.get('session_notes', ''),
+            plan=request.data.get('plan', ''),
+            goals=request.data.get('goals', ''),
+            exercises=request.data.get('exercises', []),
+            is_signed=is_signed,
+            signed_at=timezone.now() if is_signed else None,
+            signed_by=staff if is_signed else None,
+        )
+        log_chart_audit(request, patient, 'Write Clinical Entry', f'Therapy Notes ({discipline})', record_id=note.id)
+        return Response(TherapyNoteSerializer(note).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['get', 'put', 'patch', 'delete'], url_path=r'therapy-notes/(?P<note_id>\d+)')
+    def therapy_note_detail(self, request, pk=None, note_id=None):
+        patient = self.get_object()
+        check_clinician_patient_access(request.user, patient)
+        note = get_object_or_404(TherapyNote, pk=note_id, patient=patient)
+
+        # Confidentiality check for psychotherapy notes
+        if note.discipline == 'psychotherapy' and not can_view_psychotherapy_note(request.user, note):
+            return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        from staff_portal.serializers import TherapyNoteSerializer
+        if request.method == 'GET':
+            staff = getattr(request.user, 'staffmember', None)
+            if note.discipline == 'psychotherapy' and (not staff or note.author_id != staff.id):
+                user_role = get_user_role(request.user)
+                actor_name = staff.full_name if staff else (request.user.get_full_name() or request.user.username)
+                AuditLog.objects.create(
+                    actor=request.user,
+                    actor_name=actor_name,
+                    action='Read Psychotherapy Note',
+                    target_user=f"Patient {patient.patient_code or f'PT-{patient.id}'} (ID: {patient.id})",
+                    details=f"Confidential access by non-author | Role: {user_role} | Patient ID: {patient.id} | Note IDs: [{note.id}]",
+                    ip_address=request.META.get('REMOTE_ADDR') if hasattr(request, 'META') else None,
+                    timestamp=timezone.now()
+                )
+            log_chart_audit(request, patient, 'Read Patient Record', 'Therapy Notes', record_id=note.id)
+            return Response(TherapyNoteSerializer(note).data)
+
+        if request.method == 'DELETE':
+            enforce_tab_permission(request.user, 'physiotherapy', action='write')
+            if note.is_signed:
+                return Response(
+                    {'error': 'Signed clinical entries are permanently locked and cannot be deleted.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            note.delete()
+            log_chart_audit(request, patient, 'Delete Clinical Entry', 'Therapy Notes', record_id=note_id)
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        enforce_tab_permission(request.user, 'physiotherapy', action='write')
+        if note.is_signed:
+            return Response(
+                {'error': 'Signed clinical entries are immutable. Submit an addendum with an audit reason instead.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if 'session_notes' in request.data:
+            note.session_notes = request.data['session_notes']
+        if 'plan' in request.data:
+            note.plan = request.data['plan']
+        if 'goals' in request.data:
+            note.goals = request.data['goals']
+        note.save(update_fields=['session_notes', 'plan', 'goals', 'updated_at'])
+        log_chart_audit(request, patient, 'Update Clinical Entry', 'Therapy Notes', record_id=note.id)
+        return Response(TherapyNoteSerializer(note).data)
+
+    @action(detail=True, methods=['post'], url_path=r'therapy-notes/(?P<note_id>\d+)/sign')
+    def sign_therapy_note(self, request, pk=None, note_id=None):
+        patient = self.get_object()
+        check_clinician_patient_access(request.user, patient)
+        enforce_tab_permission(request.user, 'physiotherapy', action='write')
+        note = get_object_or_404(TherapyNote, pk=note_id, patient=patient)
+        if note.discipline == 'psychotherapy' and not can_view_psychotherapy_note(request.user, note):
+            return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        staff = getattr(request.user, 'staffmember', None)
+        note.is_signed = True
+        note.signed_at = timezone.now()
+        note.signed_by = staff
+        note.save(update_fields=['is_signed', 'signed_at', 'signed_by', 'updated_at'])
+        log_chart_audit(request, patient, 'Sign Clinical Entry', 'Therapy Notes', record_id=note.id)
+        from staff_portal.serializers import TherapyNoteSerializer
+        return Response(TherapyNoteSerializer(note).data)
+
+    @action(detail=True, methods=['post'], url_path=r'therapy-notes/(?P<note_id>\d+)/addendum')
+    def add_therapy_note_addendum(self, request, pk=None, note_id=None):
+        patient = self.get_object()
+        check_clinician_patient_access(request.user, patient)
+        note = get_object_or_404(TherapyNote, pk=note_id, patient=patient)
+        if note.discipline == 'psychotherapy' and not can_view_psychotherapy_note(request.user, note):
+            return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        enforce_addendum_permission(request.user, patient, note)
+
+        text = request.data.get('text', '').strip()
+        reason = request.data.get('reason', '').strip()
+        if not text or not reason:
+            return Response({'error': 'Both addendum text and reason are required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        staff = getattr(request.user, 'staffmember', None)
+        role = staff.role if staff else 'admin'
+        author_name = staff.full_name if staff else (request.user.get_full_name() or request.user.username)
+        addendum = {
+            'text': text,
+            'reason': reason,
+            'author': author_name,
+            'role': role,
+            'timestamp': timezone.now().isoformat(),
+        }
+        note.addenda.append(addendum)
+        note.save(update_fields=['addenda', 'updated_at'])
+        log_chart_audit(request, patient, 'Add Addendum', 'Therapy Notes', record_id=note.id)
+        from staff_portal.serializers import TherapyNoteSerializer
+        return Response(TherapyNoteSerializer(note).data)
+
+    @action(detail=True, methods=['get', 'post'], url_path='consents')
+    def consents(self, request, pk=None):
+        patient = self.get_object()
+        check_clinician_patient_access(request.user, patient)
+        from staff_portal.serializers import ClinicalConsentSerializer
+
+        if request.method == 'GET':
+            log_chart_audit(request, patient, 'Read Patient Record', 'Consents')
+            consents = patient.consents.select_related('signed_by').order_by('-created_at')
+            return Response(ClinicalConsentSerializer(consents, many=True).data)
+
+        # POST: create consent
+        enforce_tab_permission(request.user, 'consents', action='write')
+        staff = getattr(request.user, 'staffmember', None)
+        consent = ClinicalConsent.objects.create(
+            patient=patient,
+            consent_type=request.data.get('consent_type', 'General Care & Treatment'),
+            title=request.data.get('title', 'Informed Consent'),
+            description=request.data.get('description', ''),
+            granted_by=request.data.get('granted_by', patient.full_name),
+            relationship=request.data.get('relationship', 'Self'),
+            is_granted=bool(request.data.get('is_granted', True)),
+            is_signed=bool(request.data.get('is_signed', False)),
+            signed_at=timezone.now() if request.data.get('is_signed') else None,
+            signed_by=staff if request.data.get('is_signed') else None,
+        )
+        log_chart_audit(request, patient, 'Write Clinical Entry', 'Consents', record_id=consent.id)
+        return Response(ClinicalConsentSerializer(consent).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['get', 'post'], url_path='procedures')
+    def procedures(self, request, pk=None):
+        patient = self.get_object()
+        check_clinician_patient_access(request.user, patient)
+        from staff_portal.models import StaffRequest
+        from staff_portal.serializers import StaffRequestSerializer
+
+        if request.method == 'GET':
+            log_chart_audit(request, patient, 'Read Patient Record', 'Procedures')
+            requests = StaffRequest.objects.filter(
+                patient=patient,
+                request_type='procedure_change'
+            ).select_related('staff', 'booking').order_by('-created_at')
+            return Response(StaffRequestSerializer(requests, many=True).data)
+
+        # POST: create procedure request (Doctor or Nurse)
+        enforce_tab_permission(request.user, 'procedures', action='write')
+        staff = getattr(request.user, 'staffmember', None)
+        if not staff:
+            return Response({'error': 'No staff profile found.'}, status=status.HTTP_403_FORBIDDEN)
+
+        req = StaffRequest.objects.create(
+            staff=staff,
+            patient=patient,
+            request_type='procedure_change',
+            urgency=request.data.get('urgency', 'routine'),
+            notes=request.data.get('notes', ''),
+            details=request.data.get('details', ''),
+            status='pending',
+        )
+        log_chart_audit(request, patient, 'Write Clinical Entry', 'Procedures', record_id=req.id)
+        return Response(StaffRequestSerializer(req).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['get', 'post'], url_path='referrals')
+    def referrals(self, request, pk=None):
+        patient = self.get_object()
+        check_clinician_patient_access(request.user, patient)
+        from staff_portal.models import StaffRequest
+        from staff_portal.serializers import StaffRequestSerializer
+
+        if request.method == 'GET':
+            log_chart_audit(request, patient, 'Read Patient Record', 'Referrals')
+            requests = StaffRequest.objects.filter(
+                patient=patient,
+                request_type='referral'
+            ).select_related('staff', 'booking').order_by('-created_at')
+            return Response(StaffRequestSerializer(requests, many=True).data)
+
+        # POST: create referral (Doctor, Physio, Speech, Psych)
+        enforce_tab_permission(request.user, 'referrals', action='write')
+        staff = getattr(request.user, 'staffmember', None)
+        if not staff:
+            return Response({'error': 'No staff profile found.'}, status=status.HTTP_403_FORBIDDEN)
+
+        req = StaffRequest.objects.create(
+            staff=staff,
+            patient=patient,
+            request_type='referral',
+            urgency=request.data.get('urgency', 'routine'),
+            notes=request.data.get('notes', ''),
+            details=request.data.get('details', ''),
+            status='pending',
+        )
+        log_chart_audit(request, patient, 'Write Clinical Entry', 'Referrals', record_id=req.id)
+        return Response(StaffRequestSerializer(req).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['get', 'post'], url_path='medical-records')
+    def medical_records(self, request, pk=None):
+        patient = self.get_object()
+        check_clinician_patient_access(request.user, patient)
+
+        if request.method == 'GET':
+            log_chart_audit(request, patient, 'Read Patient Record', 'Medical Records')
+            return Response({
+                'patient_id': patient.id,
+                'patient_code': patient.patient_code,
+                'mr_number': patient.mr_number,
+                'primary_diagnosis': patient.primary_diagnosis or '',
+                'secondary_diagnoses': patient.secondary_diagnoses or '',
+                'allergies': patient.allergies or '',
+                'blood_type': patient.blood_type or '',
+                'care_manager': patient.assigned_care_manager.full_name if patient.assigned_care_manager else 'Care Coordinator',
+                'age': patient.age,
+                'gender': patient.get_gender_display() if hasattr(patient, 'get_gender_display') else patient.gender,
+            })
+
+        # POST / PUT: Update medical records (doctor only)
+        enforce_tab_permission(request.user, 'medical_records', action='write')
+        if 'primary_diagnosis' in request.data:
+            patient.primary_diagnosis = request.data['primary_diagnosis']
+        if 'secondary_diagnoses' in request.data:
+            patient.secondary_diagnoses = request.data['secondary_diagnoses']
+        if 'allergies' in request.data:
+            patient.allergies = request.data['allergies']
+        if 'blood_type' in request.data:
+            patient.blood_type = request.data['blood_type']
+        patient.save()
+        log_chart_audit(request, patient, 'Write Clinical Entry', 'Medical Records', record_id=patient.id)
+        return Response({
+            'success': True,
+            'primary_diagnosis': patient.primary_diagnosis,
+            'secondary_diagnoses': patient.secondary_diagnoses,
+            'allergies': patient.allergies,
+            'blood_type': patient.blood_type,
+        })
+
 
     @action(
         detail=True,

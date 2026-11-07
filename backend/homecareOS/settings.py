@@ -105,7 +105,10 @@ ASGI_APPLICATION = 'homecareOS.asgi.application'
 # For local dev without Docker/Postgres, use: sqlite:///./db.sqlite3
 #
 # NEVER hardcode credentials here.  Always load from .env via DATABASE_URL.
-_database_url = config('DATABASE_URL', default='sqlite:///./db.sqlite3')
+_default_db = f'sqlite:///{BASE_DIR / "db.sqlite3"}'
+_database_url = config('DATABASE_URL', default=_default_db)
+if _database_url in ('sqlite:///./db.sqlite3', 'sqlite://db.sqlite3'):
+    _database_url = _default_db
 DATABASES = {
     'default': dj_database_url.parse(
         _database_url,
@@ -365,6 +368,8 @@ OVERTIME_CLAIM_WINDOW_DAYS = config('OVERTIME_CLAIM_WINDOW_DAYS', default=2, cas
 RESIGNATION_NOTICE_PERIOD_DAYS = config('RESIGNATION_NOTICE_PERIOD_DAYS', default=30, cast=int)
 SHIFT_NOTE_TIMEOUT_HOURS = config('SHIFT_NOTE_TIMEOUT_HOURS', default=2, cast=int)
 NURSE_PATIENT_ACCESS_DAYS_AFTER_VISIT = config('NURSE_PATIENT_ACCESS_DAYS_AFTER_VISIT', default=7, cast=int)
+CLINICIAN_PATIENT_ACCESS_DAYS_AFTER_VISIT = config('CLINICIAN_PATIENT_ACCESS_DAYS_AFTER_VISIT', default=7, cast=int)
+RECENT_VITALS_WINDOW_HOURS = config('RECENT_VITALS_WINDOW_HOURS', default=24, cast=int)
 
 VITALS_THRESHOLDS = {
     'systolic_max': 140,
@@ -380,4 +385,37 @@ VITALS_THRESHOLDS = {
     'blood_glucose_min': 70,
     'intake_min_ml': 500,
     'output_min_ml': 400,
+}
+
+# PROVISIONAL - needs clinical sign-off
+# High-Alert Patient Tier Thresholds for Clinician Portal (doctor, physio, speech, psychotherapist)
+CLINICAL_TIER_THRESHOLDS = {
+    'critical': {
+        'spo2_max': 87,                # SpO2 < 88%
+        'systolic_high': 181,          # Systolic > 180 mmHg
+        'systolic_low': 79,            # Systolic < 80 mmHg
+        'heart_rate_high': 131,        # Heart Rate > 130 bpm
+        'heart_rate_low': 39,          # Heart Rate < 40 bpm
+        'temperature_high': 39.1,      # Temperature > 39.0 °C
+    },
+    'less_critical': {
+        'spo2_min': 88,
+        'spo2_max': 91,                # 88% <= SpO2 <= 91% (below normal spo2_min=92)
+        'systolic_high_min': 141,
+        'systolic_high_max': 180,      # 141 <= Systolic <= 180 mmHg
+        'systolic_low_min': 80,
+        'systolic_low_max': 89,        # 80 <= Systolic <= 89 mmHg
+        'heart_rate_high_min': 101,
+        'heart_rate_high_max': 130,    # 101 <= Heart Rate <= 130 bpm
+        'heart_rate_low_min': 40,
+        'heart_rate_low_max': 49,      # 40 <= Heart Rate <= 49 bpm
+        'temperature_high_min': 38.5,
+        'temperature_high_max': 39.0,  # 38.5 <= Temperature <= 39.0 °C
+    },
+    'mild': {
+        'systolic_min': 135,
+        'systolic_max': 140,           # 135 <= Systolic <= 140 mmHg (Mildly elevated)
+        'temperature_min': 38.1,
+        'temperature_max': 38.4,       # 38.1 <= Temperature <= 38.4 °C (Mildly elevated)
+    },
 }

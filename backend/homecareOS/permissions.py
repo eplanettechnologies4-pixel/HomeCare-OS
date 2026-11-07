@@ -100,7 +100,7 @@ class CanDeletePatient(BasePermission):
     message = "Deleting patient records is restricted to Administrators."
 
     def has_permission(self, request, view):
-        if request.method == 'DELETE':
+        if request.method == 'DELETE' and getattr(view, 'action', None) in ('destroy', None):
             return get_user_role(request.user) in ('super_admin', 'admin')
         return True
 

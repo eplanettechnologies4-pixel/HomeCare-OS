@@ -37,6 +37,9 @@ import NurseResignation from './pages/NurseResignation';
 import NurseTimesheet from './pages/NurseTimesheet';
 import NursePolicies  from './pages/NursePolicies';
 import NurseCallHelp  from './pages/NurseCallHelp';
+import ClinicianHome  from './pages/ClinicianHome';
+import ClinicianPatientChart from './pages/ClinicianPatientChart';
+import { isClinicianRole, normalizeRole, getClinicianConfig } from './config/clinicianRoleConfig';
 import { useRealtimeEvents } from './hooks/useRealtimeEvents';
 
 const PAGE_META = {
@@ -60,6 +63,7 @@ const PAGE_META = {
   'analytics':      { title: 'Analytics',           subtitle: 'Executive KPIs, trends, and service breakdown' },
   'users':          { title: 'Users & Permissions', subtitle: 'User accounts, role matrix, and audit trail' },
   'nurse-patient-detail': { title: 'Patient Clinical Chart', subtitle: 'Bedside care, MAR, vitals & doctor notes' },
+  'patient-chart':  { title: 'Patient Clinical Chart', subtitle: 'Electronic Medical Record & Clinical History' },
   'my-docs':        { title: 'My Documents',        subtitle: 'Digital staff card, credentials & SOPs' },
   'my-reviews':     { title: 'My Reviews',          subtitle: 'Patient and family feedback ratings' },
   'my-trainings':   { title: 'My Trainings',        subtitle: 'Mandatory clinical courses & certifications' },
@@ -93,6 +97,7 @@ const PAGE_COMPONENTS = {
   'analytics':      Analytics,
   'users':          UserManagement,
   'nurse-patient-detail': NursePatientDetail,
+  'patient-chart':  ClinicianPatientChart,
   'my-docs':        NurseDocs,
   'my-reviews':     NurseReviews,
   'my-trainings':   MyTrainings,
@@ -127,7 +132,7 @@ export default function App() {
   }, []);
 
   React.useEffect(() => {
-    if (isAuthenticated && currentRole !== 'nurse') {
+    if (isAuthenticated && !isClinicianRole(currentRole)) {
       fetchAllData();
     }
   }, [isAuthenticated, currentRole, fetchAllData]);
@@ -178,10 +183,16 @@ export default function App() {
   // Role Access Guard: Check if the current role is authorized to view this page
   const allowedNav = ROLE_CONFIG[currentRole]?.nav || ['overview'];
   const isSuperAdmin = currentRole === 'super_admin' && currentUser?.role === 'super_admin';
+  const clinician = isClinicianRole(currentRole);
+  const clinicianConfig = clinician ? getClinicianConfig(currentRole) : null;
+  const isNurse = normalizeRole(currentRole) === 'nurse';
   const isAllowed =
     isSuperAdmin ||
     allowedNav.includes(activePage) ||
-    (activePage === 'patient-360' && allowedNav.includes('patients'));
+    (activePage === 'patient-chart' && clinician) ||
+    (activePage === 'nurse-patient-detail' && isNurse) ||
+    (activePage === 'patient-360' && allowedNav.includes('patients')) ||
+    (clinician && (activePage === 'pharmacy' || activePage === 'equipment'));
 
   if (!isAllowed) {
     return (
@@ -208,10 +219,26 @@ export default function App() {
     );
   }
 
-  const meta = (currentRole === 'nurse' && activePage === 'overview')
-    ? { title: 'Nurses Portal', subtitle: 'Live Clinical Duty Dashboard & Schedule' }
-    : (PAGE_META[activePage] || { title: 'eHealth', subtitle: 'Hospital at Home' });
-  const PageComponent = (currentRole === 'nurse' && activePage === 'overview') ? NurseHome : (PAGE_COMPONENTS[activePage] || Overview);
+  let PageComponent = PAGE_COMPONENTS[activePage] || Overview;
+  let meta = PAGE_META[activePage] || { title: 'eHealth', subtitle: 'Hospital at Home' };
+
+  if (activePage === 'overview') {
+    if (isNurse) {
+      PageComponent = NurseHome;
+      meta = { title: 'Nurses Portal', subtitle: 'Live Clinical Duty Dashboard & Schedule' };
+    } else if (clinician) {
+      PageComponent = ClinicianHome;
+      meta = { title: clinicianConfig?.title || 'Clinician Portal', subtitle: 'Live Clinical Duty Dashboard & Schedule' };
+    } else {
+      PageComponent = Overview;
+    }
+  } else if (activePage === 'patient-chart') {
+    PageComponent = ClinicianPatientChart;
+    meta = { title: 'Patient Clinical Chart', subtitle: 'Electronic Medical Record & Clinical History' };
+  } else if (activePage === 'nurse-patient-detail') {
+    PageComponent = NursePatientDetail;
+    meta = { title: 'Patient Clinical Chart', subtitle: 'Bedside care, MAR, vitals & doctor notes' };
+  }
 
   return (
     <div className="app-shell">

@@ -296,13 +296,67 @@ class MARAdministration(models.Model):
         )
 
 
-class DoctorNote(models.Model):
+from django.core.exceptions import ValidationError
+
+
+class SignedClinicalEntryMixin:
+    """
+    Model mixin enforcing Phase 1 clinical entry immutability:
+    1. Once signed (is_signed=True in DB), the row cannot be deleted (delete() raises ValidationError).
+    2. Once signed, is_signed cannot be reverted to False.
+    3. The addenda history can only grow by appending new addendum objects. Existing items
+       cannot be modified or removed.
+    4. All other clinical and demographic fields are completely locked against direct mutation.
+    """
+    def clean(self):
+        super().clean()
+        if self.pk:
+            orig = self.__class__.objects.filter(pk=self.pk).first()
+            if orig and orig.is_signed:
+                # Rule 1: Cannot un-sign
+                if not self.is_signed:
+                    raise ValidationError({'is_signed': 'A digitally signed clinical entry cannot be unsigned.'})
+
+                # Rule 2: Addenda list can only grow, never be edited or removed
+                orig_addenda = orig.addenda or []
+                new_addenda = self.addenda or []
+                if len(new_addenda) < len(orig_addenda):
+                    raise ValidationError({'addenda': 'Signed clinical entry addenda history cannot be deleted or shortened.'})
+                if new_addenda[:len(orig_addenda)] != orig_addenda:
+                    raise ValidationError({'addenda': 'Signed clinical entry existing addenda cannot be edited or modified.'})
+
+                # Rule 3: All other fields must remain identical
+                for f in self._meta.fields:
+                    if f.name in ('addenda', 'updated_at'):
+                        continue
+                    if getattr(orig, f.attname) != getattr(self, f.attname):
+                        raise ValidationError({
+                            f.name: (
+                                f"Signed clinical entry is immutable. Field '{f.name}' cannot be modified directly. "
+                                f"Clinical updates must be appended as an addendum."
+                            )
+                        })
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        if self.is_signed:
+            raise ValidationError("Signed clinical entries are permanently locked and cannot be deleted.")
+        super().delete(*args, **kwargs)
+
+
+class DoctorNote(SignedClinicalEntryMixin, models.Model):
     patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name='doctor_notes')
     doctor = models.ForeignKey('staff.StaffMember', on_delete=models.SET_NULL, null=True, blank=True, related_name='authored_doctor_notes')
     booking = models.ForeignKey('bookings.Booking', on_delete=models.SET_NULL, null=True, blank=True, related_name='doctor_notes')
     notes = models.TextField(help_text='Clinical assessment, impression, and management notes')
     plan = models.TextField(blank=True, help_text='Treatment and follow-up plan')
     addenda = models.JSONField(default=list, blank=True, help_text='List of addendum objects [{"text": ..., "added_by": ..., "timestamp": ...}]')
+    is_signed = models.BooleanField(default=False)
+    signed_at = models.DateTimeField(null=True, blank=True)
+    signed_by = models.ForeignKey('staff.StaffMember', on_delete=models.SET_NULL, null=True, blank=True, related_name='signed_doctor_notes')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -313,7 +367,7 @@ class DoctorNote(models.Model):
         return f"DoctorNote #{self.pk} — {self.patient} by {self.doctor} ({self.created_at:%Y-%m-%d})"
 
 
-class PhysioNote(models.Model):
+class PhysioNote(SignedClinicalEntryMixin, models.Model):
     patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name='physio_notes')
     physio = models.ForeignKey('staff.StaffMember', on_delete=models.SET_NULL, null=True, blank=True, related_name='authored_physio_notes')
     booking = models.ForeignKey('bookings.Booking', on_delete=models.SET_NULL, null=True, blank=True, related_name='physio_notes')
@@ -321,6 +375,10 @@ class PhysioNote(models.Model):
     mobility_status = models.CharField(max_length=150, blank=True, default='')
     goals = models.TextField(blank=True, default='')
     exercises = models.JSONField(default=list, blank=True, help_text='List of prescribed or performed exercises')
+    is_signed = models.BooleanField(default=False)
+    signed_at = models.DateTimeField(null=True, blank=True)
+    signed_by = models.ForeignKey('staff.StaffMember', on_delete=models.SET_NULL, null=True, blank=True, related_name='signed_physio_notes')
+    addenda = models.JSONField(default=list, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -329,4 +387,56 @@ class PhysioNote(models.Model):
 
     def __str__(self):
         return f"PhysioNote #{self.pk} — {self.patient} by {self.physio} ({self.created_at:%Y-%m-%d})"
+
+
+class TherapyNote(SignedClinicalEntryMixin, models.Model):
+    class Discipline(models.TextChoices):
+        PHYSIOTHERAPY = 'physiotherapy', 'Physiotherapy'
+        SPEECH_THERAPY = 'speech_therapy', 'Speech & Language Therapy'
+        PSYCHOTHERAPY = 'psychotherapy', 'Psychotherapy'
+        OCCUPATIONAL = 'occupational', 'Occupational Therapy'
+        DIETETICS = 'dietetics', 'Dietetics'
+
+    patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name='therapy_notes')
+    author = models.ForeignKey('staff.StaffMember', on_delete=models.SET_NULL, null=True, blank=True, related_name='authored_therapy_notes')
+    booking = models.ForeignKey('bookings.Booking', on_delete=models.SET_NULL, null=True, blank=True, related_name='therapy_notes')
+    discipline = models.CharField(max_length=30, choices=Discipline.choices, default=Discipline.PHYSIOTHERAPY)
+    session_notes = models.TextField(help_text='Session observations, assessments, and clinical findings')
+    plan = models.TextField(blank=True, default='', help_text='Treatment and rehab plan')
+    goals = models.TextField(blank=True, default='')
+    exercises = models.JSONField(default=list, blank=True, help_text='List of exercises or therapy regimen')
+    is_signed = models.BooleanField(default=False)
+    signed_at = models.DateTimeField(null=True, blank=True)
+    signed_by = models.ForeignKey('staff.StaffMember', on_delete=models.SET_NULL, null=True, blank=True, related_name='signed_therapy_notes')
+    addenda = models.JSONField(default=list, blank=True, help_text='Immutable addenda history')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"TherapyNote #{self.pk} ({self.discipline}) — {self.patient} by {self.author} ({self.created_at:%Y-%m-%d})"
+
+
+class ClinicalConsent(SignedClinicalEntryMixin, models.Model):
+    patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name='consents')
+    consent_type = models.CharField(max_length=100, default='General Care & Treatment')
+    title = models.CharField(max_length=200)
+    description = models.TextField(blank=True)
+    granted_by = models.CharField(max_length=150)
+    relationship = models.CharField(max_length=100, default='Self')
+    is_granted = models.BooleanField(default=True)
+    is_signed = models.BooleanField(default=False)
+    signed_at = models.DateTimeField(null=True, blank=True)
+    signed_by = models.ForeignKey('staff.StaffMember', on_delete=models.SET_NULL, null=True, blank=True, related_name='signed_consents')
+    addenda = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Consent #{self.pk} — {self.title} for {self.patient}"
+
 

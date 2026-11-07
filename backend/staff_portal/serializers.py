@@ -3,7 +3,7 @@ from rest_framework import serializers
 from django.utils import timezone
 from staff.models import StaffMember, LeaveRequest
 from bookings.models import Booking
-from patients.models import Patient, DoctorNote, PhysioNote
+from patients.models import Patient, DoctorNote, PhysioNote, TherapyNote, ClinicalConsent
 from .models import (
     StaffRequest, OvertimeClaim, Complaint, ResignationRequest,
     CompanyPolicy, PolicyAcknowledgement, FamilyConcern
@@ -158,17 +158,59 @@ class PublicStaffVerifySerializer(serializers.Serializer):
 
 class DoctorNoteSerializer(serializers.ModelSerializer):
     doctor_name = serializers.CharField(source='doctor.full_name', read_only=True, default='')
+    signed_by_name = serializers.CharField(source='signed_by.full_name', read_only=True, default='')
 
     class Meta:
         model = DoctorNote
-        fields = ['id', 'patient', 'doctor', 'doctor_name', 'booking', 'notes', 'plan', 'addenda', 'created_at', 'updated_at']
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        fields = [
+            'id', 'patient', 'doctor', 'doctor_name', 'booking',
+            'notes', 'plan', 'addenda', 'is_signed', 'signed_at',
+            'signed_by', 'signed_by_name', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'is_signed', 'signed_at', 'signed_by', 'created_at', 'updated_at']
 
 
 class PhysioNoteSerializer(serializers.ModelSerializer):
     physio_name = serializers.CharField(source='physio.full_name', read_only=True, default='')
+    signed_by_name = serializers.CharField(source='signed_by.full_name', read_only=True, default='')
 
     class Meta:
         model = PhysioNote
-        fields = ['id', 'patient', 'physio', 'physio_name', 'booking', 'session_notes', 'mobility_status', 'goals', 'exercises', 'created_at', 'updated_at']
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        fields = [
+            'id', 'patient', 'physio', 'physio_name', 'booking',
+            'session_notes', 'mobility_status', 'goals', 'exercises',
+            'is_signed', 'signed_at', 'signed_by', 'signed_by_name',
+            'addenda', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'is_signed', 'signed_at', 'signed_by', 'created_at', 'updated_at']
+
+
+class TherapyNoteSerializer(serializers.ModelSerializer):
+    author_name = serializers.CharField(source='author.full_name', read_only=True, default='')
+    signed_by_name = serializers.CharField(source='signed_by.full_name', read_only=True, default='')
+    discipline_display = serializers.CharField(source='get_discipline_display', read_only=True)
+
+    class Meta:
+        model = TherapyNote
+        fields = [
+            'id', 'patient', 'author', 'author_name', 'booking',
+            'discipline', 'discipline_display', 'session_notes', 'plan',
+            'goals', 'exercises', 'is_signed', 'signed_at', 'signed_by',
+            'signed_by_name', 'addenda', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'is_signed', 'signed_at', 'signed_by', 'created_at', 'updated_at']
+
+
+class ClinicalConsentSerializer(serializers.ModelSerializer):
+    signed_by_name = serializers.CharField(source='signed_by.full_name', read_only=True, default='')
+
+    class Meta:
+        model = ClinicalConsent
+        fields = [
+            'id', 'patient', 'consent_type', 'title', 'description',
+            'granted_by', 'relationship', 'is_granted', 'is_signed',
+            'signed_at', 'signed_by', 'signed_by_name', 'addenda',
+            'created_at'
+        ]
+        read_only_fields = ['id', 'is_signed', 'signed_at', 'signed_by', 'created_at']
+
