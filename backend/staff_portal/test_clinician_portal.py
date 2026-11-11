@@ -132,6 +132,20 @@ class ClinicianPortalPhase1Tests(TestCase):
             designation='Registered Nurse (RN)',
         )
 
+        # 6b. Dietician
+        self.dietician_user = User.objects.create_user(username='dt_zainab', password='TestPassword123!', first_name='Zainab', last_name='Hameed')
+        self.dietician_staff = StaffMember.objects.create(
+            user=self.dietician_user,
+            first_name='Zainab',
+            last_name='Hameed',
+            role=StaffRole.DIETICIAN,
+            employee_id='DT-001',
+            platform_allowed='both',
+            hire_date=datetime.date(2025, 2, 1),
+            designation='Clinical Dietitian & Nutritionist',
+            specialization='Clinical Nutrition',
+        )
+
         # 7. Care Manager (assigned to Patient A)
         self.cm_user = User.objects.create_user(username='cm_hina', password='TestPassword123!', first_name='Hina', last_name='Malik')
         self.cm_staff = StaffMember.objects.create(
@@ -1111,4 +1125,233 @@ class ClinicianPortalPhase1Tests(TestCase):
         self.client.get(f"/api/patients/{self.patient_a.id}/therapy-notes/{psy_note.id}/")
         count_after = AuditLog.objects.filter(action__in=['Read Psychotherapy Notes', 'Read Psychotherapy Note'], actor=self.psych_user).count()
         self.assertEqual(count_before, count_after, "Author reading own note should not trigger non-author confidentiality access log")
+
+    def test_clinician_employee_card_endpoint_and_privacy(self):
+        """
+        Verify /api/staff-portal/employee-card/ returns the caller's OWN digital credential
+        for all six staff roles:
+          1. nurse
+          2. doctor
+          3. physiotherapist
+          4. speech_therapist
+          5. psychotherapist
+          6. dietician
+        Verify token contains NO patient data and NO personal contact details in QR/token.
+        Verify another user's card ID parameter is rejected (403 Forbidden).
+        Verify unauthenticated gets 401, patient_family gets 403.
+        """
+        # 1. Unauthenticated gets 401
+        self.client.logout()
+        res_anon = self.client.get('/api/staff-portal/employee-card/')
+        self.assertEqual(res_anon.status_code, status.HTTP_401_UNAUTHORIZED)
+
+        # 2. Non-staff user (patient_family user without StaffMember) gets 403
+        family_user = User.objects.create_user(username='fam_test_card', password='Password123!')
+        self.client.force_authenticate(user=family_user)
+        res_fam = self.client.get('/api/staff-portal/employee-card/')
+        self.assertEqual(res_fam.status_code, status.HTTP_403_FORBIDDEN)
+
+        # 3. Test each of the six roles gets 200 for their OWN card
+        role_test_cases = [
+            (self.nurse_user, self.nurse_staff, 'RN-001', 'Sarah Mitchell'),
+            (self.doc_user, self.doc_staff, 'DOC-001', 'Tariq Alam'),
+            (self.physio_user, self.physio_staff, 'PT-001', 'Bilal Khan'),
+            (self.speech_user, self.speech_staff, 'SLP-001', 'Amna Saeed'),
+            (self.psych_user, self.psych_staff, 'PSY-001', 'Maryam Siddiqui'),
+            (self.dietician_user, self.dietician_staff, 'DT-001', 'Zainab Hameed'),
+        ]
+
+        for user, staff_obj, expected_emp_id, expected_name in role_test_cases:
+            self.client.force_authenticate(user=user)
+            res = self.client.get('/api/staff-portal/employee-card/')
+            self.assertEqual(res.status_code, status.HTTP_200_OK, f"Role {staff_obj.role} must get 200 for own card")
+            card_data = res.data
+            self.assertEqual(card_data['employee_id'], expected_emp_id)
+            self.assertEqual(card_data['name'], expected_name)
+            self.assertEqual(card_data['role'], staff_obj.role)
+            self.assertIn('verification_token', card_data)
+            self.assertIn('verify_url', card_data)
+            self.assertIn('duty_status', card_data)
+            self.assertIn('department', card_data)
+            self.assertIn('employment_type', card_data)
+
+            # Privacy check: verify token/verify_url contains NO patient data and NO personal contact (phone, email, address)
+            token = str(card_data['verification_token'])
+            verify_url = str(card_data['verify_url'])
+            self.assertNotIn('patient', token.lower())
+            self.assertNotIn('mrn', token.lower())
+            self.assertNotIn('address', token.lower())
+            self.assertNotIn(self.patient_a.first_name.lower(), token.lower())
+            if staff_obj.phone:
+                self.assertNotIn(staff_obj.phone, token)
+            if staff_obj.email:
+                self.assertNotIn(staff_obj.email, token)
+            if getattr(staff_obj, 'address', None):
+                self.assertNotIn(staff_obj.address, token)
+            self.assertNotIn('patient', verify_url.lower())
+
+        # 4. Another user's card ID is not readable (must return 403 Forbidden)
+        # Doctor tries to read Nurse's card by ID
+        self.client.force_authenticate(user=self.doc_user)
+        res_cross_1 = self.client.get(f"/api/staff-portal/employee-card/?id={self.nurse_staff.id}")
+        self.assertEqual(res_cross_1.status_code, status.HTTP_403_FORBIDDEN)
+
+        res_cross_2 = self.client.get(f"/api/staff-portal/employee-card/?employee_id={self.nurse_staff.employee_id}")
+        self.assertEqual(res_cross_2.status_code, status.HTTP_403_FORBIDDEN)
+
+        # Nurse tries to read Doctor's card by ID
+        self.client.force_authenticate(user=self.nurse_user)
+        res_cross_3 = self.client.get(f"/api/staff-portal/employee-card/?id={self.doc_staff.id}")
+        self.assertEqual(res_cross_3.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_doctor_consultation_counts(self):
+        """
+        Verify consultation counts for role 'doctor' on GET /api/staff-portal/clinician-home/:
+        - Counts doctor's own non-cancelled physical bookings
+        - Distinguishes today, this_week, this_month, total, completed, scheduled
+        - Accurate timezone handling for Asia/Karachi (e.g., visit at 23:30 PKT)
+        - Video counts return 0 with available: false
+        - Another doctor's bookings are excluded
+        - Non-doctor clinician roles (physio, speech, psych, nurse, dietician) do NOT have consultation_counts
+        """
+        try:
+            from zoneinfo import ZoneInfo
+        except ImportError:
+            from backports.zoneinfo import ZoneInfo
+
+        local_tz = ZoneInfo('Asia/Karachi')
+        local_now = timezone.now().astimezone(local_tz)
+
+        # Clear existing bookings for test doctors so count tests are strictly deterministic
+        Booking.objects.filter(assigned_staff__in=[self.doc_staff, self.doc_b_staff]).delete()
+
+        # Ensure we create bookings relative to local_now in Asia/Karachi
+        today_10am = local_now.replace(hour=10, minute=0, second=0, microsecond=0)
+        today_2pm = local_now.replace(hour=14, minute=0, second=0, microsecond=0)
+        today_2330 = local_now.replace(hour=23, minute=30, second=0, microsecond=0)
+        today_11am = local_now.replace(hour=11, minute=0, second=0, microsecond=0)
+
+        # 1. Doctor A bookings:
+        # B1: Physical, Completed, today
+        b1 = Booking.objects.create(
+            patient=self.patient_a,
+            assigned_staff=self.doc_staff,
+            service_type=ServiceType.DOCTOR_CONSULTATION,
+            status=BookingStatus.COMPLETED,
+            scheduled_time=today_10am,
+            shift_duration=ShiftDuration.ONE_HOUR,
+            service_mode='home',
+            address='F-8/3, Islamabad',
+        )
+        # B2: Physical, Completed, today
+        b2 = Booking.objects.create(
+            patient=self.patient_a,
+            assigned_staff=self.doc_staff,
+            service_type=ServiceType.DOCTORS,
+            status=BookingStatus.COMPLETED,
+            scheduled_time=today_2pm,
+            shift_duration=ShiftDuration.ONE_HOUR,
+            service_mode='home',
+            address='F-8/3, Islamabad',
+        )
+        # B3: Physical, Scheduled (ASSIGNED), today at 23:30 Asia/Karachi
+        b3 = Booking.objects.create(
+            patient=self.patient_a,
+            assigned_staff=self.doc_staff,
+            service_type=ServiceType.DOCTOR_CONSULTATION,
+            status=BookingStatus.ASSIGNED,
+            scheduled_time=today_2330,
+            shift_duration=ShiftDuration.ONE_HOUR,
+            service_mode='home',
+            address='F-8/3, Islamabad',
+        )
+        # B4: Cancelled booking (should NOT be counted)
+        b4 = Booking.objects.create(
+            patient=self.patient_a,
+            assigned_staff=self.doc_staff,
+            service_type=ServiceType.DOCTOR_CONSULTATION,
+            status=BookingStatus.CANCELLED,
+            scheduled_time=today_11am,
+            shift_duration=ShiftDuration.ONE_HOUR,
+            service_mode='home',
+            address='F-8/3, Islamabad',
+        )
+        # B5: Other doctor's booking (Doctor B - should NOT be counted for Doctor A)
+        b5 = Booking.objects.create(
+            patient=self.patient_b,
+            assigned_staff=self.doc_b_staff,
+            service_type=ServiceType.DOCTOR_CONSULTATION,
+            status=BookingStatus.COMPLETED,
+            scheduled_time=today_10am,
+            shift_duration=ShiftDuration.ONE_HOUR,
+            service_mode='home',
+            address='G-10/2, Islamabad',
+        )
+        # B6: Past month completed booking (counts in total, but NOT this_month)
+        past_month_time = local_now - datetime.timedelta(days=45)
+        b6 = Booking.objects.create(
+            patient=self.patient_a,
+            assigned_staff=self.doc_staff,
+            service_type=ServiceType.DOCTOR_CONSULTATION,
+            status=BookingStatus.COMPLETED,
+            scheduled_time=past_month_time,
+            shift_duration=ShiftDuration.ONE_HOUR,
+            service_mode='home',
+            address='F-8/3, Islamabad',
+        )
+
+        # ── Test Doctor A ──────────────────────────────────────────
+        self.client.force_authenticate(user=self.doc_user)
+        res = self.client.get('/api/staff-portal/clinician-home/')
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertIn('consultation_counts', res.data)
+
+        counts = res.data['consultation_counts']
+        physical = counts['physical']
+        video = counts['video']
+
+        # Assert physical counts
+        self.assertEqual(physical['today'], 3, "Doctor A has 3 active physical visits today (including 23:30 PKT)")
+        self.assertEqual(physical['this_month'], 3, "Doctor A has 3 active physical visits this month")
+        self.assertEqual(physical['total'], 4, "Doctor A has 4 active physical visits all time (3 this month + 1 past month)")
+        self.assertEqual(physical['completed'], 3, "Doctor A has 3 completed physical visits all time")
+        self.assertEqual(physical['scheduled'], 1, "Doctor A has 1 scheduled physical visit (assigned status)")
+
+        # Assert video counts
+        self.assertEqual(video['today'], 0)
+        self.assertEqual(video['this_week'], 0)
+        self.assertEqual(video['this_month'], 0)
+        self.assertEqual(video['total'], 0)
+        self.assertEqual(video['completed'], 0)
+        self.assertEqual(video['scheduled'], 0)
+        self.assertIs(video['available'], False)
+
+        # ── Test Doctor B (scoped to Doctor B only) ────────────────
+        self.client.force_authenticate(user=self.doc_b_user)
+        res_b = self.client.get('/api/staff-portal/clinician-home/')
+        self.assertEqual(res_b.status_code, status.HTTP_200_OK)
+        self.assertIn('consultation_counts', res_b.data)
+        doc_b_counts = res_b.data['consultation_counts']['physical']
+        self.assertEqual(doc_b_counts['total'], 1, "Doctor B sees only their own booking (B5)")
+        self.assertEqual(doc_b_counts['completed'], 1)
+        self.assertEqual(doc_b_counts['scheduled'], 0)
+
+        # ── Test Non-Doctor Clinician Roles (must NOT have consultation_counts) ──
+        non_doc_users = [
+            ('physiotherapist', self.physio_user),
+            ('speech_therapist', self.speech_user),
+            ('psychotherapist', self.psych_user),
+            ('nurse', self.nurse_user),
+            ('dietician', self.dietician_user),
+        ]
+        for role_name, user_obj in non_doc_users:
+            self.client.force_authenticate(user=user_obj)
+            res_nd = self.client.get('/api/staff-portal/clinician-home/')
+            self.assertEqual(res_nd.status_code, status.HTTP_200_OK, f"Role {role_name} should get 200 OK")
+            self.assertNotIn(
+                'consultation_counts',
+                res_nd.data,
+                f"Role {role_name} must NOT have 'consultation_counts' in response"
+            )
+
 

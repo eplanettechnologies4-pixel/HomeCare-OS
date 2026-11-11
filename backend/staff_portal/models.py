@@ -18,6 +18,7 @@ class StaffRequest(models.Model):
         APPOINTMENT = 'appointment', 'Doctor Consultation / Appointment'
         PROCEDURE_CHANGE = 'procedure_change', 'Procedure Change'
         REFERRAL = 'referral', 'Clinical Referral'
+        SHIFT_CHANGE = 'shift_change', 'Shift Change Request'
 
     class Urgency(models.TextChoices):
         ROUTINE = 'routine', 'Routine'

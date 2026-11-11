@@ -29,6 +29,8 @@ export const ROLE_NORMALIZATION = {
   psychotherapist: 'psychotherapist',
   nurse: 'nurse',
   nursing_assistant: 'nurse',
+  dietician: 'dietician',
+  nutritionist: 'dietician',
 };
 
 export function normalizeRole(role) {
@@ -39,7 +41,7 @@ export function normalizeRole(role) {
 
 export function isClinicianRole(role) {
   const norm = normalizeRole(role);
-  return ['doctor', 'physiotherapist', 'speech_therapist', 'psychotherapist', 'nurse'].includes(norm);
+  return ['doctor', 'physiotherapist', 'speech_therapist', 'psychotherapist', 'nurse', 'dietician'].includes(norm);
 }
 
 // ── Chart Tabs Definitions ──────────────────────────────────────────────────
@@ -122,6 +124,19 @@ export const ROLE_CHART_PERMISSIONS = {
     nursing_notes:   'write', // vitals, intake/output, nursing notes
     physiotherapy:   'read',
     vital_charts:    'write',
+    lab_results:     'read',
+  },
+  dietician: {
+    medical_records: 'read',
+    doctor_notes:    'read',
+    consents:        'read',
+    procedures:      'read',
+    referrals:       'write',
+    prescriptions:   'read',
+    medications:     'read',
+    nursing_notes:   'read',
+    physiotherapy:   'read',
+    vital_charts:    'read',
     lab_results:     'read',
   },
 };
@@ -287,6 +302,37 @@ export const CLINICIAN_ROLE_CONFIG = {
           { id: 'my-complaints',     label: 'My Complaints',     icon: AlertCircle },
           { id: 'resignation',       label: 'Resignation',       icon: UserMinus },
           { id: 'company-policies',  label: 'Company Policies',  icon: ShieldCheck },
+        ],
+      },
+    ],
+  },
+  dietician: {
+    key: 'dietician',
+    title: 'Dietetics & Nutrition Portal',
+    designation: 'Clinical Dietitian / Nutritionist',
+    badgeColor: '#059669',
+    homeWidgets: ['hero', 'digital_id', 'today_visits', 'pending_requests', 'high_alert_patients', 'quick_links', 'placeholders'],
+    sidebarGroups: [
+      {
+        title: 'Overview',
+        items: [
+          { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+        ],
+      },
+      {
+        title: 'Nutritional Care',
+        items: [
+          { id: 'patient-chart', label: 'Patient Chart', icon: Activity },
+          { id: 'call-help',     label: 'Emergency Call',icon: PhoneCall },
+        ],
+      },
+      {
+        title: 'Clinician Profile',
+        items: [
+          { id: 'my-docs',          label: 'My Credentials',    icon: FileText },
+          { id: 'my-timesheet',     label: 'Clinical Roster',   icon: Clock },
+          { id: 'leave-application',label: 'Leave Application', icon: CalendarDays },
+          { id: 'company-policies', label: 'Hospital Policies', icon: ShieldCheck },
         ],
       },
     ],

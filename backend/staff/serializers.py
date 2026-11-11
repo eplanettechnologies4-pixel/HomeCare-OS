@@ -5,7 +5,13 @@ from django.contrib.auth.models import User
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import serializers
-from .models import StaffMember, StaffRole, LeaveRequest, AttendanceRecord, Certification, FeedbackRating
+from rest_framework.exceptions import PermissionDenied
+from homecareOS.permissions import get_user_role
+from .models import (
+    StaffMember, StaffRole, LeaveRequest, AttendanceRecord, Certification, FeedbackRating,
+    ShiftTemplate, RosterWeek, RosterAssignment
+)
+from accounts.models import AuditLog
 
 
 class Base64OrImageField(serializers.ImageField):
@@ -52,7 +58,7 @@ class StaffListSerializer(serializers.ModelSerializer):
         model = StaffMember
         fields = [
             'id', 'full_name', 'first_name', 'last_name', 'employee_id',
-            'role', 'role_display', 'specialization',
+            'role', 'role_display', 'specialization', 'designation', 'working_hours',
             'status', 'status_display', 'phone', 'email',
             'photo', 'id_card_front', 'id_card_back',
             'rating', 'hire_date', 'is_active',
@@ -84,6 +90,117 @@ class StaffDetailSerializer(serializers.ModelSerializer):
     def get_attendance_summary(self, obj):
         records = obj.attendance_records.all()[:30]
         return AttendanceRecordSerializer(records, many=True).data
+
+    def validate(self, attrs):
+        request = self.context.get('request')
+        actor = getattr(request, 'user', None) if request else None
+        instance = self.instance
+
+        if instance and actor and actor.is_authenticated:
+            actor_role = get_user_role(actor)
+            is_actor_super_admin = (actor_role == 'super_admin') or getattr(actor, 'is_superuser', False)
+
+            # Target staff user info
+            target_user = instance.user
+            target_is_admin_or_super = (
+                instance.role in ('super_admin', 'admin') or
+                (target_user and (
+                    target_user.is_superuser or
+                    target_user.is_staff or
+                    get_user_role(target_user) in ('super_admin', 'admin')
+                ))
+            )
+
+            new_role = attrs.get('role', instance.role)
+
+            # 1. Nobody can change their own role
+            if target_user and target_user == actor and new_role != instance.role:
+                raise serializers.ValidationError({'role': ['You cannot change your own role.']})
+
+            # 2. Only super_admin may edit a super_admin or admin account
+            if target_is_admin_or_super and not is_actor_super_admin:
+                raise PermissionDenied('Only Super Administrators can edit Super Admin or Admin accounts.')
+
+            # 3. Only super_admin may assign or remove the roles super_admin and admin
+            if new_role != instance.role:
+                if (new_role in ('super_admin', 'admin') or instance.role in ('super_admin', 'admin')) and not is_actor_super_admin:
+                    raise PermissionDenied('Only Super Administrators can assign or remove Admin or Super Admin roles.')
+
+                # 4. admin (and branch_manager) may change only staff roles
+                allowed_staff_roles = (
+                    'nurse', 'doctor', 'physio', 'speech', 'psychologist',
+                    'dietician', 'care_manager', 'accountant', 'crm_executive',
+                    'lab_tech', 'delivery_rider'
+                )
+                if not is_actor_super_admin and new_role not in allowed_staff_roles:
+                    raise PermissionDenied('You do not have permission to assign this role.')
+
+        return attrs
+
+    def update(self, instance, validated_data):
+        old_role = instance.role
+        old_platform = instance.platform_allowed
+        new_role = validated_data.get('role', old_role)
+        new_platform = validated_data.get('platform_allowed', old_platform)
+
+        updated_instance = super().update(instance, validated_data)
+
+        # Audit log if role or platform_allowed changed
+        request = self.context.get('request')
+        actor = getattr(request, 'user', None) if request else None
+        if old_role != new_role or old_platform != new_platform:
+            changes = []
+            if old_role != new_role:
+                changes.append(f"Role changed from {old_role} to {new_role}")
+            if old_platform != new_platform:
+                changes.append(f"Platform allowed changed from {old_platform} to {new_platform}")
+
+            AuditLog.objects.create(
+                actor=actor if (actor and actor.is_authenticated) else None,
+                actor_name=actor.get_full_name() if (actor and actor.is_authenticated) else 'System Administrator',
+                action='Staff Profile Updated',
+                target_user=updated_instance.full_name,
+                details=f"Staff ID {updated_instance.id} ({updated_instance.employee_id}): " + "; ".join(changes),
+            )
+
+        return updated_instance
+
+
+class ShiftTemplateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ShiftTemplate
+        fields = [
+            'id', 'name', 'start_time', 'end_time', 'location',
+            'color', 'is_off', 'is_active', 'created_at', 'updated_at'
+        ]
+
+
+class RosterAssignmentSerializer(serializers.ModelSerializer):
+    staff_name = serializers.CharField(source='staff.full_name', read_only=True)
+    staff_role = serializers.CharField(source='staff.role', read_only=True)
+    buddy_name = serializers.CharField(source='buddy_staff.full_name', read_only=True, default='')
+
+    class Meta:
+        model = RosterAssignment
+        fields = [
+            'id', 'roster_week', 'staff', 'staff_name', 'staff_role',
+            'date', 'shift_template', 'shift_name', 'start_time', 'end_time',
+            'location', 'color', 'is_off', 'buddy_staff', 'buddy_name',
+            'transport_driver_name', 'transport_driver_phone', 'transport_pickup_time',
+            'revision', 'is_published', 'created_at', 'updated_at'
+        ]
+
+
+class RosterWeekSerializer(serializers.ModelSerializer):
+    published_by_name = serializers.CharField(source='published_by.get_full_name', read_only=True, default='')
+
+    class Meta:
+        model = RosterWeek
+        fields = [
+            'id', 'week_start_date', 'status', 'revision',
+            'published_at', 'published_by', 'published_by_name',
+            'notes', 'created_at', 'updated_at'
+        ]
 
 
 class StaffCreateSerializer(serializers.ModelSerializer):
@@ -137,6 +254,14 @@ class StaffCreateSerializer(serializers.ModelSerializer):
 
         if password != password_confirm:
             raise serializers.ValidationError({'password_confirm': 'Passwords do not match.'})
+
+        role = attrs.get('role')
+        if role in ('super_admin', 'admin'):
+            request = self.context.get('request')
+            actor = getattr(request, 'user', None) if request else None
+            is_actor_super_admin = actor and ((get_user_role(actor) == 'super_admin') or getattr(actor, 'is_superuser', False))
+            if not is_actor_super_admin:
+                raise PermissionDenied('Only Super Administrators can create Admin or Super Admin accounts.')
 
         return attrs
 

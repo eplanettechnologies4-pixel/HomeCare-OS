@@ -1,14 +1,14 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
-  Clock, User, Phone, MapPin, AlertTriangle, ShieldCheck,
+  Clock, User, Phone, MapPin, AlertTriangle,
   Calendar, FileText, ChevronRight, Activity, Bell, CheckCircle2,
   PlusCircle, AlertCircle, RefreshCw, WifiOff,
   Stethoscope, Pill, ClipboardCheck, UserCheck, MessageSquare,
-  ArrowUpRight, Users, HeartHandshake, Syringe, Car
+  ArrowUpRight, HeartHandshake, Syringe, Car
 } from 'lucide-react';
 import useStore from '../store/useStore';
 import apiFetch from '../services/api';
-import QRCodeDisplay from '../components/QRCodeDisplay';
+import StaffIdCard from '../components/StaffIdCard';
 import { Modal, Input, Textarea, Button, Badge } from '../components/ui';
 
 export default function NurseHome() {
@@ -17,6 +17,7 @@ export default function NurseHome() {
 
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState(null);
+  const [employeeCard, setEmployeeCard] = useState(null);
   const [error, setError] = useState(null);
   const [isOffline, setIsOffline] = useState(false);
   const [lastUpdatedTime, setLastUpdatedTime] = useState(null);
@@ -130,9 +131,22 @@ export default function NurseHome() {
     }
   }, []);
 
+  const fetchEmployeeCard = useCallback(async () => {
+    try {
+      const res = await apiFetch('/staff-portal/employee-card/');
+      if (res.ok) {
+        const json = await res.json();
+        setEmployeeCard(json);
+      }
+    } catch (err) {
+      console.error('Failed to fetch employee card:', err);
+    }
+  }, []);
+
   useEffect(() => {
     let isMounted = true;
     fetchDashboardData(false);
+    fetchEmployeeCard();
 
     const scheduleNext = () => {
       if (!isMounted) return;
@@ -142,7 +156,10 @@ export default function NurseHome() {
         timerRef.current = setTimeout(async () => {
           if (!isMounted) return;
           if (document.visibilityState === 'visible') {
-            await fetchDashboardData(true);
+            await Promise.all([
+              fetchDashboardData(true),
+              fetchEmployeeCard(),
+            ]);
           }
           scheduleNext();
         }, backoffDelayRef.current);
@@ -154,6 +171,7 @@ export default function NurseHome() {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         fetchDashboardData(true);
+        fetchEmployeeCard();
         scheduleNext();
       } else {
         if (timerRef.current) clearTimeout(timerRef.current);
@@ -163,6 +181,7 @@ export default function NurseHome() {
     const handleFocus = () => {
       if (document.visibilityState === 'visible') {
         fetchDashboardData(true);
+        fetchEmployeeCard();
         scheduleNext();
       }
     };
@@ -171,6 +190,7 @@ export default function NurseHome() {
       setIsOffline(false);
       backoffDelayRef.current = 30000;
       fetchDashboardData(true);
+      fetchEmployeeCard();
       scheduleNext();
     };
 
@@ -190,7 +210,7 @@ export default function NurseHome() {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
-  }, [fetchDashboardData]);
+  }, [fetchDashboardData, fetchEmployeeCard]);
 
   // Server-time synchronized live ticking
   useEffect(() => {
@@ -708,7 +728,10 @@ export default function NurseHome() {
                 <button
                   type="button"
                   className="btn btn-ghost btn-sm"
-                  onClick={() => fetchDashboardData(true)}
+                  onClick={() => {
+                    fetchDashboardData(true);
+                    fetchEmployeeCard();
+                  }}
                   title="Refresh Dashboard"
                   aria-label="Refresh Dashboard"
                   style={{ padding: '2px 5px', height: 24, borderRadius: 6, display: 'inline-flex', alignItems: 'center' }}
@@ -744,9 +767,12 @@ export default function NurseHome() {
         </div>
       </section>
 
-      {/* ── SECTION B: Full-Width "My Roster" Card ── */}
-      <section
-        className="card nurse-roster-fullwidth"
+      {/* ── 2-COLUMN LAYOUT: Main Content Left, Narrow Sticky Right Column (StaffIdCard) ── */}
+      <div className="nurse-layout-grid">
+        <div className="nurse-main-column">
+          {/* ── SECTION B: Full-Width "My Roster" Card ── */}
+          <section
+            className="card nurse-roster-fullwidth"
         style={{
           background: '#FFFFFF',
           borderRadius: 20,
@@ -1893,83 +1919,62 @@ export default function NurseHome() {
             </Button>
           </div>
 
-          {/* Digital Employee ID Card (Styled like real ID card) */}
-          <div
-            className="card digital-id-card"
-            style={{
-              padding: '16px 18px',
-              background: 'linear-gradient(135deg, #FAF5FF 0%, #FFFFFF 60%, #EDE9FE 100%)',
-              borderRadius: 20,
-              border: '1.5px solid #DDD6FE',
-              borderTop: '4px solid #7C3AED',
-              boxShadow: '0 4px 16px rgba(109,40,217,0.08)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 12,
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <ShieldCheck size={16} style={{ color: '#6D28D9' }} />
-                <span style={{ fontSize: '12px', fontWeight: 700, color: '#6D28D9', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-                  eHealth Digital Staff Pass
-                </span>
-              </div>
-              <Badge variant="purple">Active</Badge>
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
-                <div
-                  style={{
-                    width: 44,
-                    height: 44,
-                    borderRadius: '50%',
-                    background: '#6D28D9',
-                    color: '#FFFFFF',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontWeight: 700,
-                    fontSize: '15px',
-                    flexShrink: 0,
-                  }}
-                >
-                  {staff.name?.slice(0, 2).toUpperCase() || 'RN'}
-                </div>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: '15px', fontWeight: 700, color: '#1F2937', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {staff.name || currentUser?.full_name || 'Mariam Sheikh'}
-                  </div>
-                  <div style={{ fontSize: '13px', color: '#6D28D9', fontWeight: 500 }}>
-                    {staff.role_label || 'Registered Nurse (RN)'}
-                  </div>
-                  <div style={{ fontSize: '12px', color: '#6B7280', marginTop: 2 }}>
-                    ID: <strong>{staff.employee_id || 'EMP011'}</strong>
-                  </div>
-                </div>
-              </div>
-
-              {/* QR Code */}
-              <div style={{ flexShrink: 0 }}>
-                <QRCodeDisplay employeeId={staff.employee_id} token={staff.id} size={50} />
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid #DDD6FE', paddingTop: 8 }}>
-              <span style={{ fontSize: '12px', color: '#6B7280' }}>Verified Clinical Staff</span>
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={() => setActivePage('my-docs')}
-                style={{ fontSize: '12px', color: '#6D28D9', fontWeight: 600, padding: '2px 8px' }}
-              >
-                Verify ID Card
-              </button>
-            </div>
-          </div>
+          {/* Digital Employee ID Card was moved to narrow sticky right column */}
         </div>
       </div>
+      </div>
+
+      {/* ── RIGHT COLUMN: Narrow Sticky Column (Desktop) / Header Stacking (Mobile) ── */}
+      <aside className="nurse-side-column">
+        <div className="nurse-id-card-wrapper">
+          <StaffIdCard staffMember={employeeCard || staff} />
+        </div>
+      </aside>
+    </div>
+
+    {/* Responsive Stacking & Sticky Right Column Styles for Nurses Portal */}
+    <style>{`
+      .nurse-layout-grid {
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+      }
+      .nurse-side-column {
+        display: contents;
+      }
+      .nurse-id-card-wrapper {
+        order: 1;
+        display: flex;
+        justify-content: center;
+      }
+      .nurse-main-column {
+        order: 2;
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+        min-width: 0;
+      }
+      @media (min-width: 1024px) {
+        .nurse-layout-grid {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) 380px;
+          gap: 24px;
+          align-items: start;
+        }
+        .nurse-side-column {
+          display: block;
+          position: sticky;
+          top: 24px;
+          align-self: start;
+        }
+        .nurse-id-card-wrapper {
+          order: unset;
+        }
+        .nurse-main-column {
+          order: unset;
+        }
+      }
+    `}</style>
 
       {/* ── Modal 1: Duty Roster Calendar ── */}
       <Modal

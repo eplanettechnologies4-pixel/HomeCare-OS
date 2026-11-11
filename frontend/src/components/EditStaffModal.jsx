@@ -29,10 +29,27 @@ const STATUSES = [
 
 export default function EditStaffModal({ staff, onClose, onUpdated }) {
   const updateStaffMember = useStore((s) => s.updateStaffMember);
+  const currentUser = useStore((s) => s.currentUser);
+  const currentRole = useStore((s) => s.currentRole);
+
+  const isSuperAdmin = currentUser?.role === 'super_admin' || currentRole === 'super_admin';
+  const isTargetAdmin = staff.role === 'admin' || staff.role === 'super_admin';
+  const isOwnAccount = Boolean(currentUser && (
+    (currentUser.staff_id && staff.id === currentUser.staff_id) ||
+    (staff.username && staff.username === currentUser.username) ||
+    (currentUser.id && (staff.user === currentUser.id || staff.user_id === currentUser.id))
+  ));
+  const canEditAccount = isSuperAdmin || !isTargetAdmin;
+  const availableRoles = isSuperAdmin
+    ? ROLES
+    : ROLES.filter(r => r.value !== 'admin' && r.value !== 'super_admin');
 
   const [form, setForm] = useState({
     full_name: staff.full_name || `${staff.first_name || ''} ${staff.last_name || ''}`.trim() || '',
     role: staff.role || 'nurse',
+    designation: staff.designation || '',
+    working_hours: staff.working_hours || '09:00 - 17:00',
+    platform_allowed: staff.platform_allowed || 'both',
     specialization: staff.specialization || '',
     phone: staff.phone || '',
     email: staff.email || '',
@@ -109,6 +126,20 @@ export default function EditStaffModal({ staff, onClose, onUpdated }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    // Confirm dialog when role or platform_allowed changes
+    const roleChanged = form.role !== staff.role;
+    const platformChanged = form.platform_allowed !== (staff.platform_allowed || 'both');
+    if (roleChanged || platformChanged) {
+      const msg = `Are you sure you want to update this staff member's credentials?\n\n` +
+        (roleChanged ? `• Role: ${staff.role} → ${form.role}\n` : '') +
+        (platformChanged ? `• Platform Access: ${staff.platform_allowed || 'both'} → ${form.platform_allowed}\n` : '') +
+        `\nNote: Changing role or platform access will not delete earlier clinical records or history.`;
+      if (!window.confirm(msg)) {
+        return;
+      }
+    }
+
     setSaving(true);
     setError('');
 
@@ -120,6 +151,9 @@ export default function EditStaffModal({ staff, onClose, onUpdated }) {
     formData.append('first_name', first_name);
     formData.append('last_name', last_name);
     formData.append('role', form.role);
+    formData.append('designation', form.designation);
+    formData.append('working_hours', form.working_hours);
+    formData.append('platform_allowed', form.platform_allowed);
     formData.append('specialization', form.specialization);
     formData.append('phone', form.phone);
     formData.append('email', form.email);
@@ -146,6 +180,9 @@ export default function EditStaffModal({ staff, onClose, onUpdated }) {
           full_name: form.full_name,
           role: form.role,
           role_display: ROLES.find(r => r.value === form.role)?.label || form.role,
+          designation: form.designation,
+          working_hours: form.working_hours,
+          platform_allowed: form.platform_allowed,
           specialization: form.specialization,
           phone: form.phone,
           email: form.email,
@@ -193,6 +230,15 @@ export default function EditStaffModal({ staff, onClose, onUpdated }) {
                 <div style={{ background: '#fef2f2', border: '1px solid #fca5a5', color: '#b91c1c', padding: 10, borderRadius: 6, fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: 8 }}>
                   <AlertCircle size={16} />
                   {error}
+                </div>
+              )}
+
+              {!canEditAccount && (
+                <div style={{ background: '#FEF2F2', border: '1px solid #F87171', color: '#991B1B', padding: '10px 14px', borderRadius: 8, fontSize: '0.84rem', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <AlertCircle size={18} style={{ flexShrink: 0 }} />
+                  <div>
+                    <strong>Administrative Account Restricted:</strong> Only Super Administrators can view or edit Admin / Super Admin accounts.
+                  </div>
                 </div>
               )}
 
@@ -413,16 +459,68 @@ export default function EditStaffModal({ staff, onClose, onUpdated }) {
 
               <div className="grid-2" style={{ gap: 12 }}>
                 <div className="form-group">
-                  <label className="form-label" style={{ fontWeight: 600 }}>Role / Designation</label>
+                  <label className="form-label" style={{ fontWeight: 600 }}>
+                    Staff Role {isOwnAccount && <span style={{ fontSize: '0.72rem', color: '#9CA3AF', fontWeight: 'normal' }}>(Cannot change own role)</span>}
+                  </label>
                   <select
                     className="form-select"
                     value={form.role}
                     onChange={(e) => setForm({ ...form, role: e.target.value })}
+                    disabled={isOwnAccount || !canEditAccount}
                   >
-                    {ROLES.map((r) => (
+                    {availableRoles.map((r) => (
                       <option key={r.value} value={r.value}>{r.label}</option>
                     ))}
                   </select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label" style={{ fontWeight: 600 }}>Platform Access</label>
+                  <select
+                    className="form-select"
+                    value={form.platform_allowed}
+                    onChange={(e) => setForm({ ...form, platform_allowed: e.target.value })}
+                    disabled={!canEditAccount}
+                  >
+                    <option value="both">Web &amp; Mobile</option>
+                    <option value="web">Web Only</option>
+                    <option value="mobile">Mobile Only</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid-2" style={{ gap: 12 }}>
+                <div className="form-group">
+                  <label className="form-label" style={{ fontWeight: 600 }}>Official Designation</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. Attending Physician, Registered Nurse"
+                    value={form.designation}
+                    onChange={(e) => setForm({ ...form, designation: e.target.value })}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label" style={{ fontWeight: 600 }}>Working Hours</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. 09:00 - 17:00 (Asia/Karachi)"
+                    value={form.working_hours}
+                    onChange={(e) => setForm({ ...form, working_hours: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div className="grid-2" style={{ gap: 12 }}>
+                <div className="form-group">
+                  <label className="form-label" style={{ fontWeight: 600 }}>Clinical Specialization</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="e.g. Critical Care, Wound Care, Cardiology"
+                    value={form.specialization}
+                    onChange={(e) => setForm({ ...form, specialization: e.target.value })}
+                  />
                 </div>
                 <div className="form-group">
                   <label className="form-label" style={{ fontWeight: 600 }}>Duty Status</label>
@@ -436,17 +534,6 @@ export default function EditStaffModal({ staff, onClose, onUpdated }) {
                     ))}
                   </select>
                 </div>
-              </div>
-
-              <div className="form-group">
-                <label className="form-label" style={{ fontWeight: 600 }}>Clinical Specialization</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  placeholder="e.g. Critical Care, Wound Care, Cardiology"
-                  value={form.specialization}
-                  onChange={(e) => setForm({ ...form, specialization: e.target.value })}
-                />
               </div>
 
               <div className="grid-2" style={{ gap: 12 }}>
@@ -480,7 +567,7 @@ export default function EditStaffModal({ staff, onClose, onUpdated }) {
                 type="submit"
                 className="btn btn-primary"
                 style={{ background: '#611F8C' }}
-                disabled={saving}
+                disabled={saving || !canEditAccount}
               >
                 {saving ? 'Saving...' : 'Save Changes'}
               </button>

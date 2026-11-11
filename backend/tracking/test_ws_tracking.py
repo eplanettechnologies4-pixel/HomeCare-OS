@@ -100,3 +100,26 @@ class WebSocketTrackingSecurityTests(TestCase):
         self.assertIn('Permission denied', response['error'])
 
         await communicator.disconnect()
+
+    async def test_expired_token_connection_rejected(self):
+        token = RefreshToken.for_user(self.staff_user).access_token
+        token.set_exp(lifetime=-datetime.timedelta(hours=2))
+        expired_token = str(token)
+
+        communicator = WebsocketCommunicator(
+            application,
+            f'/ws/tracking/?token={expired_token}'
+        )
+        connected, _ = await communicator.connect()
+        self.assertFalse(connected)
+        await communicator.disconnect()
+
+    async def test_malformed_token_connection_rejected(self):
+        malformed_token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.invalidpayload.invalidsignature'
+        communicator = WebsocketCommunicator(
+            application,
+            f'/ws/tracking/?token={malformed_token}'
+        )
+        connected, _ = await communicator.connect()
+        self.assertFalse(connected)
+        await communicator.disconnect()

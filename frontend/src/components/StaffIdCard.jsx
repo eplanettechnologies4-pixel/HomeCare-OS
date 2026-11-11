@@ -6,6 +6,7 @@ import {
 import useStore from '../store/useStore';
 import UniversalPrintButton from './UniversalPrintButton';
 import FullHdImageViewerModal from './FullHdImageViewerModal';
+import QRCodeDisplay from './QRCodeDisplay';
 
 export default function StaffIdCard({ staffMember }) {
   const staff = useStore((s) => s.staff);
@@ -24,6 +25,13 @@ export default function StaffIdCard({ staffMember }) {
   }
 
   const hasCnic = !!(targetStaff.id_card_front || targetStaff.id_card_back);
+  const staffPhoto = targetStaff.photo || targetStaff.photo_url || null;
+  const staffName = targetStaff.full_name || targetStaff.name || 'Staff Member';
+  const designationText = targetStaff.designation || targetStaff.role_display || (targetStaff.role ? (targetStaff.role.charAt(0).toUpperCase() + targetStaff.role.slice(1)).replace(/_/g, ' ') : 'Clinical Staff');
+  const deptText = targetStaff.department || targetStaff.branch || targetStaff.specialization || 'Clinical Field Care';
+  const contactText = targetStaff.contact || targetStaff.phone || targetStaff.email || 'Staff Dispatch';
+  const empTypeText = targetStaff.employment_type || 'Full-time Clinical Staff';
+  const dutyStatusText = targetStaff.duty_status || targetStaff.status || 'Active';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
@@ -55,6 +63,7 @@ export default function StaffIdCard({ staffMember }) {
               type="button"
               className={`btn btn-sm ${side === 'front' ? 'btn-primary' : 'btn-ghost'}`}
               onClick={() => setSide('front')}
+              aria-pressed={side === 'front'}
               style={{ fontSize: '0.78rem', padding: '4px 12px' }}
             >
               Front Side
@@ -63,6 +72,7 @@ export default function StaffIdCard({ staffMember }) {
               type="button"
               className={`btn btn-sm ${side === 'back' ? 'btn-primary' : 'btn-ghost'}`}
               onClick={() => setSide('back')}
+              aria-pressed={side === 'back'}
               style={{ fontSize: '0.78rem', padding: '4px 12px' }}
             >
               Back Side
@@ -76,6 +86,15 @@ export default function StaffIdCard({ staffMember }) {
       {/* ── MODE 1: DIGITAL STAFF ID BADGE (CR-80 CREDIT CARD STANDARD) ── */}
       {cardMode === 'badge' && (
         <div
+          tabIndex={0}
+          role="region"
+          aria-label="Staff ID card. Press Enter or Space to flip side."
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              setSide((s) => (s === 'front' ? 'back' : 'front'));
+            }
+          }}
           style={{
             width: 380,
             maxWidth: '100%',
@@ -92,6 +111,7 @@ export default function StaffIdCard({ staffMember }) {
             flexDirection: 'column',
             justifyContent: 'space-between',
             transition: 'all 0.3s ease',
+            outline: 'none',
           }}
         >
           {/* ── FRONT SIDE DESIGN ── */}
@@ -124,6 +144,20 @@ export default function StaffIdCard({ staffMember }) {
                   <span className="badge badge-amber" style={{ fontSize: '0.62rem', padding: '2px 7px', fontWeight: 700 }}>
                     STAFF ID
                   </span>
+                  <span
+                    style={{
+                      fontSize: '0.62rem',
+                      padding: '2px 7px',
+                      fontWeight: 700,
+                      borderRadius: 4,
+                      background: 'rgba(16, 185, 129, 0.25)',
+                      color: '#6EE7B7',
+                      border: '1px solid rgba(110, 231, 183, 0.4)',
+                      textTransform: 'capitalize',
+                    }}
+                  >
+                    {dutyStatusText}
+                  </span>
                 </div>
               </div>
 
@@ -141,16 +175,16 @@ export default function StaffIdCard({ staffMember }) {
                     background: '#1e1b4b',
                     position: 'relative',
                     flexShrink: 0,
-                    cursor: targetStaff.photo ? 'pointer' : 'default',
+                    cursor: staffPhoto ? 'pointer' : 'default',
                   }}
-                  onClick={() => targetStaff.photo && setHdViewer({ open: true, url: targetStaff.photo, title: `${targetStaff.full_name} — Square DP`, badge: '1:1 Square Full HD' })}
-                  title={targetStaff.photo ? 'Click to view Full HD DP' : 'Staff Profile DP'}
+                  onClick={() => staffPhoto && setHdViewer({ open: true, url: staffPhoto, title: `${staffName} — Square DP`, badge: '1:1 Square Full HD' })}
+                  title={staffPhoto ? 'Click to view Full HD DP' : 'Staff Profile DP'}
                 >
-                  {targetStaff.photo ? (
+                  {staffPhoto ? (
                     <>
                       <img
-                        src={targetStaff.photo}
-                        alt={targetStaff.full_name}
+                        src={staffPhoto}
+                        alt={staffName}
                         style={{
                           width: '100%',
                           height: '100%',
@@ -189,7 +223,7 @@ export default function StaffIdCard({ staffMember }) {
                         fontSize: '1.4rem',
                       }}
                     >
-                      {(targetStaff.full_name || 'Staff').split(' ').map((n) => n[0]).join('')}
+                      {staffName.split(' ').map((n) => n[0]).join('')}
                     </div>
                   )}
                 </div>
@@ -207,16 +241,16 @@ export default function StaffIdCard({ staffMember }) {
                       textOverflow: 'ellipsis',
                     }}
                   >
-                    {targetStaff.full_name}
+                    {staffName}
                   </h3>
                   <div style={{ fontSize: '0.8rem', color: '#FDE047', fontWeight: 600, marginTop: 2 }}>
-                    {targetStaff.role_display}
+                    {designationText}
                   </div>
                   <div style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.75)', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {targetStaff.specialization || 'Clinical Care Specialist'}
+                    {deptText}
                   </div>
                   <div style={{ fontSize: '0.68rem', color: 'rgba(255,255,255,0.6)', marginTop: 2 }}>
-                    Contact: {targetStaff.phone || 'Staff Dispatch'}
+                    Contact: {contactText}
                   </div>
                 </div>
               </div>
@@ -237,7 +271,9 @@ export default function StaffIdCard({ staffMember }) {
                   <div>
                     ID: <strong style={{ color: 'white', fontFamily: 'var(--font-mono)' }}>{targetStaff.employee_id}</strong>
                   </div>
-                  <div style={{ fontSize: '0.62rem', opacity: 0.8 }}>Main Office · Islamabad</div>
+                  <div style={{ fontSize: '0.62rem', opacity: 0.8 }}>
+                    {empTypeText} · {targetStaff.branch || 'Islamabad Branch'}
+                  </div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
                   <div>
@@ -250,33 +286,44 @@ export default function StaffIdCard({ staffMember }) {
               </div>
             </>
           ) : (
-            /* ── BACK SIDE DESIGN ── */
+            /* ── BACK SIDE DESIGN WITH QR CODE ── */
             <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', height: '100%', fontSize: '0.72rem', lineHeight: 1.45 }}>
               <div>
                 <div style={{ fontWeight: 700, color: '#FDE047', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
                   <ShieldCheck size={14} /> Official Medical Staff Credential
                 </div>
-                <div style={{ fontSize: '0.67rem', color: 'rgba(255,255,255,0.85)', marginBottom: 8, lineHeight: 1.35 }}>
+                <div style={{ fontSize: '0.67rem', color: 'rgba(255,255,255,0.85)', marginBottom: 6, lineHeight: 1.35 }}>
                   This card certifies that the cardholder is an authorized clinical staff member of eHealth Hospital at Home. If found, please return to Islamabad Operations Center.
                 </div>
               </div>
 
-              <div style={{ background: 'rgba(0,0,0,0.25)', padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.1)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
-                  <span style={{ color: 'rgba(255,255,255,0.7)' }}>Emergency Helpline:</span>
-                  <strong style={{ color: 'white' }}>+92-21-111-CARE-OS</strong>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                <div style={{ flex: 1, background: 'rgba(0,0,0,0.25)', padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.1)', minWidth: 0 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+                    <span style={{ color: 'rgba(255,255,255,0.7)' }}>Helpline:</span>
+                    <strong style={{ color: 'white' }}>+92-21-111-CARE-OS</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+                    <span style={{ color: 'rgba(255,255,255,0.7)' }}>Department:</span>
+                    <strong style={{ color: 'white', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{deptText}</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+                    <span style={{ color: 'rgba(255,255,255,0.7)' }}>Employee ID:</span>
+                    <strong style={{ color: '#FDE047', fontFamily: 'var(--font-mono)' }}>{targetStaff.employee_id}</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: 'rgba(255,255,255,0.7)' }}>Duty Status:</span>
+                    <strong style={{ color: '#86EFAC', textTransform: 'capitalize' }}>{dutyStatusText}</strong>
+                  </div>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
-                  <span style={{ color: 'rgba(255,255,255,0.7)' }}>Department:</span>
-                  <strong style={{ color: 'white' }}>Clinical Field Care</strong>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'rgba(255,255,255,0.7)' }}>Employee ID:</span>
-                  <strong style={{ color: '#FDE047', fontFamily: 'var(--font-mono)' }}>{targetStaff.employee_id}</strong>
+
+                {/* QR Code on Back */}
+                <div style={{ flexShrink: 0 }}>
+                  <QRCodeDisplay token={targetStaff.verification_token} employeeId={targetStaff.employee_id} size={58} />
                 </div>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid rgba(255,255,255,0.15)', paddingTop: 6, marginTop: 4 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid rgba(255,255,255,0.15)', paddingTop: 6, marginTop: 2 }}>
                 <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.68rem', letterSpacing: '2px', color: 'rgba(255,255,255,0.6)' }}>
                   *{targetStaff.employee_id}*
                 </div>

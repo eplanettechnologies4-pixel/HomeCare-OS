@@ -572,17 +572,33 @@ export const ROLE_CONFIG = {
   branch_manager:  { label: 'Branch Manager',  nav: ['overview', 'bookings', 'live-tracking', 'patients', 'patient-360', 'pharmacy', 'equipment', 'lab-orders', 'lms', 'reports', 'analytics'] },
   care_manager:    { label: 'Care Manager',    nav: ['overview', 'bookings', 'live-tracking', 'patients', 'patient-360', 'therapy', 'pharmacy', 'equipment', 'lab-orders'] },
   doctor:          { label: 'Doctor',          nav: ['overview', 'patient-chart', 'pharmacy', 'equipment', 'lab-orders', 'my-docs', 'my-timesheet', 'leave-application', 'company-policies', 'call-help'] },
-  physio:          { label: 'Physiotherapist', nav: ['overview', 'patient-chart', 'pharmacy', 'equipment', 'my-docs', 'my-timesheet', 'leave-application', 'company-policies', 'call-help'] },
   physiotherapist: { label: 'Physiotherapist', nav: ['overview', 'patient-chart', 'pharmacy', 'equipment', 'my-docs', 'my-timesheet', 'leave-application', 'company-policies', 'call-help'] },
-  speech:          { label: 'Speech Therapist',nav: ['overview', 'patient-chart', 'pharmacy', 'equipment', 'my-docs', 'my-timesheet', 'leave-application', 'company-policies', 'call-help'] },
   speech_therapist:{ label: 'Speech Therapist',nav: ['overview', 'patient-chart', 'pharmacy', 'equipment', 'my-docs', 'my-timesheet', 'leave-application', 'company-policies', 'call-help'] },
-  psychologist:    { label: 'Psychotherapist', nav: ['overview', 'patient-chart', 'pharmacy', 'equipment', 'my-docs', 'my-timesheet', 'leave-application', 'company-policies', 'call-help'] },
   psychotherapist: { label: 'Psychotherapist', nav: ['overview', 'patient-chart', 'pharmacy', 'equipment', 'my-docs', 'my-timesheet', 'leave-application', 'company-policies', 'call-help'] },
   nurse:           { label: 'Nurse',           nav: ['overview', 'nurse-patient-detail', 'patient-chart', 'my-docs', 'my-reviews', 'my-trainings', 'my-complaints', 'call-help', 'leave-application', 'permission', 'resignation', 'my-timesheet', 'company-policies', 'bookings', 'live-tracking', 'patients', 'patient-360', 'pharmacy', 'equipment', 'lab-orders'] },
+  dietician:       { label: 'Dietician',       nav: ['overview', 'patient-chart', 'pharmacy', 'equipment', 'my-docs', 'my-timesheet', 'leave-application', 'company-policies', 'call-help'] },
   accountant:      { label: 'Accountant',      nav: ['overview', 'accounts', 'billing', 'reports', 'analytics'] },
   crm_executive:   { label: 'CRM Executive',   nav: ['overview', 'crm', 'reports', 'analytics'] },
   patient_family:  { label: 'Patient / Family',nav: ['family-portal'] },
 };
+
+// Aliases defined as non-enumerable properties for backward compatibility
+// without creating duplicate entries in Object.entries / dropdown selectors
+Object.defineProperty(ROLE_CONFIG, 'physio', {
+  get() { return ROLE_CONFIG.physiotherapist; },
+  enumerable: false,
+  configurable: true,
+});
+Object.defineProperty(ROLE_CONFIG, 'speech', {
+  get() { return ROLE_CONFIG.speech_therapist; },
+  enumerable: false,
+  configurable: true,
+});
+Object.defineProperty(ROLE_CONFIG, 'psychologist', {
+  get() { return ROLE_CONFIG.psychotherapist; },
+  enumerable: false,
+  configurable: true,
+});
 
 export const SYSTEM_USERS = [
   { id: 1, full_name: 'Super Administrator', email: 'admin@homecareos.com', phone: '+92-300-0000000', role: 'super_admin', role_display: 'Super Admin', branch: 'Main Office (PWD / Soan Garden, Islamabad)', status: 'active', last_login: '2026-08-28 11:30' },

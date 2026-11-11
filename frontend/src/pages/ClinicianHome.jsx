@@ -7,7 +7,9 @@ import {
 } from 'lucide-react';
 import useStore from '../store/useStore';
 import apiFetch from '../services/api';
-import { getClinicianConfig } from '../config/clinicianRoleConfig';
+import { getClinicianConfig, normalizeRole } from '../config/clinicianRoleConfig';
+import DoctorOverview from './DoctorOverview';
+import StaffIdCard from '../components/StaffIdCard';
 
 export default function ClinicianHome() {
   const currentRole = useStore((s) => s.currentRole);
@@ -16,6 +18,7 @@ export default function ClinicianHome() {
   const setSelectedPatient = useStore((s) => s.setSelectedPatient);
 
   const [data, setData] = useState(null);
+  const [employeeCard, setEmployeeCard] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
@@ -29,12 +32,19 @@ export default function ClinicianHome() {
     if (!isBackground) setLoading(true);
 
     try {
-      const res = await apiFetch('/staff-portal/clinician-home/');
+      const [res, cardRes] = await Promise.all([
+        apiFetch('/staff-portal/clinician-home/'),
+        apiFetch('/staff-portal/employee-card/'),
+      ]);
       if (!res.ok) {
         throw new Error(`Failed to load clinician dashboard (${res.status})`);
       }
       const json = await res.json();
       setData(json);
+      if (cardRes.ok) {
+        const cJson = await cardRes.json();
+        setEmployeeCard(cJson);
+      }
       setError(null);
       setLastUpdated(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
     } catch (err) {
@@ -87,6 +97,23 @@ export default function ClinicianHome() {
           <div className="skeleton" style={{ height: 260, borderRadius: 12 }} />
         </div>
       </div>
+    );
+  }
+
+  // Doctor-specific layout: renders reworked 2-column layout with Roster card & StaffIdCard
+  // Other roles (physiotherapist, speech_therapist, psychotherapist) keep the existing ClinicianHome layout below
+  const normRole = normalizeRole(currentRole);
+  if (normRole === 'doctor') {
+    return (
+      <DoctorOverview
+        data={data}
+        fetchClinicianData={fetchClinicianData}
+        lastUpdated={lastUpdated}
+        currentUser={currentUser}
+        setActivePage={setActivePage}
+        setSelectedPatient={setSelectedPatient}
+        handleOpenPatientChart={handleOpenPatientChart}
+      />
     );
   }
 
@@ -198,113 +225,61 @@ export default function ClinicianHome() {
         </div>
       </div>
 
-      {/* ── 2. Top Split: Digital ID Card & Pending Requests ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 20 }}>
-        
-        {/* Digital ID Pass */}
-        <div
-          className="card"
-          style={{
-            padding: '20px 24px',
-            borderTop: '4px solid #7C3AED',
-            background: '#FFFFFF',
-            borderRadius: 14,
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-            <span style={{ fontSize: '0.78rem', fontWeight: 800, textTransform: 'uppercase', color: '#6D28D9', letterSpacing: '0.05em' }}>
-              Digital Clinician Credential
-            </span>
-            <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#059669', background: '#ECFDF5', padding: '2px 8px', borderRadius: 999 }}>
-              Active Duty
-            </span>
-          </div>
+      {/* ── 2-COLUMN RESPONSIVE LAYOUT (Desktop: Main left, Narrow Sticky Right Column; Mobile/Tablet: Stacked) ── */}
+      <div className="clinician-layout-grid">
+        {/* ════════════════════════════════════════════════════════════════
+            MAIN COLUMN (Pending Requests, Today's Visits, High Alert, etc.)
+            ════════════════════════════════════════════════════════════════ */}
+        <div className="clinician-main-column">
 
-          <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-            <div
-              style={{
-                width: 64,
-                height: 64,
-                borderRadius: '50%',
-                background: 'linear-gradient(135deg, #7C3AED 0%, #4F46E5 100%)',
-                color: '#FFFFFF',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '1.4rem',
-                fontWeight: 800,
-                flexShrink: 0,
-              }}
-            >
-              {staff.name.split(' ').map((n) => n[0]).slice(0, 2).join('')}
+          {/* ── 2. Pending Clinical Requests ── */}
+          <div
+            className="card"
+            style={{
+              padding: '20px 24px',
+              borderTop: '4px solid #F59E0B',
+              background: '#FFFFFF',
+              borderRadius: 14,
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+              <span style={{ fontSize: '0.78rem', fontWeight: 800, textTransform: 'uppercase', color: '#B45309', letterSpacing: '0.05em' }}>
+                Pending Clinical Requests
+              </span>
+              <span style={{ fontSize: '0.75rem', fontWeight: 800, color: '#B45309', background: '#FEF3C7', padding: '2px 8px', borderRadius: 999 }}>
+                {pendingRequests.total_pending} Pending
+              </span>
             </div>
 
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 800, fontSize: '1.1rem', color: '#111827' }}>
-                {staff.name}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, textAlign: 'center' }}>
+              <div style={{ padding: '12px 8px', background: '#FFFBEB', borderRadius: 10, border: '1px solid #FDE68A' }}>
+                <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#B45309' }}>
+                  {pendingRequests.referrals?.length || 0}
+                </div>
+                <div style={{ fontSize: '0.75rem', color: '#92400E', fontWeight: 600, marginTop: 2 }}>
+                  Referrals
+                </div>
               </div>
-              <div style={{ fontSize: '0.82rem', color: '#4B5563', fontWeight: 600 }}>
-                ID: {staff.employee_id} • {staff.designation}
-              </div>
-              <div style={{ fontSize: '0.78rem', color: '#6B7280', marginTop: 4 }}>
-                Contact: {staff.contact}
-              </div>
-              <div style={{ fontSize: '0.75rem', color: '#9CA3AF', marginTop: 2 }}>
-                Status: {staff.employment_type}
-              </div>
-            </div>
-          </div>
-        </div>
 
-        {/* Pending Clinical Requests */}
-        <div
-          className="card"
-          style={{
-            padding: '20px 24px',
-            borderTop: '4px solid #F59E0B',
-            background: '#FFFFFF',
-            borderRadius: 14,
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-            <span style={{ fontSize: '0.78rem', fontWeight: 800, textTransform: 'uppercase', color: '#B45309', letterSpacing: '0.05em' }}>
-              Pending Clinical Requests
-            </span>
-            <span style={{ fontSize: '0.75rem', fontWeight: 800, color: '#B45309', background: '#FEF3C7', padding: '2px 8px', borderRadius: 999 }}>
-              {pendingRequests.total_pending} Pending
-            </span>
-          </div>
+              <div style={{ padding: '12px 8px', background: '#EFF6FF', borderRadius: 10, border: '1px solid #BFDBFE' }}>
+                <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#1D4ED8' }}>
+                  {pendingRequests.consultations?.length || 0}
+                </div>
+                <div style={{ fontSize: '0.75rem', color: '#1E40AF', fontWeight: 600, marginTop: 2 }}>
+                  Consultations
+                </div>
+              </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, textAlign: 'center' }}>
-            <div style={{ padding: '12px 8px', background: '#FFFBEB', borderRadius: 10, border: '1px solid #FDE68A' }}>
-              <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#B45309' }}>
-                {pendingRequests.referrals?.length || 0}
-              </div>
-              <div style={{ fontSize: '0.75rem', color: '#92400E', fontWeight: 600, marginTop: 2 }}>
-                Referrals
-              </div>
-            </div>
-
-            <div style={{ padding: '12px 8px', background: '#EFF6FF', borderRadius: 10, border: '1px solid #BFDBFE' }}>
-              <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#1D4ED8' }}>
-                {pendingRequests.consultations?.length || 0}
-              </div>
-              <div style={{ fontSize: '0.75rem', color: '#1E40AF', fontWeight: 600, marginTop: 2 }}>
-                Consultations
-              </div>
-            </div>
-
-            <div style={{ padding: '12px 8px', background: '#F0FDF4', borderRadius: 10, border: '1px solid #BBF7D0' }}>
-              <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#047857' }}>
-                {pendingRequests.procedures?.length || 0}
-              </div>
-              <div style={{ fontSize: '0.75rem', color: '#065F46', fontWeight: 600, marginTop: 2 }}>
-                Procedures
+              <div style={{ padding: '12px 8px', background: '#F0FDF4', borderRadius: 10, border: '1px solid #BBF7D0' }}>
+                <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#047857' }}>
+                  {pendingRequests.procedures?.length || 0}
+                </div>
+                <div style={{ fontSize: '0.75rem', color: '#065F46', fontWeight: 600, marginTop: 2 }}>
+                  Procedures
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      </div>
 
       {/* ── 3. Today's Visits Table ── */}
       <div
@@ -752,7 +727,64 @@ export default function ClinicianHome() {
           </div>
         </div>
 
-      </div>
+        </div>{/* closes Quick Links & Placeholders grid */}
+
+        </div>{/* /clinician-main-column */}
+
+        {/* ════════════════════════════════════════════════════════════════
+            NARROW STICKY RIGHT COLUMN (Contains StaffIdCard only)
+            ════════════════════════════════════════════════════════════════ */}
+        <aside className="clinician-side-column">
+          <div className="clinician-id-card-wrapper">
+            <StaffIdCard staffMember={employeeCard || staff} />
+          </div>
+        </aside>
+
+      </div>{/* /clinician-layout-grid */}
+
+      {/* Responsive Stacking & Sticky Right Column Styles for Clinician Overviews */}
+      <style>{`
+        .clinician-layout-grid {
+          display: flex;
+          flex-direction: column;
+          gap: 20px;
+        }
+        .clinician-side-column {
+          display: contents;
+        }
+        .clinician-id-card-wrapper {
+          order: 1;
+          display: flex;
+          justify-content: center;
+        }
+        .clinician-main-column {
+          order: 2;
+          display: flex;
+          flex-direction: column;
+          gap: 24px;
+          min-width: 0;
+        }
+        @media (min-width: 1024px) {
+          .clinician-layout-grid {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 380px;
+            gap: 24px;
+            align-items: start;
+          }
+          .clinician-side-column {
+            display: block;
+            position: sticky;
+            top: 24px;
+            align-self: start;
+          }
+          .clinician-id-card-wrapper {
+            order: unset;
+          }
+          .clinician-main-column {
+            order: unset;
+          }
+        }
+      `}</style>
 
     </div>
   );

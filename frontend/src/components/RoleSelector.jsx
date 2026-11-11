@@ -8,6 +8,12 @@ export default function RoleSelector() {
   const setCurrentRole = useStore((s) => s.setCurrentRole);
   const setActivePage  = useStore((s) => s.setActivePage);
 
+  const normalizedRole = {
+    physio: 'physiotherapist',
+    speech: 'speech_therapist',
+    psychologist: 'psychotherapist',
+  }[currentRole] || currentRole;
+
   const handleRoleChange = (e) => {
     const role = e.target.value;
     setCurrentRole(role);
@@ -40,7 +46,7 @@ export default function RoleSelector() {
         Role:
       </span>
       <select
-        value={currentRole}
+        value={normalizedRole}
         onChange={handleRoleChange}
         style={{
           border: 'none',

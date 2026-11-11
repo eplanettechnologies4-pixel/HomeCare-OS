@@ -419,3 +419,12 @@ CLINICAL_TIER_THRESHOLDS = {
         'temperature_max': 38.4,       # 38.1 <= Temperature <= 38.4 °C (Mildly elevated)
     },
 }
+
+# ── Roster & Scheduling Configuration ───────────────────────────────────────
+# PROVISIONAL - needs HR sign-off
+# Maximum weekly scheduled hours before warning highlight is displayed in Roster
+ROSTER_MAX_WEEKLY_HOURS = 60
+
+# Determines whether Care Managers may edit draft rosters (cannot publish)
+ROSTER_CARE_MANAGER_CAN_EDIT = False
+

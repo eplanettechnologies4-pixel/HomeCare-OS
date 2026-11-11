@@ -12,6 +12,7 @@ import EditStaffModal from '../components/EditStaffModal';
 import VisitFeedbackTab from '../components/VisitFeedbackTab';
 import ManagerChecklistTab from '../components/ManagerChecklistTab';
 import FullHdImageViewerModal from '../components/FullHdImageViewerModal';
+import StaffRosterTab from '../components/StaffRosterTab';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay } from 'date-fns';
 
 const STATUS_BADGE = {
@@ -320,6 +321,7 @@ export default function Staff() {
       <div className="tabs-bar" style={{ marginBottom: 20 }}>
         {[
           { id: 'directory', label: 'Staff Directory' },
+          { id: 'roster',    label: 'Duty Roster & Scheduling' },
           { id: 'daily-log', label: 'Daily Attendance Log' },
           { id: 'calendar',  label: 'Individual Nurse Calendar' },
           { id: 'leave',     label: 'Leave Requests' },
@@ -335,6 +337,11 @@ export default function Staff() {
           </button>
         ))}
       </div>
+
+      {/* ── 0. DUTY ROSTER & SCHEDULING TAB ─────────────────────────────────── */}
+      {activeSubTab === 'roster' && (
+        <StaffRosterTab />
+      )}
 
       {/* ── 1. STAFF DIRECTORY TAB ────────────────────────────────────────── */}
       {activeSubTab === 'directory' && (

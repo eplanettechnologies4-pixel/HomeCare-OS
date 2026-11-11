@@ -16,7 +16,7 @@ from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
 from rest_framework.views import APIView
 
 from accounts.models import AuditLog
-from bookings.models import Booking, BookingStatus
+from bookings.models import Booking, BookingStatus, ServiceMode, ServiceType
 from homecareOS.permissions import (
     IsAdminOrSuperAdmin,
     IsFinancialStaff,
@@ -28,7 +28,7 @@ from notifications.models import Notification
 from notifications.views import create_notification
 from patients.models import DoctorNote, Patient, PhysioNote, VitalSign
 from quality.models import ManagerVisitChecklist
-from staff.models import AttendanceRecord, LeaveRequest, StaffMember
+from staff.models import AttendanceRecord, LeaveRequest, StaffMember, RosterAssignment, RosterWeek
 
 from .models import (
     CompanyPolicy,
@@ -234,6 +234,38 @@ class StaffPortalHomeView(APIView):
                 'start': n_start.isoformat(),
                 'type': _derive_shift_label(n_start, n_end, tz=local_tz),
             }
+
+        # Fallback to published roster assignment for today if no direct booking active
+        if duty_state == 'off_duty':
+            today_roster = RosterAssignment.objects.filter(
+                staff=staff,
+                date=local_now.date(),
+                is_published=True,
+                is_off=False,
+            ).first()
+            if today_roster:
+                st_time = today_roster.start_time or datetime.time(8, 0)
+                en_time = today_roster.end_time or datetime.time(16, 0)
+                try:
+                    shift_start = timezone.make_aware(datetime.datetime.combine(today_roster.date, st_time), timezone=local_tz)
+                    shift_end = timezone.make_aware(
+                        datetime.datetime.combine(today_roster.date + (datetime.timedelta(days=1) if en_time <= st_time else datetime.timedelta()), en_time),
+                        timezone=local_tz
+                    )
+                except Exception:
+                    shift_start = datetime.datetime.combine(today_roster.date, st_time)
+                    shift_end = datetime.datetime.combine(today_roster.date, en_time)
+
+                duty_state = 'on_duty'
+                time_left_seconds = max(0, int((shift_end - now).total_seconds())) if now < shift_end else 0
+                current_shift_data = {
+                    'id': f"roster_{today_roster.id}",
+                    'start': shift_start.isoformat(),
+                    'end': shift_end.isoformat(),
+                    'type': today_roster.shift_name,
+                    'break_minutes': 30,
+                    'is_ended': bool(now > shift_end),
+                }
 
         duty_info = {
             'state': duty_state,
@@ -893,7 +925,73 @@ class ClinicianPortalHomeView(APIView):
             ),
         }
 
-        return Response({
+        # 6. Consultation counts (role doctor only)
+        consultation_counts = None
+        is_doctor = (user_role == 'doctor' or (staff and staff.role == 'doctor'))
+        if is_doctor:
+            doctor_service_types = [
+                ServiceType.DOCTOR_CONSULTATION,
+                ServiceType.DOCTORS,
+                'doctor_consultation',
+                'doctors',
+            ]
+            if staff:
+                doc_bookings = Booking.objects.filter(
+                    assigned_staff=staff,
+                    service_type__in=doctor_service_types,
+                ).exclude(status=BookingStatus.CANCELLED)
+            else:
+                doc_bookings = Booking.objects.none()
+
+            physical_qs = doc_bookings.exclude(service_mode=ServiceMode.ONLINE)
+
+            today_start = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+            today_end = local_now.replace(hour=23, minute=59, second=59, microsecond=999999)
+
+            days_since_monday = local_now.weekday()
+            week_start = (local_now - datetime.timedelta(days=days_since_monday)).replace(hour=0, minute=0, second=0, microsecond=0)
+            week_end = (week_start + datetime.timedelta(days=6)).replace(hour=23, minute=59, second=59, microsecond=999999)
+
+            import calendar
+            _, last_day = calendar.monthrange(local_now.year, local_now.month)
+            month_start = local_now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            month_end = local_now.replace(day=last_day, hour=23, minute=59, second=59, microsecond=999999)
+
+            scheduled_statuses = [
+                BookingStatus.ASSIGNED,
+                BookingStatus.IN_PROGRESS,
+                BookingStatus.EN_ROUTE,
+                BookingStatus.PENDING,
+                'confirmed',
+                'assigned',
+                'in_progress',
+            ]
+
+            physical_counts = {
+                'today': physical_qs.filter(scheduled_time__range=(today_start, today_end)).count(),
+                'this_week': physical_qs.filter(scheduled_time__range=(week_start, week_end)).count(),
+                'this_month': physical_qs.filter(scheduled_time__range=(month_start, month_end)).count(),
+                'total': physical_qs.count(),
+                'completed': physical_qs.filter(status=BookingStatus.COMPLETED).count(),
+                'scheduled': physical_qs.filter(status__in=scheduled_statuses).exclude(status=BookingStatus.COMPLETED).count(),
+            }
+
+            video_counts = {
+                'today': 0,
+                'this_week': 0,
+                'this_month': 0,
+                'total': 0,
+                'completed': 0,
+                'scheduled': 0,
+                'available': False,
+            }
+
+            consultation_counts = {
+                'physical': physical_counts,
+                'video': video_counts,
+            }
+
+        resp_data = {
             'staff': digital_id,
             'working_hours': working_hours,
             'today_visits': today_visits,
@@ -903,7 +1001,11 @@ class ClinicianPortalHomeView(APIView):
             'provisional_note': 'PROVISIONAL - needs clinical sign-off',
             'quick_links': quick_links,
             'placeholders': placeholders,
-        })
+        }
+        if is_doctor and consultation_counts is not None:
+            resp_data['consultation_counts'] = consultation_counts
+
+        return Response(resp_data)
 
 
 # ── 2. GET /api/staff-portal/roster/ ───────────────────────────────────────────
@@ -995,6 +1097,90 @@ class StaffPortalRosterView(APIView):
                     'phone': buddy_obj.phone,
                 } if buddy_obj and buddy_obj.id != staff.id else None,
             })
+
+        # Query published roster assignments for this staff member (staff only see published rosters)
+        published_roster = RosterAssignment.objects.filter(
+            staff=staff,
+            date__range=[start_date, end_date],
+            is_published=True,
+        ).select_related('buddy_staff')
+
+        local_tz = ZoneInfo(getattr(settings, 'OFFICE_TIMEZONE', 'Asia/Karachi'))
+
+        for assign in published_roster:
+            # If off-duty assignment, indicate off duty
+            if assign.is_off:
+                day_start = timezone.make_aware(datetime.datetime.combine(assign.date, datetime.time.min), timezone=local_tz)
+                day_end = timezone.make_aware(datetime.datetime.combine(assign.date, datetime.time.max), timezone=local_tz)
+                shifts.append({
+                    'id': f"roster_{assign.id}",
+                    'assignment_id': assign.id,
+                    'start': day_start.isoformat(),
+                    'end': day_end.isoformat(),
+                    'type': 'Off Duty',
+                    'status': 'off_duty',
+                    'is_off': True,
+                    'patient': {
+                        'id': None,
+                        'name': 'Scheduled Rest Day',
+                        'diagnosis': 'Off Duty',
+                        'location': 'Off Duty',
+                        'patient_code': 'OFF',
+                    },
+                    'supervisor': None,
+                    'transport': None,
+                    'buddy': None,
+                })
+                continue
+
+            st_time = assign.start_time or datetime.time(8, 0)
+            en_time = assign.end_time or datetime.time(16, 0)
+            try:
+                shift_start = timezone.make_aware(datetime.datetime.combine(assign.date, st_time), timezone=local_tz)
+                if en_time <= st_time:
+                    shift_end = timezone.make_aware(datetime.datetime.combine(assign.date + datetime.timedelta(days=1), en_time), timezone=local_tz)
+                else:
+                    shift_end = timezone.make_aware(datetime.datetime.combine(assign.date, en_time), timezone=local_tz)
+            except Exception:
+                shift_start = datetime.datetime.combine(assign.date, st_time)
+                shift_end = datetime.datetime.combine(assign.date, en_time)
+
+            driver_name = assign.transport_driver_name or getattr(staff, 'transport_driver_name', '') or ''
+            driver_phone = assign.transport_driver_phone or getattr(staff, 'transport_driver_phone', '') or ''
+            raw_pt = assign.transport_pickup_time or getattr(staff, 'transport_pickup_time', '') or ''
+            pickup_time = raw_pt if (raw_pt and str(raw_pt).strip()) else None
+            buddy_obj = assign.buddy_staff or getattr(staff, 'buddy_staff', None)
+
+            shifts.append({
+                'id': f"roster_{assign.id}",
+                'assignment_id': assign.id,
+                'start': shift_start.isoformat(),
+                'end': shift_end.isoformat(),
+                'type': assign.shift_name,
+                'status': 'scheduled',
+                'is_roster_shift': True,
+                'color': assign.color,
+                'patient': {
+                    'id': None,
+                    'name': 'Hospital Clinical Duty',
+                    'diagnosis': assign.shift_name,
+                    'location': assign.location or 'Hospital Branch / Clinical Field',
+                    'patient_code': 'ROSTER',
+                },
+                'supervisor': None,
+                'transport': {
+                    'driver_name': driver_name or 'Staff Transport Van',
+                    'driver_phone': driver_phone,
+                    'pickup_time': pickup_time,
+                } if (driver_name or pickup_time) else None,
+                'buddy': {
+                    'name': buddy_obj.full_name,
+                    'phone': buddy_obj.phone,
+                } if buddy_obj and buddy_obj.id != staff.id else None,
+            })
+
+        # Sort shifts by start time
+        shifts.sort(key=lambda s: s['start'])
 
         return Response({
             'view': view_mode,
@@ -1631,17 +1817,35 @@ class EmployeeCardView(APIView):
         if not staff:
             return Response({'detail': 'Staff profile required.'}, status=status.HTTP_403_FORBIDDEN)
 
+        # Strictly prevent reading another staff member's ID card via query parameter
+        target_id = request.query_params.get('id') or request.query_params.get('staff_id') or request.query_params.get('employee_id')
+        if target_id and str(target_id) not in (str(staff.id), str(staff.employee_id)):
+            return Response({'detail': 'Forbidden. Clinicians may access their own staff card only.'}, status=status.HTTP_403_FORBIDDEN)
+
         signer = signing.TimestampSigner(salt='staff-id-card')
         signed_token = signer.sign(str(staff.id))
 
         photo_url = staff.photo.url if staff.photo else None
-        role_label = staff.designation or staff.get_role_display() or 'Nurse'
+        role_label = staff.designation or staff.get_role_display() or 'Clinical Staff'
 
         return Response({
             'employee_id': staff.employee_id,
             'name': staff.full_name,
-            'role': role_label,
+            'full_name': staff.full_name,
+            'role': staff.role,
+            'role_display': role_label,
+            'designation': staff.designation or role_label,
+            'department': staff.specialization or 'Clinical Field Care',
+            'specialization': staff.specialization or 'Clinical Field Care',
+            'branch': 'Islamabad Operations Branch',
+            'contact': staff.phone or staff.email or 'Staff Dispatch',
+            'phone': staff.phone or '',
+            'email': staff.email or '',
+            'photo': photo_url,
             'photo_url': photo_url,
+            'employment_type': 'Full-time Clinical Specialist',
+            'duty_status': staff.status or 'available',
+            'status': staff.status or 'available',
             'verification_token': signed_token,
             'verify_url': f"/api/staff/verify/{signed_token}/",
         })
