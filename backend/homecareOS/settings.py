@@ -428,3 +428,7 @@ ROSTER_MAX_WEEKLY_HOURS = 60
 # Determines whether Care Managers may edit draft rosters (cannot publish)
 ROSTER_CARE_MANAGER_CAN_EDIT = False
 
+# ── Patient File Configuration ──────────────────────────────────────────────
+# display window only, not a retention or deletion policy; needs organisation records-policy sign-off
+PATIENT_FILE_DEFAULT_RECORD_WINDOW_DAYS = 183
+

@@ -296,3 +296,57 @@ def log_chart_audit(request, patient, action, section, record_id=None):
 # ================================================================================
 
 
+# ==============================================================================
+# PATIENT FILE: LEGAL GUARDIAN CONTACT VISIBILITY CONFIGURATION (A4)
+# ==============================================================================
+# Single configuration constant defining role access for guardian contact numbers:
+# - 'direct': role sees full name, relation, and phone number directly in JSON response.
+# - 'emergency_reveal': role sees name and relation; phone is withheld until
+#   an explicit emergency reveal action is triggered, which writes a security AuditLog.
+# - 'name_only': role sees name and relation only; phone number is never exposed.
+GUARDIAN_CONTACT_VISIBILITY_CONFIG = {
+    # Direct access roles: assigned doctor, patient's assigned care manager, admin, super_admin
+    'direct_roles': ('super_admin', 'admin', 'treating_doctor', 'assigned_care_manager'),
+    # Emergency reveal roles: nurse
+    'emergency_reveal_roles': ('nurse', 'nursing_assistant'),
+    # All other roles (physiotherapist, speech_therapist, psychotherapist, accountant, crm_executive)
+    # fall back to name_only.
+}
+
+
+def get_guardian_contact_visibility(user, patient):
+    """
+    Evaluates guardian contact visibility for a given user and patient.
+    Returns:
+      'direct'           -> Include full phone number
+      'emergency_reveal' -> Omit phone number; allow emergency reveal action
+      'name_only'        -> Omit phone number; no reveal action allowed
+    """
+    if not user or not user.is_authenticated:
+        return 'name_only'
+    if getattr(user, 'is_superuser', False):
+        return 'direct'
+
+    from homecareOS.permissions import get_user_role
+    role = get_user_role(user)
+
+    if role in ('super_admin', 'admin'):
+        return 'direct'
+
+    if role == 'doctor':
+        from patients.scoping import is_treating_doctor_for_patient
+        if is_treating_doctor_for_patient(user, patient):
+            return 'direct'
+
+    if role == 'care_manager':
+        from patients.scoping import is_care_manager_for_patient
+        if is_care_manager_for_patient(user, patient):
+            return 'direct'
+
+    if role in GUARDIAN_CONTACT_VISIBILITY_CONFIG['emergency_reveal_roles']:
+        return 'emergency_reveal'
+
+    return 'name_only'
+
+
+

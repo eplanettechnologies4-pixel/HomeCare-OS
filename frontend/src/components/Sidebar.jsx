@@ -8,7 +8,7 @@ import {
   Activity, Kanban, PieChart, Shield, GraduationCap,
   Pill, Truck, FlaskConical, FileText, LogOut,
   Star, AlertCircle, PhoneCall, CalendarDays, Clock, UserMinus, ShieldCheck,
-  ChevronLeft, ChevronRight
+  ChevronLeft, ChevronRight, FolderHeart
 } from 'lucide-react';
 
 const NURSE_NAV_GROUPS = [
@@ -21,6 +21,7 @@ const NURSE_NAV_GROUPS = [
   {
     title: 'Care',
     items: [
+      { id: 'patient-file',         label: 'Patient File',  icon: FolderHeart },
       { id: 'nurse-patient-detail', label: 'Patient Chart', icon: Activity },
       { id: 'call-help',            label: 'Call Help',     icon: PhoneCall },
       { id: 'my-reviews',           label: 'My Reviews',    icon: Star },
@@ -46,13 +47,14 @@ const NAV_GROUPS = [
   {
     title: 'Care',
     items: [
-      { id: 'overview',   label: 'Overview',          icon: LayoutDashboard },
-      { id: 'bookings',   label: 'Bookings',          icon: Calendar },
-      { id: 'patients',   label: 'Patients',          icon: Heart },
-      { id: 'therapy',    label: 'Therapy Services',  icon: Activity },
-      { id: 'pharmacy',   label: 'Pharmacy Orders',   icon: Pill },
-      { id: 'lab-orders', label: 'Lab Orders',        icon: FlaskConical },
-      { id: 'equipment',  label: 'Equipment Rentals', icon: Truck },
+      { id: 'overview',     label: 'Overview',          icon: LayoutDashboard },
+      { id: 'bookings',     label: 'Bookings',          icon: Calendar },
+      { id: 'patient-file', label: 'Patient File',      icon: FolderHeart },
+      { id: 'patients',     label: 'Patients',          icon: Heart },
+      { id: 'therapy',      label: 'Therapy Services',  icon: Activity },
+      { id: 'pharmacy',     label: 'Pharmacy Orders',   icon: Pill },
+      { id: 'lab-orders',   label: 'Lab Orders',        icon: FlaskConical },
+      { id: 'equipment',    label: 'Equipment Rentals', icon: Truck },
     ]
   },
   {

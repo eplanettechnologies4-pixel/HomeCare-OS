@@ -159,6 +159,7 @@ export const CLINICIAN_ROLE_CONFIG = {
       {
         title: 'Clinical Care',
         items: [
+          { id: 'patient-file',  label: 'Patient File',  icon: FolderHeart },
           { id: 'patient-chart', label: 'Patient Chart', icon: Activity },
           { id: 'pharmacy',      label: 'Pharmacy',      icon: Pill },
           { id: 'lab-orders',    label: 'Lab Orders',    icon: FlaskConical },
@@ -192,6 +193,7 @@ export const CLINICIAN_ROLE_CONFIG = {
       {
         title: 'Rehabilitation Care',
         items: [
+          { id: 'patient-file',  label: 'Patient File',  icon: FolderHeart },
           { id: 'patient-chart', label: 'Patient Chart', icon: Activity },
           { id: 'equipment',     label: 'Equipment',     icon: Truck },
           { id: 'call-help',     label: 'Emergency Call',icon: PhoneCall },
@@ -224,6 +226,7 @@ export const CLINICIAN_ROLE_CONFIG = {
       {
         title: 'Speech Pathology',
         items: [
+          { id: 'patient-file',  label: 'Patient File',  icon: FolderHeart },
           { id: 'patient-chart', label: 'Patient Chart', icon: Activity },
           { id: 'call-help',     label: 'Emergency Call',icon: PhoneCall },
         ],
@@ -255,6 +258,7 @@ export const CLINICIAN_ROLE_CONFIG = {
       {
         title: 'Mental Health & CBT',
         items: [
+          { id: 'patient-file',  label: 'Patient File',  icon: FolderHeart },
           { id: 'patient-chart', label: 'Patient Chart', icon: Activity },
           { id: 'call-help',     label: 'Emergency Call',icon: PhoneCall },
         ],
@@ -286,6 +290,7 @@ export const CLINICIAN_ROLE_CONFIG = {
       {
         title: 'Care',
         items: [
+          { id: 'patient-file',         label: 'Patient File',  icon: FolderHeart },
           { id: 'nurse-patient-detail', label: 'Patient Chart', icon: Activity },
           { id: 'call-help',            label: 'Call Help',     icon: PhoneCall },
           { id: 'my-reviews',           label: 'My Reviews',    icon: Star },
@@ -322,6 +327,7 @@ export const CLINICIAN_ROLE_CONFIG = {
       {
         title: 'Nutritional Care',
         items: [
+          { id: 'patient-file',  label: 'Patient File',  icon: FolderHeart },
           { id: 'patient-chart', label: 'Patient Chart', icon: Activity },
           { id: 'call-help',     label: 'Emergency Call',icon: PhoneCall },
         ],

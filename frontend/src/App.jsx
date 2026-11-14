@@ -39,6 +39,7 @@ import NursePolicies  from './pages/NursePolicies';
 import NurseCallHelp  from './pages/NurseCallHelp';
 import ClinicianHome  from './pages/ClinicianHome';
 import ClinicianPatientChart from './pages/ClinicianPatientChart';
+import PatientFile from './pages/PatientFile';
 import { isClinicianRole, normalizeRole, getClinicianConfig } from './config/clinicianRoleConfig';
 import { useRealtimeEvents } from './hooks/useRealtimeEvents';
 
@@ -62,6 +63,7 @@ const PAGE_META = {
   'reports':        { title: 'Reports',             subtitle: 'Operational reports and export' },
   'analytics':      { title: 'Analytics',           subtitle: 'Executive KPIs, trends, and service breakdown' },
   'users':          { title: 'Users & Permissions', subtitle: 'User accounts, role matrix, and audit trail' },
+  'patient-file':   { title: 'Patient File',        subtitle: 'Electronic Medical Record & Clinical File' },
   'nurse-patient-detail': { title: 'Patient Clinical Chart', subtitle: 'Bedside care, MAR, vitals & doctor notes' },
   'patient-chart':  { title: 'Patient Clinical Chart', subtitle: 'Electronic Medical Record & Clinical History' },
   'my-docs':        { title: 'My Documents',        subtitle: 'Digital staff card, credentials & SOPs' },
@@ -96,6 +98,7 @@ const PAGE_COMPONENTS = {
   'reports':        Reports,
   'analytics':      Analytics,
   'users':          UserManagement,
+  'patient-file':   PatientFile,
   'nurse-patient-detail': NursePatientDetail,
   'patient-chart':  ClinicianPatientChart,
   'my-docs':        NurseDocs,
@@ -186,9 +189,11 @@ export default function App() {
   const clinician = isClinicianRole(currentRole);
   const clinicianConfig = clinician ? getClinicianConfig(currentRole) : null;
   const isNurse = normalizeRole(currentRole) === 'nurse';
+  const isSupportOrFamilyRole = ['accountant', 'crm_executive', 'patient_family'].includes(currentRole);
   const isAllowed =
     isSuperAdmin ||
     allowedNav.includes(activePage) ||
+    (activePage === 'patient-file' && !isSupportOrFamilyRole) ||
     (activePage === 'patient-chart' && clinician) ||
     (activePage === 'nurse-patient-detail' && isNurse) ||
     (activePage === 'patient-360' && allowedNav.includes('patients')) ||
@@ -232,12 +237,9 @@ export default function App() {
     } else {
       PageComponent = Overview;
     }
-  } else if (activePage === 'patient-chart') {
-    PageComponent = ClinicianPatientChart;
-    meta = { title: 'Patient Clinical Chart', subtitle: 'Electronic Medical Record & Clinical History' };
-  } else if (activePage === 'nurse-patient-detail') {
-    PageComponent = NursePatientDetail;
-    meta = { title: 'Patient Clinical Chart', subtitle: 'Bedside care, MAR, vitals & doctor notes' };
+  } else if (activePage === 'patient-file' || activePage === 'patient-chart' || activePage === 'nurse-patient-detail') {
+    PageComponent = PatientFile;
+    meta = { title: 'Patient File', subtitle: 'Electronic Medical Record & Clinical File' };
   }
 
   return (

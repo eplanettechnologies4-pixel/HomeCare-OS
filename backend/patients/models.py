@@ -1,5 +1,15 @@
+import os
+import uuid
 from django.db import models
+from django.contrib.auth.models import User
 from patients.encryption import encrypt
+
+
+def patient_photo_upload_path(instance, filename):
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in ['.jpg', '.jpeg', '.png', '.webp']:
+        ext = '.jpg'
+    return f"patient_photos/{uuid.uuid4().hex}{ext}"
 
 
 class Patient(models.Model):
@@ -70,6 +80,17 @@ class Patient(models.Model):
         null=True, blank=True, related_name='managed_patients'
     )
     is_active = models.BooleanField(default=True)
+
+    # ── Patient Photo (optional, with initials fallback) ─────────────────────
+    photo = models.ImageField(upload_to=patient_photo_upload_path, null=True, blank=True)
+
+    # ── Brief History & Care Plan (additive) ──────────────────────────────────
+    brief_history = models.TextField(blank=True, default='')
+    care_plan = models.TextField(blank=True, default='')
+    history_care_plan_edits = models.JSONField(
+        default=list, blank=True,
+        help_text='Immutable audit trail of history and care plan updates'
+    )
 
     # ── Portal Login Account (optional) ──────────────────────────────────────
     portal_user = models.OneToOneField(
@@ -438,5 +459,85 @@ class ClinicalConsent(SignedClinicalEntryMixin, models.Model):
 
     def __str__(self):
         return f"Consent #{self.pk} — {self.title} for {self.patient}"
+
+
+class PatientActiveComplaint(models.Model):
+    """
+    Patient Active Complaint (Important Note).
+    Always created additively; changing it creates a new entry, never overwrites.
+    Latest unresolved entry (resolved_at is null) is the current active complaint.
+    """
+    patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name='active_complaints')
+    text = models.TextField()
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='created_patient_complaints'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    resolved_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='resolved_patient_complaints'
+    )
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        status = "Resolved" if self.resolved_at else "Active"
+        return f"Complaint #{self.pk} for {self.patient} ({status})"
+
+
+class ScheduledItem(models.Model):
+    """
+    Upcoming procedures, appointments, and blood tests for a patient.
+    """
+    class Kind(models.TextChoices):
+        PROCEDURE = 'procedure', 'Procedure'
+        APPOINTMENT = 'appointment', 'Appointment'
+        BLOOD_TEST = 'blood_test', 'Blood Test'
+
+    class Status(models.TextChoices):
+        SCHEDULED = 'scheduled', 'Scheduled'
+        DONE = 'done', 'Done'
+        CANCELLED = 'cancelled', 'Cancelled'
+
+    patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name='scheduled_items')
+    kind = models.CharField(max_length=30, choices=Kind.choices)
+    title = models.CharField(max_length=255)
+    due_at = models.DateTimeField()
+    notes = models.TextField(blank=True, default='')
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.SCHEDULED)
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='created_scheduled_items'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    done_at = models.DateTimeField(null=True, blank=True)
+    done_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='completed_scheduled_items'
+    )
+
+    # Optional foreign key links
+    staff_request = models.ForeignKey(
+        'staff_portal.StaffRequest', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='scheduled_items'
+    )
+    booking = models.ForeignKey(
+        'bookings.Booking', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='scheduled_items'
+    )
+    lab_order = models.ForeignKey(
+        'lab.LabOrder', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='scheduled_items'
+    )
+
+    class Meta:
+        ordering = ['due_at']
+
+    def __str__(self):
+        return f"ScheduledItem #{self.pk} ({self.kind}): {self.title} - {self.status}"
+
 
 

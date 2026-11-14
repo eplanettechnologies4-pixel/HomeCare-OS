@@ -18,6 +18,13 @@ const savedRole = typeof window !== 'undefined'
   ? (localStorage.getItem('currentRole') || savedUser?.role || 'nurse')
   : 'nurse';
 
+export const CLINICIAN_OR_FAMILY_ROLES = new Set([
+  'nurse', 'doctor', 'physiotherapist', 'physio',
+  'speech_therapist', 'speech', 'psychotherapist', 'psychologist',
+  'dietician', 'nutritionist', 'patient_family'
+]);
+export const isClinicianOrFamily = (role) => CLINICIAN_OR_FAMILY_ROLES.has(String(role || '').trim().toLowerCase());
+
 const useStore = create((set, get) => ({
   // ── Authentication State ──────────────────────────────────────────────────
   isAuthenticated: !!savedToken,
@@ -144,7 +151,7 @@ const useStore = create((set, get) => ({
   setWsConnected: (wsConnected) => set({ wsConnected }),
 
   fetchLiveVisits: async () => {
-    if (get().currentRole === 'nurse') return;
+    if (isClinicianOrFamily(get().currentRole)) return;
     try {
       const res = await apiFetch('/tracking/live-visits/');
       if (res.ok) {
@@ -245,7 +252,7 @@ const useStore = create((set, get) => ({
   activeSosAlerts: [],
 
   fetchActiveSOS: async () => {
-    if (get().currentRole === 'nurse') return;
+    if (isClinicianOrFamily(get().currentRole)) return;
     try {
       const res = await apiFetch('/tracking/sos/active/');
       if (res.ok) {
@@ -307,7 +314,7 @@ const useStore = create((set, get) => ({
   alertRules: ALERT_RULES,
 
   fetchAlertRules: async () => {
-    if (get().currentRole === 'nurse') return;
+    if (isClinicianOrFamily(get().currentRole)) return;
     try {
       const res = await apiFetch('/tracking/alert-rules/');
       if (res.ok) {
@@ -354,7 +361,7 @@ const useStore = create((set, get) => ({
   selectedBooking: null,
   setSelectedBooking: (b) => set({ selectedBooking: b }),
   fetchBookings: async () => {
-    if (get().currentRole === 'nurse') return get().bookings;
+    if (isClinicianOrFamily(get().currentRole)) return get().bookings;
     try {
       const res = await apiFetch('/bookings/');
       if (res.ok) {
@@ -470,7 +477,7 @@ const useStore = create((set, get) => ({
   selectedStaff: null,
   setSelectedStaff: (s_) => set({ selectedStaff: s_ }),
   fetchStaff: async () => {
-    if (get().currentRole === 'nurse') return get().staff;
+    if (isClinicianOrFamily(get().currentRole)) return get().staff;
     try {
       const res = await apiFetch('/staff/members/');
       if (res.ok) {
@@ -621,7 +628,7 @@ const useStore = create((set, get) => ({
         method: 'POST',
         body: JSON.stringify({ username, password }),
       });
-      const data = await res.json().catch(() => ({}));
+      const data = await res.json().catch(() => ({}));  
       if (res.ok) {
         // Refresh patients list so has_portal_account badge updates immediately
         await get().fetchPatients();
@@ -965,7 +972,26 @@ const useStore = create((set, get) => ({
     set({ selectedPatient: p });
   },
   fetchPatients: async () => {
-    if (get().currentRole === 'nurse') return get().patients;
+    const role = get().currentRole;
+    if (isClinicianOrFamily(role)) {
+      if (role === 'patient_family') {
+        set({ patients: [] });
+        return [];
+      }
+      try {
+        const res = await apiFetch('/staff-portal/patients/');
+        if (res.ok) {
+          const data = await res.json();
+          const items = Array.isArray(data) ? data : (data.results || []);
+          set({ patients: items });
+          return items;
+        }
+      } catch (err) {
+        console.warn('[Store] fetchPatients clinician error:', err);
+      }
+      set({ patients: [] });
+      return [];
+    }
     try {
       const res = await apiFetch('/patients/');
       if (res.ok) {
@@ -1049,9 +1075,9 @@ const useStore = create((set, get) => ({
   // ── Load All Active Data ──────────────────────────────────────────────────
   fetchAllData: async () => {
     const role = get().currentRole;
-    if (role === 'nurse') {
-      // Nurse portal overview calls staff-portal endpoints only.
-      // Global admin stores must not fetch or poll for the nurse role.
+    if (isClinicianOrFamily(role)) {
+      // Clinician and family portals call staff-portal/family endpoints only.
+      // Global admin stores must not fetch or poll for clinical or family roles.
       return;
     }
     await Promise.allSettled([
@@ -1071,7 +1097,7 @@ const useStore = create((set, get) => ({
   catalog: SERVICE_CATALOG_ITEMS,
   catalogLoaded: false,
   fetchCatalog: async () => {
-    if (get().currentRole === 'nurse') return get().catalog;
+    if (isClinicianOrFamily(get().currentRole)) return get().catalog;
     try {
       let res = await apiFetch('/services/catalog/');
       if (!res.ok) {
@@ -1386,7 +1412,7 @@ const useStore = create((set, get) => ({
   setEventsWsConnected: (connected) => set({ eventsWsConnected: connected }),
 
   fetchInvoices: async () => {
-    if (get().currentRole === 'nurse') {
+    if (isClinicianOrFamily(get().currentRole)) {
       return [];
     }
     try {

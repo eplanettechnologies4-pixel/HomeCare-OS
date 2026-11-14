@@ -60,9 +60,16 @@ export default function RoleSelector() {
         }}
         aria-label="Switch User Role"
       >
-        {Object.entries(ROLE_CONFIG).map(([key, cfg]) => (
-          <option key={key} value={key}>{cfg.label}</option>
-        ))}
+        {(() => {
+          const seen = new Set();
+          return Object.entries(ROLE_CONFIG).filter(([key, cfg]) => {
+            if (!cfg?.label || seen.has(cfg.label)) return false;
+            seen.add(cfg.label);
+            return true;
+          }).map(([key, cfg]) => (
+            <option key={key} value={key}>{cfg.label}</option>
+          ));
+        })()}
       </select>
     </div>
   );
