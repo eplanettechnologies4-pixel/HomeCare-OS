@@ -1629,7 +1629,7 @@ class PatientFileTests(APITestCase):
                 else:
                     self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN, f"{role_key} must be forbidden to write {discipline}")
 
-        # ── 7. Vitals and Intake/Output (Nurse and Doctor only)
+        # ── 7. Vitals and Intake/Output (Nurse only, doctor may read)
         for role_key, user in all_roles:
             self.client.force_authenticate(user=user)
             res = self.client.post(f"/api/patients/{self.patient_assigned.id}/vitals/", {
@@ -1639,12 +1639,11 @@ class PatientFileTests(APITestCase):
                 'intake_ml': 350,
                 'output_ml': 300,
             }, format='json')
-            if role_key in ('nurse', 'doctor_assigned'):
+            if role_key == 'nurse':
                 self.assertEqual(res.status_code, status.HTTP_201_CREATED, f"{role_key} should record vitals/intake-output")
                 v_id = res.data['id']
                 vt = VitalSign.objects.get(pk=v_id)
-                expected_staff = self.staff_members['nurse'] if role_key == 'nurse' else self.staff_members['doctor']
-                self.assertEqual(vt.recorded_by, expected_staff)
+                self.assertEqual(vt.recorded_by, self.staff_members['nurse'])
             elif role_key == 'doctor_unassigned':
                 self.assertIn(res.status_code, (status.HTTP_404_NOT_FOUND, status.HTTP_403_FORBIDDEN))
             else:
@@ -2435,16 +2434,8 @@ class PatientFileTests(APITestCase):
         self.assertEqual(rx2.verification_status, 'cancelled')
         self.assertEqual(rx2.status_reason, 'Phone order clarified')
 
-    def test_42_real_coverage_audit_clinical_write_routes_rbac(self):
-        """
-        Coverage audit for Item 8:
-        Tests every clinical write route against unauthorized roles
-        (admin, super_admin, care_manager, accountant, crm_executive, patient_family, unrelated therapist)
-        and asserts 403 Forbidden.
-        Also asserts lab specimen collection and result entry succeed for real roles (nurse, lab_tech).
-        """
-        from lab.models import LabOrder, LabTest, LabOrderStatus
-
+    def test_42_doctor_notes_rbac_and_immutability(self):
+        """Doctor notes: doctor only create/edit/delete; signed notes immutable & addendum only."""
         blocked_roles = [
             ('admin', self.users['admin']),
             ('super_admin', self.users['super_admin']),
@@ -2452,144 +2443,382 @@ class PatientFileTests(APITestCase):
             ('accountant', self.users['accountant']),
             ('crm_executive', self.users['crm_executive']),
             ('patient_family', self.users['patient_family']),
+            ('nurse', self.users['nurse']),
             ('physiotherapist', self.users['physiotherapist']),
         ]
-
-        # 1. Doctor notes create -> doctor only
+        # Unauthorized roles get 403 on create
         for rk, u in blocked_roles:
             self.client.force_authenticate(user=u)
             res = self.client.post(f"/api/patients/{self.patient_assigned.id}/doctor-notes/", {
-                'notes': f'Unauthorized doctor note by {rk}',
-                'is_signed': True
+                'notes': f'Unauthorized note by {rk}', 'is_signed': False
             }, format='json')
-            self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN, f"Role {rk} must get 403 on doctor-notes create")
+            self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
 
-        # 2. Prescriptions create (PrescriptionViewSet and patient-scoped)
-        for rk, u in [r for r in blocked_roles if r[0] != 'physiotherapist'] + [('physiotherapist', self.users['physiotherapist'])]:
+        # Assigned doctor creates unsigned note -> 201
+        self.client.force_authenticate(user=self.users['doctor'])
+        res_create = self.client.post(f"/api/patients/{self.patient_assigned.id}/doctor-notes/", {
+            'notes': 'Initial physician consult', 'plan': 'Observe', 'is_signed': False
+        }, format='json')
+        self.assertEqual(res_create.status_code, status.HTTP_201_CREATED)
+        note_id = res_create.data['id']
+
+        # GET detail -> 200
+        res_get = self.client.get(f"/api/patients/{self.patient_assigned.id}/doctor-notes/{note_id}/")
+        self.assertEqual(res_get.status_code, status.HTTP_200_OK)
+
+        # Non-doctor gets 403 on PUT/PATCH and DELETE
+        self.client.force_authenticate(user=self.users['nurse'])
+        res_nurse_put = self.client.patch(f"/api/patients/{self.patient_assigned.id}/doctor-notes/{note_id}/", {'notes': 'Nurse edit'}, format='json')
+        self.assertEqual(res_nurse_put.status_code, status.HTTP_403_FORBIDDEN)
+        res_nurse_del = self.client.delete(f"/api/patients/{self.patient_assigned.id}/doctor-notes/{note_id}/")
+        self.assertEqual(res_nurse_del.status_code, status.HTTP_403_FORBIDDEN)
+
+        # Doctor updates unsigned note -> 200
+        self.client.force_authenticate(user=self.users['doctor'])
+        res_doc_put = self.client.patch(f"/api/patients/{self.patient_assigned.id}/doctor-notes/{note_id}/", {'notes': 'Updated consult'}, format='json')
+        self.assertEqual(res_doc_put.status_code, status.HTTP_200_OK)
+
+        # Sign note
+        res_sign = self.client.post(f"/api/patients/{self.patient_assigned.id}/doctor-notes/{note_id}/sign/")
+        self.assertEqual(res_sign.status_code, status.HTTP_200_OK)
+        dn = DoctorNote.objects.get(pk=note_id)
+        self.assertTrue(dn.is_signed)
+
+        # Signed note: PUT/PATCH and DELETE return 400
+        res_signed_patch = self.client.patch(f"/api/patients/{self.patient_assigned.id}/doctor-notes/{note_id}/", {'notes': 'Tamper attempt'}, format='json')
+        self.assertEqual(res_signed_patch.status_code, status.HTTP_400_BAD_REQUEST)
+        res_signed_del = self.client.delete(f"/api/patients/{self.patient_assigned.id}/doctor-notes/{note_id}/")
+        self.assertEqual(res_signed_del.status_code, status.HTTP_400_BAD_REQUEST)
+
+        # Model level: signed note cannot be edited or deleted (raises ValidationError)
+        from django.core.exceptions import ValidationError
+        dn.notes = 'Direct model tamper'
+        with self.assertRaises(ValidationError):
+            dn.save()
+        with self.assertRaises(ValidationError):
+            dn.delete()
+
+        # Addendum route succeeds for signed note -> 200
+        res_add = self.client.post(f"/api/patients/{self.patient_assigned.id}/doctor-notes/{note_id}/addendum/", {
+            'text': 'Follow-up observation addendum', 'reason': 'Lab report reviewed'
+        }, format='json')
+        self.assertEqual(res_add.status_code, status.HTTP_200_OK)
+
+    def test_43_prescriptions_write_and_cancellation_rbac(self):
+        """Prescriptions: doctor create (verified), nurse transcribe (pending), cancel route rbac."""
+        blocked_roles = [
+            ('admin', self.users['admin']),
+            ('super_admin', self.users['super_admin']),
+            ('care_manager', self.users['care_manager']),
+            ('accountant', self.users['accountant']),
+            ('crm_executive', self.users['crm_executive']),
+            ('physiotherapist', self.users['physiotherapist']),
+        ]
+        # Unauthorized roles get 403 on create (both flat and patient-scoped)
+        for rk, u in blocked_roles:
             self.client.force_authenticate(user=u)
             res_pt = self.client.post(f"/api/patients/{self.patient_assigned.id}/prescriptions/", {
                 'medication': f'Drug by {rk}', 'dosage': '10mg', 'frequency': 'OD', 'date': self.now.date().isoformat()
             }, format='json')
-            self.assertEqual(res_pt.status_code, status.HTTP_403_FORBIDDEN, f"Role {rk} must get 403 on patient prescriptions create")
-
+            self.assertEqual(res_pt.status_code, status.HTTP_403_FORBIDDEN)
             res_pvs = self.client.post("/api/prescriptions/", {
                 'patient': self.patient_assigned.id,
                 'medication': f'Drug by {rk}', 'dosage': '10mg', 'frequency': 'OD', 'date': self.now.date().isoformat()
             }, format='json')
-            self.assertEqual(res_pvs.status_code, status.HTTP_403_FORBIDDEN, f"Role {rk} must get 403 on PrescriptionViewSet create")
+            self.assertEqual(res_pvs.status_code, status.HTTP_403_FORBIDDEN)
 
-        # 3. Nurse notes create (NurseNoteViewSet and patient-scoped) -> nurse only
+        # Nurse creates pending transcribed order via both routes -> 201
+        self.client.force_authenticate(user=self.users['nurse'])
+        res_nurse_rx1 = self.client.post(f"/api/patients/{self.patient_assigned.id}/prescriptions/", {
+            'medication': 'Amoxicillin 500mg', 'dosage': '500mg', 'frequency': 'TDS', 'date': self.now.date().isoformat(),
+            'ordering_doctor_name': 'Dr. Tariq'
+        }, format='json')
+        self.assertEqual(res_nurse_rx1.status_code, status.HTTP_201_CREATED)
+        rx1_id = res_nurse_rx1.data['id']
+
+        res_nurse_rx2 = self.client.post("/api/prescriptions/", {
+            'patient': self.patient_assigned.id,
+            'medication': 'Paracetamol 500mg', 'dosage': '500mg', 'frequency': 'BD', 'date': self.now.date().isoformat(),
+            'ordering_doctor_name': 'Dr. Tariq'
+        }, format='json')
+        self.assertEqual(res_nurse_rx2.status_code, status.HTTP_201_CREATED)
+        rx2_id = res_nurse_rx2.data['id']
+
+        # Nurse author can PATCH pending order -> 200
+        res_patch = self.client.patch(f"/api/patients/{self.patient_assigned.id}/prescriptions/{rx1_id}/", {'dosage': '250mg'}, format='json')
+        self.assertEqual(res_patch.status_code, status.HTTP_200_OK)
+
+        # Non-nurse (doctor, admin) gets 403 on PATCH
+        self.client.force_authenticate(user=self.users['doctor'])
+        res_doc_patch = self.client.patch(f"/api/patients/{self.patient_assigned.id}/prescriptions/{rx1_id}/", {'dosage': '100mg'}, format='json')
+        self.assertEqual(res_doc_patch.status_code, status.HTTP_403_FORBIDDEN)
+
+        # Cancellation via POST /cancel/ and DELETE:
+        # 1. Nurse author cancels rx1 via DELETE with reason -> 200
+        self.client.force_authenticate(user=self.users['nurse'])
+        res_nurse_del = self.client.delete(f"/api/patients/{self.patient_assigned.id}/prescriptions/{rx1_id}/", {'reason': 'Patient allergic'}, format='json')
+        self.assertEqual(res_nurse_del.status_code, status.HTTP_200_OK)
+        self.assertEqual(Prescription.objects.get(pk=rx1_id).verification_status, 'cancelled')
+
+        # 2. Non-treating doctor / admin gets 403 on cancel of pending order rx2
+        self.client.force_authenticate(user=self.users['admin'])
+        res_admin_cancel = self.client.post(f"/api/patients/{self.patient_assigned.id}/prescriptions/{rx2_id}/cancel/", {'reason': 'Admin cancel'}, format='json')
+        self.assertEqual(res_admin_cancel.status_code, status.HTTP_403_FORBIDDEN)
+
+        # 3. Treating doctor cancels pending order rx2 via POST /cancel/ with reason -> 200
+        self.client.force_authenticate(user=self.users['doctor'])
+        res_doc_cancel = self.client.post(f"/api/patients/{self.patient_assigned.id}/prescriptions/{rx2_id}/cancel/", {'reason': 'Doctor discontinued prior to verification'}, format='json')
+        self.assertEqual(res_doc_cancel.status_code, status.HTTP_200_OK)
+        self.assertEqual(Prescription.objects.get(pk=rx2_id).verification_status, 'cancelled')
+
+    def test_44_nurse_notes_rbac_and_flat_routes(self):
+        """Nurse notes: nurse only create, update, delete across flat and patient-scoped routes."""
+        blocked_roles = [
+            ('doctor', self.users['doctor']),
+            ('admin', self.users['admin']),
+            ('super_admin', self.users['super_admin']),
+            ('care_manager', self.users['care_manager']),
+            ('accountant', self.users['accountant']),
+            ('crm_executive', self.users['crm_executive']),
+            ('physiotherapist', self.users['physiotherapist']),
+        ]
+        # Unauthorized roles get 403 on create
         for rk, u in blocked_roles:
             self.client.force_authenticate(user=u)
-            res = self.client.post(f"/api/patients/{self.patient_assigned.id}/nurse-notes/", {
-                'note': f'Note by {rk}'
-            }, format='json')
-            self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN, f"Role {rk} must get 403 on nurse-notes create")
+            res_pt = self.client.post(f"/api/patients/{self.patient_assigned.id}/nurse-notes/", {'note': f'Note by {rk}'}, format='json')
+            self.assertEqual(res_pt.status_code, status.HTTP_403_FORBIDDEN)
+            res_nnv = self.client.post("/api/patients/notes/", {'patient': self.patient_assigned.id, 'note': f'Note by {rk}'}, format='json')
+            self.assertEqual(res_nnv.status_code, status.HTTP_403_FORBIDDEN)
 
-            res_nnv = self.client.post("/api/patients/notes/", {
-                'patient': self.patient_assigned.id,
-                'note': f'Note by {rk}'
-            }, format='json')
-            self.assertEqual(res_nnv.status_code, status.HTTP_403_FORBIDDEN, f"Role {rk} must get 403 on NurseNoteViewSet create")
+        # Nurse creates nurse note -> 201
+        self.client.force_authenticate(user=self.users['nurse'])
+        res_create = self.client.post("/api/patients/notes/", {'patient': self.patient_assigned.id, 'note': 'Morning bedside check'}, format='json')
+        self.assertEqual(res_create.status_code, status.HTTP_201_CREATED)
+        note_id = res_create.data['id']
 
-        # 4. Therapy notes create -> matching therapist only
-        for rk, u in [r for r in blocked_roles if r[0] != 'physiotherapist']:
+        # Clinician reads note -> 200
+        res_get = self.client.get(f"/api/patients/notes/{note_id}/")
+        self.assertEqual(res_get.status_code, status.HTTP_200_OK)
+
+        # Doctor gets 403 on PUT/PATCH and DELETE
+        self.client.force_authenticate(user=self.users['doctor'])
+        res_doc_put = self.client.patch(f"/api/patients/notes/{note_id}/", {'note': 'Doctor edit attempt'}, format='json')
+        self.assertEqual(res_doc_put.status_code, status.HTTP_403_FORBIDDEN)
+        res_doc_del = self.client.delete(f"/api/patients/notes/{note_id}/")
+        self.assertEqual(res_doc_del.status_code, status.HTTP_403_FORBIDDEN)
+
+        # Nurse updates note -> 200
+        self.client.force_authenticate(user=self.users['nurse'])
+        res_nurse_put = self.client.patch(f"/api/patients/notes/{note_id}/", {'note': 'Updated bedside check'}, format='json')
+        self.assertEqual(res_nurse_put.status_code, status.HTTP_200_OK)
+
+        # Nurse deletes note -> 204
+        res_nurse_del = self.client.delete(f"/api/patients/notes/{note_id}/")
+        self.assertEqual(res_nurse_del.status_code, status.HTTP_204_NO_CONTENT)
+
+    def test_45_therapy_notes_and_physio_notes_rbac(self):
+        """Therapy & Physio notes: matching therapist create/update, signed note immutability & addendum."""
+        blocked_roles = [
+            ('doctor', self.users['doctor']),
+            ('nurse', self.users['nurse']),
+            ('admin', self.users['admin']),
+            ('super_admin', self.users['super_admin']),
+            ('accountant', self.users['accountant']),
+            ('crm_executive', self.users['crm_executive']),
+        ]
+        # Unauthorized roles get 403 on therapy note create
+        for rk, u in blocked_roles:
             self.client.force_authenticate(user=u)
             res = self.client.post(f"/api/patients/{self.patient_assigned.id}/therapy-notes/", {
-                'discipline': 'physiotherapy',
-                'notes': f'Therapy note by {rk}'
+                'discipline': 'physiotherapy', 'notes': f'Therapy note by {rk}'
             }, format='json')
-            self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN, f"Role {rk} must get 403 on therapy-notes create")
+            self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
 
-        # 5. Vitals create (VitalSignViewSet and patient-scoped) -> nurse or doctor only
-        for rk, u in [('accountant', self.users['accountant']), ('crm_executive', self.users['crm_executive']), ('patient_family', self.users['patient_family']), ('physiotherapist', self.users['physiotherapist'])]:
-            self.client.force_authenticate(user=u)
-            res = self.client.post(f"/api/patients/{self.patient_assigned.id}/vitals/", {
-                'heart_rate': 75, 'blood_pressure_systolic': 120, 'blood_pressure_diastolic': 80
-            }, format='json')
-            self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN, f"Role {rk} must get 403 on vitals create")
+        # Physiotherapist creates therapy note -> 201
+        self.client.force_authenticate(user=self.users['physiotherapist'])
+        res_create = self.client.post(f"/api/patients/{self.patient_assigned.id}/therapy-notes/", {
+            'discipline': 'physiotherapy', 'session_notes': 'Gait training session', 'mobility_status': 'Fair', 'is_signed': False
+        }, format='json')
+        self.assertEqual(res_create.status_code, status.HTTP_201_CREATED)
+        note_id = res_create.data['id']
 
-            res_vsv = self.client.post("/api/patients/vitals/", {
-                'patient': self.patient_assigned.id,
-                'heart_rate': 75, 'blood_pressure_systolic': 120, 'blood_pressure_diastolic': 80
-            }, format='json')
-            self.assertEqual(res_vsv.status_code, status.HTTP_403_FORBIDDEN, f"Role {rk} must get 403 on VitalSignViewSet create")
+        # GET detail -> 200
+        res_get = self.client.get(f"/api/patients/{self.patient_assigned.id}/therapy-notes/{note_id}/")
+        self.assertEqual(res_get.status_code, status.HTTP_200_OK)
 
-        # 6. Lab orders create (LabResultViewSet and patient-scoped) -> doctor only
+        # Non-therapist gets 403 on PUT/PATCH and DELETE
+        self.client.force_authenticate(user=self.users['nurse'])
+        res_nurse_patch = self.client.patch(f"/api/patients/{self.patient_assigned.id}/therapy-notes/{note_id}/", {'session_notes': 'Nurse edit'}, format='json')
+        self.assertEqual(res_nurse_patch.status_code, status.HTTP_403_FORBIDDEN)
+        res_nurse_del = self.client.delete(f"/api/patients/{self.patient_assigned.id}/therapy-notes/{note_id}/")
+        self.assertEqual(res_nurse_del.status_code, status.HTTP_403_FORBIDDEN)
+
+        # Physiotherapist updates unsigned note -> 200
+        self.client.force_authenticate(user=self.users['physiotherapist'])
+        res_pt_patch = self.client.patch(f"/api/patients/{self.patient_assigned.id}/therapy-notes/{note_id}/", {'session_notes': 'Updated gait session'}, format='json')
+        self.assertEqual(res_pt_patch.status_code, status.HTTP_200_OK)
+
+        # Sign therapy note
+        res_sign = self.client.post(f"/api/patients/{self.patient_assigned.id}/therapy-notes/{note_id}/sign/")
+        self.assertEqual(res_sign.status_code, status.HTTP_200_OK)
+
+        # Signed note: PUT/PATCH and DELETE return 400
+        res_signed_patch = self.client.patch(f"/api/patients/{self.patient_assigned.id}/therapy-notes/{note_id}/", {'session_notes': 'Tamper attempt'}, format='json')
+        self.assertEqual(res_signed_patch.status_code, status.HTTP_400_BAD_REQUEST)
+        res_signed_del = self.client.delete(f"/api/patients/{self.patient_assigned.id}/therapy-notes/{note_id}/")
+        self.assertEqual(res_signed_del.status_code, status.HTTP_400_BAD_REQUEST)
+
+        # PhysioNote read & addendum routes
+        # 1. GET /api/patients/{id}/physio-notes/ -> 200
+        res_pn_list = self.client.get(f"/api/patients/{self.patient_assigned.id}/physio-notes/")
+        self.assertEqual(res_pn_list.status_code, status.HTTP_200_OK)
+
+        # 2. GET /api/patients/{id}/records/rehabilitation_notes/pn-{id}/ -> 200
+        res_pn_single = self.client.get(f"/api/patients/{self.patient_assigned.id}/records/rehabilitation_notes/pn-{self.physio_note.id}/")
+        self.assertEqual(res_pn_single.status_code, status.HTTP_200_OK)
+
+        # 3. Model level immutability on signed PhysioNote
+        from django.core.exceptions import ValidationError
+        self.physio_note.is_signed = True
+        self.physio_note.signed_by = self.staff_members['physiotherapist']
+        self.physio_note.save()
+        self.physio_note.session_notes = 'Tampered notes'
+        with self.assertRaises(ValidationError):
+            self.physio_note.save()
+        with self.assertRaises(ValidationError):
+            self.physio_note.delete()
+
+        # 4. POST addendum to signed PhysioNote -> 200/201
+        res_pn_add = self.client.post(f"/api/patients/{self.patient_assigned.id}/records/rehabilitation_notes/pn-{self.physio_note.id}/addendum/", {
+            'text': 'Post-exercise recovery observation', 'reason': 'Late note on patient response'
+        }, format='json')
+        self.assertIn(res_pn_add.status_code, (status.HTTP_200_OK, status.HTTP_201_CREATED))
+
+    def test_46_vitals_and_intake_output_rbac_nurse_only(self):
+        """Vitals and Intake/Output: nurse only create, update, delete. Doctor gets 403 on write."""
+        blocked_roles = [
+            ('doctor', self.users['doctor']),
+            ('admin', self.users['admin']),
+            ('super_admin', self.users['super_admin']),
+            ('accountant', self.users['accountant']),
+            ('crm_executive', self.users['crm_executive']),
+            ('patient_family', self.users['patient_family']),
+            ('physiotherapist', self.users['physiotherapist']),
+        ]
+        # Unauthorized roles get 403 on create (both flat and patient-scoped)
         for rk, u in blocked_roles:
             self.client.force_authenticate(user=u)
-            res = self.client.post(f"/api/patients/{self.patient_assigned.id}/labs/", {
+            res_pt = self.client.post(f"/api/patients/{self.patient_assigned.id}/vitals/", {
+                'heart_rate': 75, 'blood_pressure_systolic': 120, 'blood_pressure_diastolic': 80,
+                'intake_ml': 500, 'output_ml': 450
+            }, format='json')
+            self.assertEqual(res_pt.status_code, status.HTTP_403_FORBIDDEN, f"Role {rk} must get 403 on vitals write")
+            res_vsv = self.client.post("/api/patients/vitals/", {
+                'patient': self.patient_assigned.id,
+                'heart_rate': 75, 'blood_pressure_systolic': 120, 'blood_pressure_diastolic': 80,
+                'intake_ml': 500, 'output_ml': 450
+            }, format='json')
+            self.assertEqual(res_vsv.status_code, status.HTTP_403_FORBIDDEN, f"Role {rk} must get 403 on VitalSignViewSet write")
+
+        # Nurse records vitals & fluid balance -> 201
+        self.client.force_authenticate(user=self.users['nurse'])
+        res_create = self.client.post("/api/patients/vitals/", {
+            'patient': self.patient_assigned.id,
+            'heart_rate': 78, 'blood_pressure_systolic': 125, 'blood_pressure_diastolic': 82,
+            'intake_ml': 600, 'output_ml': 500
+        }, format='json')
+        self.assertEqual(res_create.status_code, status.HTTP_201_CREATED)
+        vital_id = res_create.data['id']
+
+        # Doctor can read vitals -> 200
+        self.client.force_authenticate(user=self.users['doctor'])
+        res_doc_get = self.client.get(f"/api/patients/vitals/{vital_id}/")
+        self.assertEqual(res_doc_get.status_code, status.HTTP_200_OK)
+
+        # Doctor gets 403 on PUT/PATCH and DELETE
+        res_doc_put = self.client.patch(f"/api/patients/vitals/{vital_id}/", {'heart_rate': 85}, format='json')
+        self.assertEqual(res_doc_put.status_code, status.HTTP_403_FORBIDDEN)
+        res_doc_del = self.client.delete(f"/api/patients/vitals/{vital_id}/")
+        self.assertEqual(res_doc_del.status_code, status.HTTP_403_FORBIDDEN)
+
+        # Nurse updates vital/intake-output record -> 200
+        self.client.force_authenticate(user=self.users['nurse'])
+        res_nurse_patch = self.client.patch(f"/api/patients/vitals/{vital_id}/", {'heart_rate': 80, 'intake_ml': 650}, format='json')
+        self.assertEqual(res_nurse_patch.status_code, status.HTTP_200_OK)
+
+        # Nurse deletes vital record -> 204
+        res_nurse_del = self.client.delete(f"/api/patients/vitals/{vital_id}/")
+        self.assertEqual(res_nurse_del.status_code, status.HTTP_204_NO_CONTENT)
+
+    def test_47_labs_ordering_collection_and_upload_rbac(self):
+        """Lab orders, specimen collection (nurse, lab_tech) and report upload (lab_tech, doctor). Admin 403 on upload."""
+        blocked_order_roles = [
+            ('nurse', self.users['nurse']),
+            ('admin', self.users['admin']),
+            ('super_admin', self.users['super_admin']),
+            ('accountant', self.users['accountant']),
+            ('crm_executive', self.users['crm_executive']),
+            ('physiotherapist', self.users['physiotherapist']),
+        ]
+        # 1. Lab orders create: doctor only
+        for rk, u in blocked_order_roles:
+            self.client.force_authenticate(user=u)
+            res_pt = self.client.post(f"/api/patients/{self.patient_assigned.id}/labs/", {
                 'test_name': 'CBC', 'result_value': '12.0'
             }, format='json')
-            self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN, f"Role {rk} must get 403 on labs create")
-
+            self.assertEqual(res_pt.status_code, status.HTTP_403_FORBIDDEN)
             res_lrv = self.client.post("/api/patients/labs/", {
-                'patient': self.patient_assigned.id,
-                'test_name': 'CBC', 'result_value': '12.0',
-                'collected_at': self.now.isoformat(),
+                'patient': self.patient_assigned.id, 'test_name': 'CBC', 'result_value': '12.0',
+                'collected_at': self.now.isoformat()
             }, format='json')
-            self.assertEqual(res_lrv.status_code, status.HTTP_403_FORBIDDEN, f"Role {rk} must get 403 on LabResultViewSet create")
+            self.assertEqual(res_lrv.status_code, status.HTTP_403_FORBIDDEN)
 
-        # 7. Consent and referral create -> doctor only (care_manager allowed for referral)
-        for rk, u in [('admin', self.users['admin']), ('super_admin', self.users['super_admin']), ('accountant', self.users['accountant']), ('crm_executive', self.users['crm_executive']), ('physiotherapist', self.users['physiotherapist'])]:
-            self.client.force_authenticate(user=u)
-            res_c = self.client.post(f"/api/patients/{self.patient_assigned.id}/consents/", {
-                'title': f'Consent by {rk}', 'consent_type': 'Treatment', 'is_signed': True
-            }, format='json')
-            self.assertEqual(res_c.status_code, status.HTTP_403_FORBIDDEN, f"Role {rk} must get 403 on consent create")
+        # Doctor creates lab result -> 201
+        self.client.force_authenticate(user=self.users['doctor'])
+        res_doc_lab = self.client.post("/api/patients/labs/", {
+            'patient': self.patient_assigned.id, 'test_name': 'Serum Creatinine', 'result_value': '1.1',
+            'collected_at': self.now.isoformat()
+        }, format='json')
+        self.assertEqual(res_doc_lab.status_code, status.HTTP_201_CREATED)
+        lab_res_id = res_doc_lab.data['id']
 
-            res_r = self.client.post(f"/api/patients/{self.patient_assigned.id}/referrals/", {
-                'notes': f'Referral notes by {rk}', 'details': 'Cardiology consult'
-            }, format='json')
-            self.assertEqual(res_r.status_code, status.HTTP_403_FORBIDDEN, f"Role {rk} must get 403 on referral create")
+        # Nurse gets 403 on PUT/PATCH and DELETE
+        self.client.force_authenticate(user=self.users['nurse'])
+        res_nurse_put = self.client.patch(f"/api/patients/labs/{lab_res_id}/", {'result_value': '1.2'}, format='json')
+        self.assertEqual(res_nurse_put.status_code, status.HTTP_403_FORBIDDEN)
+        res_nurse_del = self.client.delete(f"/api/patients/labs/{lab_res_id}/")
+        self.assertEqual(res_nurse_del.status_code, status.HTTP_403_FORBIDDEN)
 
-        # 8. MAR administer -> nurse only
-        test_rx = Prescription.objects.create(
-            patient=self.patient_assigned,
-            medication='Test MAR Drug',
-            dosage='10mg',
-            frequency='OD',
-            date=self.now.date(),
-            verification_status='verified',
-            verified_at=self.now
-        )
-        for rk, u in [('admin', self.users['admin']), ('super_admin', self.users['super_admin']), ('care_manager', self.users['care_manager']), ('accountant', self.users['accountant']), ('crm_executive', self.users['crm_executive']), ('physiotherapist', self.users['physiotherapist'])]:
-            self.client.force_authenticate(user=u)
-            res_mar = self.client.post(f"/api/patients/{self.patient_assigned.id}/mar/administer/", {
-                'prescription_id': test_rx.id,
-                'day_number': 1
-            }, format='json')
-            self.assertEqual(res_mar.status_code, status.HTTP_403_FORBIDDEN, f"Role {rk} must get 403 on MAR administer")
+        # Doctor updates lab result -> 200, deletes -> 204
+        self.client.force_authenticate(user=self.users['doctor'])
+        res_doc_patch = self.client.patch(f"/api/patients/labs/{lab_res_id}/", {'result_value': '1.0'}, format='json')
+        self.assertEqual(res_doc_patch.status_code, status.HTTP_200_OK)
+        res_doc_del = self.client.delete(f"/api/patients/labs/{lab_res_id}/")
+        self.assertEqual(res_doc_del.status_code, status.HTTP_204_NO_CONTENT)
 
-        # 9. Lab specimen collection and result entry:
-        lab_test = LabTest.objects.create(name='CBC Test', price=1000)
+        # 2. Lab specimen collection: nurse and lab_tech allowed; others 403
+        from lab.models import LabOrder, LabTest, LabOrderStatus
+        lab_test = LabTest.objects.create(name='Liver Function Test', price=1500)
         lab_order = LabOrder.objects.create(
-            patient=self.patient_assigned,
-            scheduled_collection_time=self.now,
-            status=LabOrderStatus.REQUESTED
+            patient=self.patient_assigned, scheduled_collection_time=self.now, status=LabOrderStatus.REQUESTED
         )
         lab_order.tests.set([lab_test])
 
-        # Blocked roles on collect-sample
         for rk, u in [('accountant', self.users['accountant']), ('crm_executive', self.users['crm_executive']), ('physiotherapist', self.users['physiotherapist'])]:
             self.client.force_authenticate(user=u)
-            res_cs = self.client.post(f"/api/lab/orders/{lab_order.id}/collect-sample/", {
-                'lat': 33.6844, 'lng': 73.0479
-            }, format='json')
-            self.assertEqual(res_cs.status_code, status.HTTP_403_FORBIDDEN, f"Role {rk} must get 403 on collect-sample")
+            res_cs = self.client.post(f"/api/lab/orders/{lab_order.id}/collect-sample/", {'lat': 33.6844, 'lng': 73.0479}, format='json')
+            self.assertEqual(res_cs.status_code, status.HTTP_403_FORBIDDEN)
 
-        # Nurse collects sample -> 200 OK
+        # Nurse collects sample -> 200
         self.client.force_authenticate(user=self.users['nurse'])
         res_nurse_collect = self.client.post(f"/api/lab/orders/{lab_order.id}/collect-sample/", {
             'lat': 33.6844, 'lng': 73.0479, 'notes': 'Sample collected by nurse'
         }, format='json')
         self.assertEqual(res_nurse_collect.status_code, status.HTTP_200_OK)
 
-        # Lab tech collects sample on another order -> 200 OK
+        # Lab tech collects sample on order 2 -> 200
         lab_order2 = LabOrder.objects.create(
-            patient=self.patient_assigned,
-            scheduled_collection_time=self.now,
-            status=LabOrderStatus.REQUESTED
+            patient=self.patient_assigned, scheduled_collection_time=self.now, status=LabOrderStatus.REQUESTED
         )
         lab_order2.tests.set([lab_test])
         self.client.force_authenticate(user=self.users['lab_tech'])
@@ -2598,20 +2827,133 @@ class PatientFileTests(APITestCase):
         }, format='json')
         self.assertEqual(res_tech_collect.status_code, status.HTTP_200_OK)
 
-        # Blocked roles on upload-report
-        for rk, u in [('accountant', self.users['accountant']), ('crm_executive', self.users['crm_executive']), ('physiotherapist', self.users['physiotherapist']), ('nurse', self.users['nurse'])]:
+        # 3. Lab report upload: lab_tech and doctor allowed; admin and super_admin get 403
+        for rk, u in [('admin', self.users['admin']), ('super_admin', self.users['super_admin']), ('nurse', self.users['nurse']), ('accountant', self.users['accountant'])]:
             self.client.force_authenticate(user=u)
             res_up = self.client.post(f"/api/lab/orders/{lab_order.id}/upload-report/", {
-                'result_data': json.dumps({'CBC Test': 'Normal'})
+                'result_data': json.dumps({'LFT': 'Normal'})
             }, format='json')
             self.assertEqual(res_up.status_code, status.HTTP_403_FORBIDDEN, f"Role {rk} must get 403 on upload-report")
 
-        # Lab tech uploads report -> 201 OK
+        # Lab tech uploads report -> 201
         self.client.force_authenticate(user=self.users['lab_tech'])
         res_tech_up = self.client.post(f"/api/lab/orders/{lab_order.id}/upload-report/", {
-            'result_data': json.dumps({'CBC Test': 'Hb: 14.2 g/dL'})
+            'result_data': json.dumps({'LFT': 'Bilirubin 0.8 mg/dL'})
         }, format='json')
         self.assertEqual(res_tech_up.status_code, status.HTTP_201_CREATED)
+
+        # Doctor uploads report -> 201
+        self.client.force_authenticate(user=self.users['doctor'])
+        res_doc_up = self.client.post(f"/api/lab/orders/{lab_order2.id}/upload-report/", {
+            'result_data': json.dumps({'LFT': 'ALT: 30 U/L'})
+        }, format='json')
+        self.assertEqual(res_doc_up.status_code, status.HTTP_201_CREATED)
+
+    def test_48_consents_and_referrals_rbac(self):
+        """Consents (doctor only, signed consent immutability) and referrals (doctor and care manager)."""
+        blocked_consent_roles = [
+            ('nurse', self.users['nurse']),
+            ('care_manager', self.users['care_manager']),
+            ('admin', self.users['admin']),
+            ('super_admin', self.users['super_admin']),
+            ('accountant', self.users['accountant']),
+            ('crm_executive', self.users['crm_executive']),
+        ]
+        # 1. Consents: doctor only
+        for rk, u in blocked_consent_roles:
+            self.client.force_authenticate(user=u)
+            res = self.client.post(f"/api/patients/{self.patient_assigned.id}/consents/", {
+                'title': f'Consent by {rk}', 'consent_type': 'Treatment', 'is_signed': True
+            }, format='json')
+            self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+
+        self.client.force_authenticate(user=self.users['doctor'])
+        res_consent = self.client.post(f"/api/patients/{self.patient_assigned.id}/consents/", {
+            'title': 'Surgical Consent', 'consent_type': 'Treatment', 'is_signed': True
+        }, format='json')
+        self.assertEqual(res_consent.status_code, status.HTTP_201_CREATED)
+        consent_id = res_consent.data['id']
+
+        # Signed consent is immutable at model level
+        from django.core.exceptions import ValidationError
+        cs = ClinicalConsent.objects.get(pk=consent_id)
+        cs.title = 'Tampered consent'
+        with self.assertRaises(ValidationError):
+            cs.save()
+        with self.assertRaises(ValidationError):
+            cs.delete()
+
+        # 2. Referrals: doctor only; care_manager/nurse/admin/accountant get 403
+        for rk, u in [('nurse', self.users['nurse']), ('admin', self.users['admin']), ('accountant', self.users['accountant']), ('care_manager', self.users['care_manager'])]:
+            self.client.force_authenticate(user=u)
+            res_ref_block = self.client.post(f"/api/patients/{self.patient_assigned.id}/referrals/", {
+                'notes': f'Referral by {rk}', 'details': 'Cardiology consult'
+            }, format='json')
+            self.assertEqual(res_ref_block.status_code, status.HTTP_403_FORBIDDEN)
+
+        self.client.force_authenticate(user=self.users['doctor'])
+        res_ref_doc = self.client.post(f"/api/patients/{self.patient_assigned.id}/referrals/", {
+            'notes': 'Cardiology referral', 'details': 'Evaluate murmur'
+        }, format='json')
+        self.assertEqual(res_ref_doc.status_code, status.HTTP_201_CREATED)
+
+    def test_49_management_routes_history_complaints_scheduled_items(self):
+        """Management actions: history-care-plan, active-complaint, scheduled-items rbac and workflow."""
+        # 1. History and Care Plan
+        # Nurse gets 403
+        self.client.force_authenticate(user=self.users['nurse'])
+        res_hcp_nurse = self.client.post(f"/api/patients/{self.patient_assigned.id}/history-care-plan/", {
+            'section': 'brief_history', 'text': 'Nurse history edit'
+        }, format='json')
+        self.assertEqual(res_hcp_nurse.status_code, status.HTTP_403_FORBIDDEN)
+
+        # Doctor updates history -> 200, appends to immutable audit trail
+        self.client.force_authenticate(user=self.users['doctor'])
+        res_hcp_doc = self.client.post(f"/api/patients/{self.patient_assigned.id}/history-care-plan/", {
+            'section': 'brief_history', 'text': 'Hypertensive patient with post-stroke care'
+        }, format='json')
+        self.assertEqual(res_hcp_doc.status_code, status.HTTP_200_OK)
+        pt = Patient.objects.get(pk=self.patient_assigned.id)
+        self.assertEqual(len(pt.history_care_plan_edits), 1)
+
+        # 2. Active complaint
+        # Nurse gets 403
+        self.client.force_authenticate(user=self.users['nurse'])
+        res_ac_nurse = self.client.post(f"/api/patients/{self.patient_assigned.id}/active-complaint/", {
+            'action': 'create', 'text': 'Nurse complaint'
+        }, format='json')
+        self.assertEqual(res_ac_nurse.status_code, status.HTTP_403_FORBIDDEN)
+
+        # Care manager creates active complaint -> 201/200
+        self.client.force_authenticate(user=self.users['care_manager'])
+        res_ac_cm = self.client.post(f"/api/patients/{self.patient_assigned.id}/active-complaint/", {
+            'action': 'create', 'text': 'Difficulty swallowing solids'
+        }, format='json')
+        self.assertIn(res_ac_cm.status_code, (status.HTTP_200_OK, status.HTTP_201_CREATED))
+
+        # 3. Scheduled items
+        # Nurse gets 403 on schedule create
+        self.client.force_authenticate(user=self.users['nurse'])
+        res_si_nurse = self.client.post(f"/api/patients/{self.patient_assigned.id}/scheduled-items/", {
+            'kind': 'procedure', 'title': 'Wound dressing', 'due_at': self.now.isoformat()
+        }, format='json')
+        self.assertEqual(res_si_nurse.status_code, status.HTTP_403_FORBIDDEN)
+
+        # Care manager schedules procedure item -> 201
+        self.client.force_authenticate(user=self.users['care_manager'])
+        res_si_create = self.client.post(f"/api/patients/{self.patient_assigned.id}/scheduled-items/", {
+            'kind': 'procedure', 'title': 'Daily antiseptic dressing', 'due_at': self.now.isoformat()
+        }, format='json')
+        self.assertEqual(res_si_create.status_code, status.HTTP_201_CREATED)
+        item_id = res_si_create.data['id']
+
+        # Nurse marks procedure done -> 200
+        self.client.force_authenticate(user=self.users['nurse'])
+        res_mark_done = self.client.patch(f"/api/patients/{self.patient_assigned.id}/scheduled-items/{item_id}/", {
+            'status': 'done'
+        }, format='json')
+        self.assertEqual(res_mark_done.status_code, status.HTTP_200_OK)
+        self.assertEqual(ScheduledItem.objects.get(pk=item_id).status, 'done')
 
 
 

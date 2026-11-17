@@ -44,7 +44,7 @@ export default function PrescriptionsTab({ patient }) {
 
   // RBAC permissions
   const isDoctor = currentRole === 'doctor';
-  const isNurse = ['nurse', 'nursing_assistant'].includes(currentRole);
+  const isNurse = currentRole === 'nurse';
   const canAdd = isDoctor || isNurse;
   // Physical deletion is removed; old UI button hidden
   const canDelete = false;
@@ -400,7 +400,7 @@ export default function PrescriptionsTab({ patient }) {
                             Discontinue
                           </button>
                         )}
-                        {isNurse && rx.verification_status === 'pending_verification' && (
+                        {(isDoctor || isNurse) && rx.verification_status === 'pending_verification' && (
                           <button
                             className="btn btn-ghost btn-sm"
                             style={{ padding: '3px 8px', fontSize: '0.75rem', color: '#DC2626' }}

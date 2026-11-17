@@ -56,7 +56,6 @@ ROLE_ALIASES = {
     'psychologist': 'psychotherapist',
     'psychotherapist': 'psychotherapist',
     'nurse': 'nurse',
-    'nursing_assistant': 'nurse',
     'doctor': 'doctor',
     'dietician': 'dietician',
     'nutritionist': 'dietician',
@@ -92,8 +91,8 @@ CLINICAL_WRITE_ROLES = {
         'nutrition': ('dietician',),
     },
     'therapy_notes_all': ('physiotherapist', 'speech_therapist', 'psychotherapist', 'dietician'),
-    'vitals': ('nurse', 'doctor'),     # Nurse and doctor
-    'intake_output': ('nurse', 'doctor'), # Nurse and doctor
+    'vitals': ('nurse',),              # Nurse only (doctor may read)
+    'intake_output': ('nurse',),       # Nurse only (doctor may read)
     'nurse_notes': ('nurse',),         # Nurse only
     'mar_administer': ('nurse',),      # Nurse only
     # Management actions (unchanged):
@@ -462,7 +461,7 @@ GUARDIAN_CONTACT_VISIBILITY_CONFIG = {
     # Direct access roles: assigned doctor, patient's assigned care manager, admin, super_admin
     'direct_roles': ('super_admin', 'admin', 'treating_doctor', 'assigned_care_manager'),
     # Emergency reveal roles: nurse
-    'emergency_reveal_roles': ('nurse', 'nursing_assistant'),
+    'emergency_reveal_roles': ('nurse',),
     # All other roles (physiotherapist, speech_therapist, psychotherapist, accountant, crm_executive)
     # fall back to name_only.
 }

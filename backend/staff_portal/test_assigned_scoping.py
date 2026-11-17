@@ -445,7 +445,7 @@ class AssignedPatientScopingTests(TestCase):
         Tests every role across assigned and unassigned patients:
         - Doctors, Care Managers, Branch Managers, Admins, Super Admins, Physios,
           Lab Techs, Delivery Riders, Accountants, and CRM retain unrestricted access (200).
-        - Field nurse roles (nurse, nursing_assistant) are restricted (404 for unassigned).
+        - Field nurse role (nurse) is restricted (404 for unassigned).
         """
         role_configs = [
             ('doc_user2', StaffRole.DOCTOR, False),
@@ -493,13 +493,13 @@ class AssignedPatientScopingTests(TestCase):
         self.assertEqual(self.client.get(f"/api/patients/{self.patient_a.id}/").status_code, status.HTTP_200_OK)
         self.assertEqual(self.client.get(f"/api/patients/{self.patient_b.id}/").status_code, status.HTTP_200_OK)
 
-        # 3. Nursing Assistant (restricted like nurse)
+        # 3. Unassigned Nurse (restricted: 404 for unassigned)
         na_user = User.objects.create_user(username='na_zahra', password='TestPassword123!')
         StaffMember.objects.create(
             user=na_user,
             first_name='Zahra',
             last_name='Assistant',
-            role='nursing_assistant',
+            role='nurse',
             employee_id='NA-001',
             hire_date=datetime.date(2025, 1, 1),
             platform_allowed='both',

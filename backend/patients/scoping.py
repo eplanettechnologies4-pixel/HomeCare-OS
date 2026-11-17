@@ -29,11 +29,11 @@ def is_field_nurse_user(user):
 
     from homecareOS.permissions import get_user_role
     role = get_user_role(user)
-    if role in ('nurse', 'nursing_assistant'):
+    if role == 'nurse':
         return True
 
     staff = getattr(user, 'staffmember', None)
-    if staff and staff.role in ('nurse', 'nursing_assistant'):
+    if staff and staff.role == 'nurse':
         return True
 
     return False
@@ -119,7 +119,7 @@ def filter_queryset_for_nurse(qs, user, patient_field='patient', now=None):
 # ── Clinician Portal Shared Scoping (Phase 1) ─────────────────────────────────
 
 CLINICAL_ROLES = (
-    'nurse', 'nursing_assistant',
+    'nurse',
     'doctor',
     'physio', 'physiotherapist',
     'speech', 'speech_therapist',

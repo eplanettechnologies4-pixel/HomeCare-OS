@@ -7,7 +7,7 @@
  *   2. physiotherapist (alias: physio)
  *   3. speech_therapist (alias: speech)
  *   4. psychotherapist (alias: psychologist)
- *   5. nurse (alias: nursing_assistant)
+ *   5. nurse
  *
  * NOTE: Mirrored by backend clinician_permissions.py.
  * Frontend permissions control UI display; backend enforces strict object-level security.
@@ -28,7 +28,6 @@ export const ROLE_NORMALIZATION = {
   psychologist: 'psychotherapist',
   psychotherapist: 'psychotherapist',
   nurse: 'nurse',
-  nursing_assistant: 'nurse',
   dietician: 'dietician',
   nutritionist: 'dietician',
 };
@@ -67,8 +66,8 @@ export const CLINICAL_WRITE_ROLES = {
   referrals: ['doctor'],
   consents: ['doctor'],
   therapy_notes: ['physiotherapist', 'speech_therapist', 'psychotherapist', 'dietician'],
-  vitals: ['nurse', 'doctor'],
-  intake_output: ['nurse', 'doctor'],
+  vitals: ['nurse'],
+  intake_output: ['nurse'],
   nurse_notes: ['nurse'],
   mar_administer: ['nurse'],
   active_complaint: ['doctor', 'care_manager', 'admin', 'super_admin'],

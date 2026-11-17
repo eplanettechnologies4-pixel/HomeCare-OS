@@ -27,9 +27,9 @@ describe('Clinician Role Config: Tile Orders & Sidebar Navigation', () => {
     assert.deepEqual(CLINICAL_WRITE_ROLES.nurse_notes, ['nurse']);
     assert.deepEqual(CLINICAL_WRITE_ROLES.mar_administer, ['nurse']);
 
-    // Nurse & doctor: vitals, intake_output
-    assert.deepEqual(CLINICAL_WRITE_ROLES.vitals, ['nurse', 'doctor']);
-    assert.deepEqual(CLINICAL_WRITE_ROLES.intake_output, ['nurse', 'doctor']);
+    // Nurse only: vitals, intake_output, nurse_notes, mar_administer
+    assert.deepEqual(CLINICAL_WRITE_ROLES.vitals, ['nurse']);
+    assert.deepEqual(CLINICAL_WRITE_ROLES.intake_output, ['nurse']);
 
     // canRoleWriteClinical checks
     assert.equal(canRoleWriteClinical('doctor', 'doctor_notes'), true);
@@ -41,7 +41,7 @@ describe('Clinician Role Config: Tile Orders & Sidebar Navigation', () => {
     assert.equal(canRoleWriteClinical('doctor', 'nurse_notes'), false);
 
     assert.equal(canRoleWriteClinical('nurse', 'vitals'), true);
-    assert.equal(canRoleWriteClinical('doctor', 'vitals'), true);
+    assert.equal(canRoleWriteClinical('doctor', 'vitals'), false);
     assert.equal(canRoleWriteClinical('physiotherapist', 'vitals'), false);
     assert.equal(canRoleWriteClinical('admin', 'vitals'), false);
 

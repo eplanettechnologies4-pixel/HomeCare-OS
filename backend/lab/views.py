@@ -213,7 +213,7 @@ class LabOrderViewSet(viewsets.ModelViewSet):
           - notes: str (optional)
         """
         role = get_user_role(request.user)
-        if role not in ('nurse', 'nursing_assistant', 'lab_tech') and not request.user.is_superuser:
+        if role not in ('nurse', 'lab_tech'):
             return Response({'error': 'Only field nurses and lab technicians may collect lab samples.'}, status=status.HTTP_403_FORBIDDEN)
 
         order = self.get_object()
@@ -255,8 +255,8 @@ class LabOrderViewSet(viewsets.ModelViewSet):
           - clinical_remarks: str (optional)
         """
         role = get_user_role(request.user)
-        if role not in ('lab_tech', 'doctor', 'admin', 'super_admin') and not request.user.is_superuser:
-            return Response({'error': 'Only lab technicians, doctors, or administrators may upload diagnostic reports.'}, status=status.HTTP_403_FORBIDDEN)
+        if role not in ('lab_tech', 'doctor') or request.user.is_superuser:
+            return Response({'error': 'Only lab technicians or doctors may upload diagnostic reports.'}, status=status.HTTP_403_FORBIDDEN)
 
         order = self.get_object()
         result_file = request.FILES.get('result_file')

@@ -156,10 +156,10 @@ class IsPrescriptionManagementAllowed(BasePermission):
                     log_chart_audit(request, patient_pk, 'Prescription Create Blocked', 'Prescriptions')
             return allowed
         if request.method in ('PATCH', 'PUT'):
-            return role in ('nurse', 'nursing_assistant')
+            return role == 'nurse'
         if request.method == 'DELETE':
-            # Nurse author may cancel a pending transcribed prescription via DELETE route
-            return role in ('nurse', 'nursing_assistant')
+            # Nurse author or assigned treating doctor may cancel a pending prescription via DELETE route
+            return role in ('nurse', 'doctor')
         return False
 
 

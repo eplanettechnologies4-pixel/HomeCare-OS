@@ -625,7 +625,7 @@ class PatientScheduledItemView(APIView):
             can_mark = False
             if is_super_or_admin or is_assigned_doc or is_assigned_cm:
                 can_mark = True
-            elif role in ('nurse', 'nursing_assistant') and item.kind in (ScheduledItem.Kind.PROCEDURE, ScheduledItem.Kind.BLOOD_TEST):
+            elif role == 'nurse' and item.kind in (ScheduledItem.Kind.PROCEDURE, ScheduledItem.Kind.BLOOD_TEST):
                 can_mark = True
             elif role in ('physio', 'physiotherapist', 'speech', 'speech_therapist', 'psychologist', 'psychotherapist', 'dietician') and item.kind == ScheduledItem.Kind.APPOINTMENT:
                 can_mark = True

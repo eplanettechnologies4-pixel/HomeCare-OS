@@ -64,7 +64,7 @@ def _save_prescription_record(request, serializer, patient):
     role = normalize_clinical_role(raw_role)
 
     # 1. Non-doctor, non-nurse roles get 403
-    if role not in ('doctor', 'nurse', 'nursing_assistant') and raw_role not in ('doctor', 'nurse', 'nursing_assistant'):
+    if role not in ('doctor', 'nurse') and raw_role not in ('doctor', 'nurse'):
         log_chart_audit(request, patient, 'Prescription Create Blocked', 'Prescriptions')
         raise PermissionDenied(f"Role '{raw_role}' is not authorized to create or transcribe medication orders.")
 
@@ -95,7 +95,7 @@ def _save_prescription_record(request, serializer, patient):
         return prescription
 
     # 3. Nurse Transcription (Pending Verification)
-    if role in ('nurse', 'nursing_assistant'):
+    if role == 'nurse':
         ordering_doc_name = (
             request.data.get('ordering_doctor_name') or
             serializer.validated_data.get('ordering_doctor_name') or
@@ -241,8 +241,12 @@ def _handle_prescription_action(request, patient_pk, prescription_pk, action):
             return Response({'detail': f"Prescription cannot be cancelled: order is already {prescription.verification_status}."}, status=status.HTTP_400_BAD_REQUEST)
         if prescription.verified_at is not None or prescription.administrations.exists():
             return Response({'detail': "Prescription cannot be cancelled: order has been verified or administrations have occurred."}, status=status.HTTP_400_BAD_REQUEST)
-        if prescription.entered_by and prescription.entered_by != request.user:
-            return Response({'detail': "Only the nurse who entered this transcribed order may cancel it."}, status=status.HTTP_403_FORBIDDEN)
+
+        # Allowed: author nurse who entered it, or assigned treating doctor
+        is_nurse_author = (role == 'nurse' and (not prescription.entered_by or prescription.entered_by == request.user))
+        is_treating_doc = (role == 'doctor' and is_treating_doctor_for_patient(request.user, patient))
+        if not (is_nurse_author or is_treating_doc):
+            return Response({'detail': "Only the authoring nurse or assigned treating doctor may cancel a pending order."}, status=status.HTTP_403_FORBIDDEN)
 
         reason = (request.data.get('reason') or '').strip()
         if not reason:
@@ -1248,7 +1252,7 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        if role not in ('nurse', 'nursing_assistant'):
+        if role != 'nurse':
             return Response(
                 {'detail': "Only the author nurse may edit a pending transcribed prescription."},
                 status=status.HTTP_403_FORBIDDEN
@@ -1285,17 +1289,24 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
         raw_role = get_user_role(request.user)
         role = normalize_clinical_role(raw_role)
 
-        if role not in ('nurse', 'nursing_assistant'):
+        if role not in ('nurse', 'doctor'):
             log_chart_audit(request, instance.patient, 'Prescription Delete Blocked', 'Prescriptions', record_id=instance.id)
             return Response(
                 {'detail': 'Physical deletion of prescriptions is disabled. Please cancel or discontinue the order instead.'},
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        if instance.entered_by and instance.entered_by != request.user:
+        if role == 'nurse' and instance.entered_by and instance.entered_by != request.user:
             log_chart_audit(request, instance.patient, 'Prescription Delete Blocked', 'Prescriptions', record_id=instance.id)
             return Response(
                 {'detail': "Only the nurse who entered this transcribed order may cancel it."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        if role == 'doctor' and not is_treating_doctor_for_patient(request.user, instance.patient):
+            log_chart_audit(request, instance.patient, 'Prescription Delete Blocked', 'Prescriptions', record_id=instance.id)
+            return Response(
+                {'detail': "Only the assigned treating doctor within the active care window may cancel a prescription."},
                 status=status.HTTP_403_FORBIDDEN
             )
 
@@ -1378,7 +1389,7 @@ class PatientPrescriptionDetailView(APIView):
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        if role not in ('nurse', 'nursing_assistant'):
+        if role != 'nurse':
             return Response(
                 {'detail': "Only the author nurse may edit a pending transcribed prescription."},
                 status=status.HTTP_403_FORBIDDEN
@@ -1419,17 +1430,24 @@ class PatientPrescriptionDetailView(APIView):
         raw_role = get_user_role(request.user)
         role = normalize_clinical_role(raw_role)
 
-        if role not in ('nurse', 'nursing_assistant'):
+        if role not in ('nurse', 'doctor'):
             log_chart_audit(request, prescription.patient, 'Prescription Delete Blocked', 'Prescriptions', record_id=prescription.id)
             return Response(
                 {'detail': 'Physical deletion of prescriptions is disabled. Please cancel or discontinue the order instead.'},
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        if prescription.entered_by and prescription.entered_by != request.user:
+        if role == 'nurse' and prescription.entered_by and prescription.entered_by != request.user:
             log_chart_audit(request, prescription.patient, 'Prescription Delete Blocked', 'Prescriptions', record_id=prescription.id)
             return Response(
                 {'detail': "Only the nurse who entered this transcribed order may cancel it."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        if role == 'doctor' and not is_treating_doctor_for_patient(request.user, prescription.patient):
+            log_chart_audit(request, prescription.patient, 'Prescription Delete Blocked', 'Prescriptions', record_id=prescription.id)
+            return Response(
+                {'detail': "Only the assigned treating doctor within the active care window may cancel a prescription."},
                 status=status.HTTP_403_FORBIDDEN
             )
 
