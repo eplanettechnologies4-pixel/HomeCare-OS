@@ -13,7 +13,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import PermissionDenied, NotFound
 
 from accounts.models import AuditLog
-from homecareOS.permissions import get_user_role
+from homecareOS.permissions import get_user_role, DenyNonClinicalRoles
 from homecareOS.clinician_permissions import (
     GUARDIAN_CONTACT_VISIBILITY_CONFIG,
     get_guardian_contact_visibility,
@@ -107,7 +107,7 @@ class PatientFileView(APIView):
     - Role-specific permissions
     - AuditLog generation for compliance
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, DenyNonClinicalRoles]
 
     def get(self, request, pk):
         patient = _resolve_patient_with_scoping(request.user, pk)
@@ -322,7 +322,7 @@ class PatientFileView(APIView):
         # Marking done: nurse for procedures & blood tests, therapists for therapy, doctors/cm/admins for all
         can_mark_done = (
             is_super_or_admin or is_assigned_doc or is_assigned_cm or
-            role in ('nurse', 'physio', 'physiotherapist', 'speech', 'speech_therapist', 'psychologist', 'psychotherapist')
+            role in ('nurse', 'physio', 'physiotherapist', 'speech', 'speech_therapist', 'psychologist', 'psychotherapist', 'dietician')
         )
 
         # Derived location display
@@ -348,7 +348,6 @@ class PatientFileView(APIView):
                 'secondary_diagnoses': patient.secondary_diagnoses or '',
                 'allergies': patient.allergies or 'No Known Drug Allergies (NKDA)',
                 'blood_type': patient.blood_type or '-',
-                'phone': patient.phone or '-',
                 'photo': f"/api/patients/{patient.id}/photo/" if patient.photo else None,
                 'is_active': patient.is_active,
             },
@@ -379,7 +378,7 @@ class PatientEmergencyContactRevealView(APIView):
     A4 Rule: Nurse presses 'Emergency contact' button to reveal legal guardian phone.
     Writes an immutable AuditLog entry (user, role, patient id, timestamp, NO phone number in log text).
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, DenyNonClinicalRoles]
 
     def post(self, request, pk):
         patient = _resolve_patient_with_scoping(request.user, pk)
@@ -419,7 +418,7 @@ class PatientHistoryCarePlanUpdateView(APIView):
     Editable by assigned doctor, patient's care manager, admin, super_admin.
     Appends an immutable edit entry to history_care_plan_edits audit trail.
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, DenyNonClinicalRoles]
 
     def post(self, request, pk):
         patient = _resolve_patient_with_scoping(request.user, pk)
@@ -485,7 +484,7 @@ class PatientActiveComplaintView(APIView):
     B2: Create or resolve active complaint banner.
     Permitted: assigned doctor, care manager, admin, super_admin.
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, DenyNonClinicalRoles]
 
     def post(self, request, pk):
         patient = _resolve_patient_with_scoping(request.user, pk)
@@ -556,7 +555,7 @@ class PatientScheduledItemView(APIView):
     PATCH /api/patients/{id}/scheduled-items/{item_id}/
     B3: Upcoming procedures, appointments and blood tests.
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, DenyNonClinicalRoles]
 
     def get(self, request, pk):
         patient = _resolve_patient_with_scoping(request.user, pk)
@@ -628,7 +627,7 @@ class PatientScheduledItemView(APIView):
                 can_mark = True
             elif role in ('nurse', 'nursing_assistant') and item.kind in (ScheduledItem.Kind.PROCEDURE, ScheduledItem.Kind.BLOOD_TEST):
                 can_mark = True
-            elif role in ('physio', 'physiotherapist', 'speech', 'speech_therapist', 'psychologist', 'psychotherapist') and item.kind == ScheduledItem.Kind.APPOINTMENT:
+            elif role in ('physio', 'physiotherapist', 'speech', 'speech_therapist', 'psychologist', 'psychotherapist', 'dietician') and item.kind == ScheduledItem.Kind.APPOINTMENT:
                 can_mark = True
 
             if not can_mark:
@@ -662,7 +661,7 @@ class PatientRecordsTimelineView(APIView):
     10. nursing_notes
     11. rehabilitation_notes (Physio & Speech; Psychotherapy strictly gated per Phase 1 rule)
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, DenyNonClinicalRoles]
 
     def get(self, request, pk, record_type=None):
         patient = _resolve_patient_with_scoping(request.user, pk)
@@ -702,21 +701,38 @@ class PatientRecordsTimelineView(APIView):
 
         if record_type in ('medications', 'medication_chart'):
             # Prescriptions
-            p_qs = patient.prescriptions.select_related('uploaded_by').all()
+            p_qs = patient.prescriptions.select_related('uploaded_by', 'entered_by', 'verified_by').all()
             if start_dt: p_qs = p_qs.filter(created_at__gte=start_dt)
             if end_dt: p_qs = p_qs.filter(created_at__lte=end_dt)
             for p in p_qs:
+                is_transcribed = (p.entry_mode == 'transcribed')
+                if is_transcribed and p.entered_by:
+                    author_name = p.entered_by.get_full_name() or p.entered_by.username
+                    author_role = 'Nurse (Transcribed Order)'
+                else:
+                    author_name = p.prescribed_by or (p.uploaded_by.full_name if p.uploaded_by else '-')
+                    author_role = _format_author_role(p.uploaded_by) or 'Attending Doctor'
+
+                is_verified = (p.verification_status == 'verified')
+                status_label = {
+                    'verified': 'Verified',
+                    'pending_verification': 'Pending Verification',
+                    'rejected': 'Rejected',
+                    'cancelled': 'Cancelled',
+                    'discontinued': 'Discontinued',
+                }.get(p.verification_status, p.verification_status.title())
+
                 items.append({
                     'id': f"rx-{p.id}",
                     'record_id': p.id,
                     'type': 'medications',
                     'occurred_at': p.created_at.isoformat(),
-                    'title': f"Prescription: {p.medication} ({p.dosage})",
-                    'summary': f"Route: {p.route or 'Oral'} · Freq: {p.frequency} · Duration: {p.duration_days or '-'} days. {p.notes}",
-                    'author_name': p.uploaded_by.full_name if p.uploaded_by else '-',
-                    'author_role': _format_author_role(p.uploaded_by),
-                    'is_signed': True,
-                    'signed_at': p.created_at.isoformat(),
+                    'title': f"Prescription: {p.medication} ({p.dosage}) [{status_label}]",
+                    'summary': f"Route: {p.route or 'Oral'} · Freq: {p.frequency} · Duration: {p.duration_days or '-'} days · Status: {status_label}. {p.notes}",
+                    'author_name': author_name,
+                    'author_role': author_role,
+                    'is_signed': is_verified,
+                    'signed_at': p.verified_at.isoformat() if p.verified_at else None,
                     'has_addenda': False,
                     'addenda': [],
                     'details': {
@@ -727,6 +743,13 @@ class PatientRecordsTimelineView(APIView):
                         'duration_days': p.duration_days,
                         'notes': p.notes,
                         'document_url': p.document.url if p.document else None,
+                        'entry_mode': p.entry_mode,
+                        'ordering_doctor_name': p.ordering_doctor_name,
+                        'order_source': p.order_source,
+                        'verification_status': p.verification_status,
+                        'verified_by': p.verified_by.get_full_name() if p.verified_by else None,
+                        'verified_at': p.verified_at.isoformat() if p.verified_at else None,
+                        'status_reason': p.status_reason,
                     }
                 })
 
@@ -753,6 +776,61 @@ class PatientRecordsTimelineView(APIView):
                         'medication': m.prescription.medication,
                         'day_number': m.day_number,
                         'dose_time': m.administered_at.astimezone(karachi_tz).strftime('%H:%M PKT'),
+                    }
+                })
+
+        elif record_type in ('monitoring', 'vitals_and_io'):
+            # Merged monitoring view: vitals observations + fluid balance entries
+            m_qs = patient.vitals.select_related('recorded_by').all()
+            if start_dt: m_qs = m_qs.filter(recorded_at__gte=start_dt)
+            if end_dt: m_qs = m_qs.filter(recorded_at__lte=end_dt)
+            for v in m_qs:
+                has_vitals = any([v.blood_pressure_systolic, v.heart_rate, v.temperature, v.spo2, v.blood_glucose])
+                has_io = (v.intake_ml is not None) or (v.output_ml is not None)
+                if not (has_vitals or has_io):
+                    continue
+
+                bp_str = f"{v.blood_pressure_systolic}/{v.blood_pressure_diastolic} mmHg" if v.blood_pressure_systolic else None
+                parts = []
+                if bp_str: parts.append(f"BP: {bp_str}")
+                if v.heart_rate: parts.append(f"HR: {v.heart_rate} bpm")
+                if v.temperature: parts.append(f"Temp: {v.temperature}°C")
+                if v.spo2: parts.append(f"SpO2: {v.spo2}%")
+                if v.blood_glucose: parts.append(f"BS: {v.blood_glucose} mg/dL")
+                if v.intake_ml is not None: parts.append(f"In: {v.intake_ml}ml")
+                if v.output_ml is not None: parts.append(f"Out: {v.output_ml}ml")
+                if has_io and v.intake_ml is not None and v.output_ml is not None:
+                    parts.append(f"Net: {v.intake_ml - v.output_ml}ml")
+
+                title = f"Vitals Observation: BP {bp_str}" if bp_str else (
+                    f"Fluid Balance: In {v.intake_ml or 0}ml / Out {v.output_ml or 0}ml" if has_io else "Monitoring Entry"
+                )
+
+                items.append({
+                    'id': f"monitoring-{v.id}",
+                    'record_id': v.id,
+                    'type': 'monitoring',
+                    'occurred_at': v.recorded_at.isoformat(),
+                    'title': title,
+                    'summary': " · ".join(parts) + (f" · {v.notes}" if v.notes else ""),
+                    'author_name': v.recorded_by.full_name if v.recorded_by else '-',
+                    'author_role': _format_author_role(v.recorded_by),
+                    'is_signed': True,
+                    'signed_at': v.recorded_at.isoformat(),
+                    'has_addenda': False,
+                    'addenda': [],
+                    'details': {
+                        'bp_systolic': v.blood_pressure_systolic,
+                        'bp_diastolic': v.blood_pressure_diastolic,
+                        'heart_rate': v.heart_rate,
+                        'temperature': str(v.temperature) if v.temperature else None,
+                        'spo2': v.spo2,
+                        'respiratory_rate': v.respiratory_rate,
+                        'blood_glucose': str(v.blood_glucose) if v.blood_glucose else None,
+                        'intake_ml': v.intake_ml,
+                        'output_ml': v.output_ml,
+                        'net_balance_ml': (v.intake_ml or 0) - (v.output_ml or 0) if has_io else None,
+                        'notes': v.notes,
                     }
                 })
 
@@ -1118,17 +1196,29 @@ class PatientSingleRecordDetailView(APIView):
     GET /api/patients/{id}/records/{type}/{record_id}/
     Returns complete chart or entry in a side drawer (full values, addenda trail, author, signed time).
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, DenyNonClinicalRoles]
 
     def get(self, request, pk, record_type=None, record_id=None):
         patient = _resolve_patient_with_scoping(request.user, pk)
         user = request.user
 
+        raw_id_str = str(record_id)
+        is_pn = raw_id_str.startswith('pn-')
+        clean_id_str = raw_id_str
+        for prefix in ('pn-', 'tn-', 'dn-', 'nn-', 'monitoring-', 'vs-', 'lr-', 'rx-', 'cf-'):
+            if clean_id_str.startswith(prefix):
+                clean_id_str = clean_id_str[len(prefix):]
+                break
+        try:
+            numeric_id = int(clean_id_str)
+        except (ValueError, TypeError):
+            numeric_id = record_id
+
         # Support querying the timeline endpoint with exact record_id
         # Delegate to single lookup
         if record_type in ('doctor_notes', 'consultations'):
             try:
-                dn = patient.doctor_notes.select_related('doctor', 'signed_by').get(pk=record_id)
+                dn = patient.doctor_notes.select_related('doctor', 'signed_by').get(pk=numeric_id)
             except DoctorNote.DoesNotExist:
                 raise NotFound("Doctor note not found.")
             return Response({
@@ -1149,36 +1239,57 @@ class PatientSingleRecordDetailView(APIView):
             })
 
         elif record_type in ('rehabilitation_notes', 'rehab_notes'):
-            # Try TherapyNote first, then PhysioNote
-            tn = patient.therapy_notes.filter(pk=record_id).select_related('author', 'signed_by').first()
-            if tn:
-                if tn.discipline == TherapyNote.Discipline.PSYCHOTHERAPY:
-                    if not can_view_psychotherapy_note(user, tn):
-                        raise Http404("Therapy note not found.")
-                    author = tn.author or tn.signed_by
-                    if not author or author.user_id != user.id:
-                        log_chart_audit(request, patient, action='Read Psychotherapy Note', section='rehabilitation_notes', record_id=tn.id)
+            if is_pn or request.GET.get('source') == 'physio':
+                pn = patient.physio_notes.filter(pk=numeric_id).select_related('physio', 'signed_by').first()
+                if pn:
+                    return Response({
+                        'id': pn.id,
+                        'type': 'rehabilitation_notes',
+                        'title': f"Physiotherapy Progress Note — {pn.physio.full_name if pn.physio else 'Physiotherapist'}",
+                        'occurred_at': pn.created_at.isoformat(),
+                        'author_name': pn.physio.full_name if pn.physio else '-',
+                        'author_role': _format_author_role(pn.physio),
+                        'is_signed': pn.is_signed,
+                        'signed_at': pn.signed_at.isoformat() if pn.signed_at else None,
+                        'addenda': pn.addenda or [],
+                        'details': {
+                            'session_notes': pn.session_notes,
+                            'mobility_status': pn.mobility_status,
+                            'goals': pn.goals,
+                            'exercises': pn.exercises,
+                        }
+                    })
 
-                return Response({
-                    'id': tn.id,
-                    'type': 'rehabilitation_notes',
-                    'title': f"{tn.get_discipline_display()} — {tn.author.full_name if tn.author else 'Therapist'}",
-                    'occurred_at': tn.created_at.isoformat(),
-                    'author_name': tn.author.full_name if tn.author else '-',
-                    'author_role': _format_author_role(tn.author),
-                    'is_signed': tn.is_signed,
-                    'signed_at': tn.signed_at.isoformat() if tn.signed_at else None,
-                    'addenda': tn.addenda or [],
-                    'details': {
-                        'discipline': tn.discipline,
-                        'session_notes': tn.session_notes,
-                        'plan': tn.plan,
-                        'goals': tn.goals,
-                        'exercises': tn.exercises,
-                    }
-                })
+            if not is_pn:
+                tn = patient.therapy_notes.filter(pk=numeric_id).select_related('author', 'signed_by').first()
+                if tn:
+                    if tn.discipline == TherapyNote.Discipline.PSYCHOTHERAPY:
+                        if not can_view_psychotherapy_note(user, tn):
+                            raise Http404("Therapy note not found.")
+                        author = tn.author or tn.signed_by
+                        if not author or author.user_id != user.id:
+                            log_chart_audit(request, patient, action='Read Psychotherapy Note', section='rehabilitation_notes', record_id=tn.id)
 
-            pn = patient.physio_notes.filter(pk=record_id).select_related('physio', 'signed_by').first()
+                    return Response({
+                        'id': tn.id,
+                        'type': 'rehabilitation_notes',
+                        'title': f"{tn.get_discipline_display()} — {tn.author.full_name if tn.author else 'Therapist'}",
+                        'occurred_at': tn.created_at.isoformat(),
+                        'author_name': tn.author.full_name if tn.author else '-',
+                        'author_role': _format_author_role(tn.author),
+                        'is_signed': tn.is_signed,
+                        'signed_at': tn.signed_at.isoformat() if tn.signed_at else None,
+                        'addenda': tn.addenda or [],
+                        'details': {
+                            'discipline': tn.discipline,
+                            'session_notes': tn.session_notes,
+                            'plan': tn.plan,
+                            'goals': tn.goals,
+                            'exercises': tn.exercises,
+                        }
+                    })
+
+            pn = patient.physio_notes.filter(pk=numeric_id).select_related('physio', 'signed_by').first()
             if pn:
                 return Response({
                     'id': pn.id,
@@ -1223,7 +1334,7 @@ class PatientSingleRecordDetailView(APIView):
                 }
             })
 
-        elif record_type in ('vitals', 'vital_signs', 'intake_output'):
+        elif record_type in ('vitals', 'vital_signs', 'intake_output', 'monitoring'):
             try:
                 v = patient.vitals.select_related('recorded_by').get(pk=record_id)
             except VitalSign.DoesNotExist:
@@ -1285,7 +1396,7 @@ class PatientPhotoView(APIView):
     - GET: Enforces scoping; returns FileResponse with content_type.
     - POST: Restricted to admin, super_admin, care_manager. Max 5MB, jpeg/png/webp.
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, DenyNonClinicalRoles]
 
     def get(self, request, pk):
         patient = _resolve_patient_with_scoping(request.user, pk)
@@ -1350,7 +1461,7 @@ class PatientRecordAddendumView(APIView):
     Appends an immutable clinical addendum entry with audit reason.
     Allowed for: Author of the note, treating doctor, assigned care manager, admin, super_admin.
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, DenyNonClinicalRoles]
 
     def post(self, request, pk, record_type=None, record_id=None):
         patient = _resolve_patient_with_scoping(request.user, pk)
@@ -1367,13 +1478,28 @@ class PatientRecordAddendumView(APIView):
             )
 
         # Resolve note by record_type
+        raw_id_str = str(record_id)
+        is_pn = raw_id_str.startswith('pn-')
+        clean_id_str = raw_id_str
+        for prefix in ('pn-', 'tn-', 'dn-', 'nn-', 'monitoring-', 'vs-', 'lr-', 'rx-', 'cf-'):
+            if clean_id_str.startswith(prefix):
+                clean_id_str = clean_id_str[len(prefix):]
+                break
+        try:
+            numeric_id = int(clean_id_str)
+        except (ValueError, TypeError):
+            numeric_id = record_id
+
         record = None
         if record_type in ('doctor_notes', 'consultations'):
-            record = patient.doctor_notes.filter(pk=record_id).first()
+            record = patient.doctor_notes.filter(pk=numeric_id).first()
         elif record_type in ('rehabilitation_notes', 'rehab_notes'):
-            record = patient.therapy_notes.filter(pk=record_id).first() or patient.physio_notes.filter(pk=record_id).first()
+            if is_pn:
+                record = patient.physio_notes.filter(pk=numeric_id).first()
+            else:
+                record = patient.therapy_notes.filter(pk=numeric_id).first() or patient.physio_notes.filter(pk=numeric_id).first()
         elif record_type in ('consents', 'consent_forms'):
-            record = patient.consents.filter(pk=record_id).first()
+            record = patient.consents.filter(pk=numeric_id).first()
 
         if not record:
             raise NotFound("Clinical record not found for addendum append.")

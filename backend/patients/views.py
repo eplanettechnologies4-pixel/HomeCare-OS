@@ -3,6 +3,7 @@ import string
 
 from django.contrib.auth.models import User
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from django.shortcuts import get_object_or_404
 from rest_framework import viewsets, status
@@ -13,7 +14,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from homecareOS.permissions import (
     CanDeletePatient, IsPrescriptionManagementAllowed, CanManagePatientPortal,
-    is_family_user, IsPatientOrFamilyOwner, get_user_role,
+    is_family_user, IsPatientOrFamilyOwner, get_user_role, DenyNonClinicalRoles,
 )
 from accounts.models import AuditLog
 from .models import (
@@ -35,20 +36,249 @@ from .scoping import (
 from homecareOS.clinician_permissions import (
     can_user_access_chart_tab, enforce_tab_permission,
     validate_entry_immutability, log_chart_audit, normalize_clinical_role,
-    enforce_addendum_permission,
+    enforce_addendum_permission, CLINICAL_WRITE_ROLES,
+    check_clinical_write_permission, enforce_clinical_write_permission,
 )
+
+
+
+def _save_prescription_record(request, serializer, patient):
+    """
+    Saves a prescription record enforcing clinical authorship rules:
+    - Doctor: verified order, prescribed_by = doctor name, entered_by = doctor user.
+    - Nurse: transcribed order (pending_verification), ordering_doctor_name required,
+             entered_by = nurse user. Doctor is not author. Notifies doctor.
+    - All other roles: 403 Forbidden.
+    """
+    from staff.models import StaffMember
+    from notifications.models import Notification
+    from bookings.models import Booking, BookingStatus
+    from rest_framework.exceptions import PermissionDenied, ValidationError
+
+    if not patient:
+        raise ValidationError({'patient': ['Patient is required.']})
+
+    check_clinician_patient_access(request.user, patient)
+
+    raw_role = get_user_role(request.user)
+    role = normalize_clinical_role(raw_role)
+
+    # 1. Non-doctor, non-nurse roles get 403
+    if role not in ('doctor', 'nurse', 'nursing_assistant') and raw_role not in ('doctor', 'nurse', 'nursing_assistant'):
+        log_chart_audit(request, patient, 'Prescription Create Blocked', 'Prescriptions')
+        raise PermissionDenied(f"Role '{raw_role}' is not authorized to create or transcribe medication orders.")
+
+    staff = StaffMember.objects.filter(user=request.user).first()
+
+    # 2. Doctor Creation (Normal Verified Order)
+    if role == 'doctor':
+        if not is_treating_doctor_for_patient(request.user, patient):
+            log_chart_audit(request, patient, 'Prescription Create Blocked', 'Prescriptions')
+            raise PermissionDenied("Only the assigned treating doctor within the active care window may prescribe medication.")
+
+        doctor_name = staff.full_name if staff else (request.user.get_full_name() or request.user.username)
+        now = timezone.now()
+        prescription = serializer.save(
+            patient=patient,
+            entry_mode=Prescription.EntryMode.DOCTOR,
+            entered_by=request.user,
+            uploaded_by=staff,
+            ordering_doctor=staff,
+            ordering_doctor_name=doctor_name,
+            prescribed_by=doctor_name,
+            verification_status=Prescription.VerificationStatus.VERIFIED,
+            verified_by=request.user,
+            verified_at=now,
+            order_source=request.data.get('order_source') or serializer.validated_data.get('order_source') or Prescription.OrderSource.WRITTEN,
+        )
+        log_chart_audit(request, patient, 'Created Prescription Order', 'Prescriptions', record_id=prescription.id)
+        return prescription
+
+    # 3. Nurse Transcription (Pending Verification)
+    if role in ('nurse', 'nursing_assistant'):
+        ordering_doc_name = (
+            request.data.get('ordering_doctor_name') or
+            serializer.validated_data.get('ordering_doctor_name') or
+            request.data.get('prescribed_by') or
+            serializer.validated_data.get('prescribed_by') or
+            ''
+        ).strip()
+
+        if not ordering_doc_name or ordering_doc_name == 'Attending Physician':
+            raise ValidationError({'ordering_doctor_name': ['Ordering doctor name is required for transcribed orders.']})
+
+        ordering_doc_id = request.data.get('ordering_doctor')
+        ordering_doctor_staff = None
+        if ordering_doc_id:
+            try:
+                ordering_doctor_staff = StaffMember.objects.filter(pk=ordering_doc_id, role='doctor').first()
+            except Exception:
+                pass
+
+        nurse_name = staff.full_name if staff else (request.user.get_full_name() or request.user.username)
+        author_record = f"Transcribed by {nurse_name}"
+
+        prescription = serializer.save(
+            patient=patient,
+            entry_mode=Prescription.EntryMode.TRANSCRIBED,
+            entered_by=request.user,
+            uploaded_by=staff,
+            ordering_doctor=ordering_doctor_staff,
+            ordering_doctor_name=ordering_doc_name,
+            prescribed_by=author_record,
+            verification_status=Prescription.VerificationStatus.PENDING_VERIFICATION,
+            order_source=request.data.get('order_source') or serializer.validated_data.get('order_source') or Prescription.OrderSource.WRITTEN,
+        )
+        log_chart_audit(request, patient, 'Created Transcribed Prescription', 'Prescriptions', record_id=prescription.id)
+
+        # Notify treating doctor using Notification mechanism
+        try:
+            doc_booking = Booking.objects.filter(
+                patient=patient, assigned_staff__role='doctor'
+            ).exclude(status=BookingStatus.CANCELLED).order_by('-scheduled_time').first()
+            recipient_user = None
+            if doc_booking and doc_booking.assigned_staff and doc_booking.assigned_staff.user:
+                recipient_user = doc_booking.assigned_staff.user
+            elif ordering_doctor_staff and ordering_doctor_staff.user:
+                recipient_user = ordering_doctor_staff.user
+
+            if recipient_user:
+                Notification.objects.create(
+                    recipient=recipient_user,
+                    icon_key='pill',
+                    message=f"New transcribed prescription for {patient.full_name} entered by {nurse_name} requires verification.",
+                    target_screen='PatientFile',
+                    target_params={'patient_id': patient.id, 'prescription_id': prescription.id, 'action': 'verify'}
+                )
+        except Exception:
+            pass
+
+        return prescription
+
+
+def _handle_prescription_action(request, patient_pk, prescription_pk, action):
+    """
+    Handles verification, rejection, cancellation, and discontinuation of prescriptions:
+    - verify: Treating doctor only. Verified status, server timestamp, audit log.
+    - reject: Treating doctor only. Reason required. Status rejected, audit log.
+    - discontinue: Treating doctor only. Reason required. Status discontinued, audit log.
+    - cancel: Nurse author only while pending and no administrations. Reason required.
+    """
+    patient = get_object_or_404(Patient, pk=patient_pk)
+    prescription = get_object_or_404(Prescription, pk=prescription_pk, patient=patient)
+
+    raw_role = get_user_role(request.user)
+    role = normalize_clinical_role(raw_role)
+
+    # 1. Scoping check: unassigned clinician gets 404
+    check_clinician_patient_access(request.user, patient)
+
+    # 2. Action routing
+    if action == 'verify':
+        if role != 'doctor' or raw_role in ('super_admin', 'admin', 'care_manager', 'nurse', 'accountant', 'crm_executive'):
+            log_chart_audit(request, patient, 'Prescription Verify Blocked', 'Prescriptions', record_id=prescription.id)
+            return Response({'detail': "Only a doctor may verify medication orders."}, status=status.HTTP_403_FORBIDDEN)
+        if not is_treating_doctor_for_patient(request.user, patient):
+            log_chart_audit(request, patient, 'Prescription Verify Blocked', 'Prescriptions', record_id=prescription.id)
+            return Response({'detail': "Only the assigned treating doctor within the active care window may verify medication orders."}, status=status.HTTP_403_FORBIDDEN)
+        if prescription.verification_status != Prescription.VerificationStatus.PENDING_VERIFICATION:
+            return Response({'detail': f"Prescription is already {prescription.verification_status}."}, status=status.HTTP_400_BAD_REQUEST)
+
+        prescription.verification_status = Prescription.VerificationStatus.VERIFIED
+        prescription.verified_by = request.user
+        prescription.verified_at = timezone.now()
+        prescription.verification_note = request.data.get('note', '') or request.data.get('verification_note', '')
+        prescription.save(update_fields=['verification_status', 'verified_by', 'verified_at', 'verification_note'])
+        log_chart_audit(request, patient, 'Verified Prescription Order', 'Prescriptions', record_id=prescription.id)
+        return Response(PrescriptionSerializer(prescription, context={'request': request}).data, status=status.HTTP_200_OK)
+
+    elif action == 'reject':
+        if role != 'doctor' or raw_role in ('super_admin', 'admin', 'care_manager', 'nurse', 'accountant', 'crm_executive'):
+            log_chart_audit(request, patient, 'Prescription Reject Blocked', 'Prescriptions', record_id=prescription.id)
+            return Response({'detail': "Only a doctor may reject medication orders."}, status=status.HTTP_403_FORBIDDEN)
+        if not is_treating_doctor_for_patient(request.user, patient):
+            log_chart_audit(request, patient, 'Prescription Reject Blocked', 'Prescriptions', record_id=prescription.id)
+            return Response({'detail': "Only the assigned treating doctor within the active care window may reject medication orders."}, status=status.HTTP_403_FORBIDDEN)
+        if prescription.verification_status != Prescription.VerificationStatus.PENDING_VERIFICATION:
+            return Response({'detail': f"Prescription is already {prescription.verification_status}."}, status=status.HTTP_400_BAD_REQUEST)
+
+        reason = (request.data.get('reason') or request.data.get('rejection_reason') or '').strip()
+        if not reason:
+            return Response({'reason': ['Rejection reason is required.']}, status=status.HTTP_400_BAD_REQUEST)
+
+        prescription.verification_status = Prescription.VerificationStatus.REJECTED
+        prescription.status_reason = reason
+        prescription.status_changed_by = request.user
+        prescription.status_changed_at = timezone.now()
+        prescription.save(update_fields=['verification_status', 'status_reason', 'status_changed_by', 'status_changed_at'])
+        log_chart_audit(request, patient, 'Rejected Prescription Order', 'Prescriptions', record_id=prescription.id)
+        return Response(PrescriptionSerializer(prescription, context={'request': request}).data, status=status.HTTP_200_OK)
+
+    elif action == 'discontinue':
+        if role != 'doctor' or raw_role in ('super_admin', 'admin', 'care_manager', 'nurse', 'accountant', 'crm_executive'):
+            log_chart_audit(request, patient, 'Prescription Discontinue Blocked', 'Prescriptions', record_id=prescription.id)
+            return Response({'detail': "Only a doctor may discontinue medication orders."}, status=status.HTTP_403_FORBIDDEN)
+        if not is_treating_doctor_for_patient(request.user, patient):
+            log_chart_audit(request, patient, 'Prescription Discontinue Blocked', 'Prescriptions', record_id=prescription.id)
+            return Response({'detail': "Only the assigned treating doctor within the active care window may discontinue medication orders."}, status=status.HTTP_403_FORBIDDEN)
+        if prescription.verification_status != Prescription.VerificationStatus.VERIFIED:
+            return Response({'detail': "Only verified prescriptions can be discontinued."}, status=status.HTTP_400_BAD_REQUEST)
+
+        reason = (request.data.get('reason') or '').strip()
+        if not reason:
+            return Response({'reason': ['Discontinuation reason is required.']}, status=status.HTTP_400_BAD_REQUEST)
+
+        prescription.verification_status = Prescription.VerificationStatus.DISCONTINUED
+        prescription.status_reason = reason
+        prescription.status_changed_by = request.user
+        prescription.status_changed_at = timezone.now()
+        prescription.save(update_fields=['verification_status', 'status_reason', 'status_changed_by', 'status_changed_at'])
+        log_chart_audit(request, patient, 'Discontinued Prescription Order', 'Prescriptions', record_id=prescription.id)
+        return Response(PrescriptionSerializer(prescription, context={'request': request}).data, status=status.HTTP_200_OK)
+
+    elif action == 'cancel':
+        if prescription.verification_status != Prescription.VerificationStatus.PENDING_VERIFICATION:
+            return Response({'detail': f"Prescription cannot be cancelled: order is already {prescription.verification_status}."}, status=status.HTTP_400_BAD_REQUEST)
+        if prescription.verified_at is not None or prescription.administrations.exists():
+            return Response({'detail': "Prescription cannot be cancelled: order has been verified or administrations have occurred."}, status=status.HTTP_400_BAD_REQUEST)
+        if prescription.entered_by and prescription.entered_by != request.user:
+            return Response({'detail': "Only the nurse who entered this transcribed order may cancel it."}, status=status.HTTP_403_FORBIDDEN)
+
+        reason = (request.data.get('reason') or '').strip()
+        if not reason:
+            return Response({'reason': ['Cancellation reason is required.']}, status=status.HTTP_400_BAD_REQUEST)
+
+        prescription.verification_status = Prescription.VerificationStatus.CANCELLED
+        prescription.status_reason = reason
+        prescription.status_changed_by = request.user
+        prescription.status_changed_at = timezone.now()
+        prescription.save(update_fields=['verification_status', 'status_reason', 'status_changed_by', 'status_changed_at'])
+        log_chart_audit(request, patient, 'Cancelled Prescription Order', 'Prescriptions', record_id=prescription.id)
+        return Response(PrescriptionSerializer(prescription, context={'request': request}).data, status=status.HTTP_200_OK)
+
+    return Response({'error': 'Invalid action.'}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class PatientViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated, CanDeletePatient, IsPatientOrFamilyOwner]
     queryset = Patient.objects.select_related('assigned_care_manager').all().order_by('-created_at')
+    search_fields = ['first_name', 'last_name', 'mr_number']
 
     def get_queryset(self):
         qs = Patient.objects.select_related('assigned_care_manager').all().order_by('-created_at')
         user = self.request.user
         if is_family_user(user):
-            return qs.filter(portal_user=user)
-        return filter_queryset_for_nurse(qs, user, patient_field=None)
+            qs = qs.filter(portal_user=user)
+        else:
+            qs = filter_queryset_for_nurse(qs, user, patient_field=None)
+        q = self.request.query_params.get('q') or self.request.query_params.get('search')
+        if q:
+            qs = qs.filter(
+                Q(first_name__icontains=q) |
+                Q(last_name__icontains=q) |
+                Q(mr_number__icontains=q)
+            )
+        return qs
 
     def get_object(self):
         user = self.request.user
@@ -82,14 +312,31 @@ class PatientViewSet(viewsets.ModelViewSet):
         bookings = patient.bookings.all().order_by('-scheduled_time')
         return Response(BookingListSerializer(bookings, many=True).data)
 
-    @action(detail=True, methods=['get'])
+    @action(detail=True, methods=['get', 'post'])
     def vitals(self, request, pk=None):
         patient = self.get_object()
-        return Response(VitalSignSerializer(patient.vitals.all(), many=True).data)
+        check_clinician_patient_access(request.user, patient)
+        if request.method == 'GET':
+            return Response(VitalSignSerializer(patient.vitals.all(), many=True).data)
+        enforce_clinical_write_permission(request.user, 'vitals', patient=patient)
+        staff_member = getattr(request.user, 'staffmember', None) or getattr(request.user, 'staff_profile', None)
+        data = request.data.copy() if hasattr(request.data, 'copy') else dict(request.data)
+        data['patient'] = patient.id
+        serializer = VitalSignSerializer(data=data)
+        if serializer.is_valid():
+            v = serializer.save(
+                patient=patient,
+                recorded_by=staff_member,
+                recorded_at=serializer.validated_data.get('recorded_at') or timezone.now()
+            )
+            return Response(VitalSignSerializer(v).data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def _handle_notes(self, request):
         patient = self.get_object()
+        check_clinician_patient_access(request.user, patient)
         if request.method == 'POST':
+            enforce_clinical_write_permission(request.user, 'nurse_notes', patient=patient)
             staff = getattr(request.user, 'staffmember', None)
             note_text = request.data.get('note', '') or request.data.get('notes', '')
             booking_id = request.data.get('booking') or request.data.get('booking_id')
@@ -107,35 +354,67 @@ class PatientViewSet(viewsets.ModelViewSet):
         notes = patient.nurse_notes.select_related('recorded_by').order_by('-recorded_at')
         return Response(NurseNoteSerializer(notes, many=True).data)
 
-    @action(detail=True, methods=['get', 'post'])
+    @action(detail=True, methods=['get', 'post'], url_path='nurse-notes')
     def nurse_notes(self, request, pk=None):
         return self._handle_notes(request)
 
-    @action(detail=True, methods=['get'])
+    @action(detail=True, methods=['get', 'post'], url_path='nurse_notes')
+    def nurse_notes_underscore(self, request, pk=None):
+        return self._handle_notes(request)
+
+    @action(detail=True, methods=['get', 'post'])
     def labs(self, request, pk=None):
         patient = self.get_object()
-        data = list(LabResultSerializer(patient.lab_results.all(), many=True).data)
-        try:
-            from lab.models import LabReport
-            reports = LabReport.objects.filter(lab_order__patient=patient).select_related('lab_order')
-            for rep in reports:
-                for test in rep.lab_order.tests.all():
-                    val = str(rep.result_data.get(test.name, 'Completed'))
-                    data.append({
-                        'id': f"rep-{rep.id}-{test.id}",
-                        'patient': patient.id,
-                        'test_name': test.name,
-                        'result_value': val,
-                        'unit': '',
-                        'reference_range': '',
-                        'is_abnormal': rep.flagged_abnormal,
-                        'collected_at': rep.lab_order.collected_at.isoformat() if rep.lab_order.collected_at else rep.uploaded_at.isoformat(),
-                        'reported_at': rep.uploaded_at.isoformat(),
-                        'document': rep.result_file.url if rep.result_file else None,
-                    })
-        except Exception:
-            pass
-        return Response(data)
+        check_clinician_patient_access(request.user, patient)
+        if request.method == 'GET':
+            data = list(LabResultSerializer(patient.lab_results.all(), many=True).data)
+            try:
+                from lab.models import LabReport
+                reports = LabReport.objects.filter(lab_order__patient=patient).select_related('lab_order')
+                for rep in reports:
+                    for test in rep.lab_order.tests.all():
+                        val = str(rep.result_data.get(test.name, 'Completed'))
+                        data.append({
+                            'id': f"rep-{rep.id}-{test.id}",
+                            'patient': patient.id,
+                            'test_name': test.name,
+                            'result_value': val,
+                            'unit': '',
+                            'reference_range': '',
+                            'is_abnormal': rep.flagged_abnormal,
+                            'collected_at': rep.lab_order.collected_at.isoformat() if rep.lab_order.collected_at else rep.uploaded_at.isoformat(),
+                            'reported_at': rep.uploaded_at.isoformat(),
+                            'document': rep.result_file.url if rep.result_file else None,
+                        })
+            except Exception:
+                pass
+            return Response(data)
+
+        # POST: create lab order
+        enforce_clinical_write_permission(request.user, 'lab_orders', patient=patient)
+        staff = getattr(request.user, 'staffmember', None)
+        test_name = request.data.get('test_name', 'General Lab Order')
+        from lab.models import LabOrder, LabOrderStatus, LabTest
+        test, _ = LabTest.objects.get_or_create(name=test_name, defaults={'sample_type': 'Blood', 'price': 0})
+        now = timezone.now()
+        order = LabOrder.objects.create(
+            patient=patient,
+            scheduled_collection_time=now + timezone.timedelta(hours=2),
+            notes=request.data.get('notes') or request.data.get('reference_range', ''),
+            status=LabOrderStatus.REQUESTED,
+        )
+        order.tests.add(test)
+        result = LabResult.objects.create(
+            patient=patient,
+            test_name=test_name,
+            result_value=request.data.get('value', 'Pending Collection'),
+            unit=request.data.get('unit', ''),
+            reference_range=request.data.get('reference_range', ''),
+            collected_at=now,
+            reported_at=now,
+        )
+        log_chart_audit(request, patient, 'Write Clinical Entry', 'Lab Orders', record_id=order.id)
+        return Response(LabResultSerializer(result).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['get', 'post'], url_path='doctor-notes')
     def doctor_notes(self, request, pk=None):
@@ -149,7 +428,7 @@ class PatientViewSet(viewsets.ModelViewSet):
             return Response(DoctorNoteSerializer(notes, many=True).data)
 
         # POST: create doctor note
-        enforce_tab_permission(request.user, 'doctor_notes', action='write')
+        enforce_clinical_write_permission(request.user, 'doctor_notes', patient=patient)
         staff = getattr(request.user, 'staffmember', None)
         notes_text = request.data.get('notes', '')
         plan_text = request.data.get('plan', '')
@@ -214,7 +493,7 @@ class PatientViewSet(viewsets.ModelViewSet):
     def sign_doctor_note(self, request, pk=None, note_id=None):
         patient = self.get_object()
         check_clinician_patient_access(request.user, patient)
-        enforce_tab_permission(request.user, 'doctor_notes', action='write')
+        enforce_clinical_write_permission(request.user, 'doctor_notes', patient=patient)
         note = get_object_or_404(DoctorNote, pk=note_id, patient=patient)
         staff = getattr(request.user, 'staffmember', None)
         note.is_signed = True
@@ -298,7 +577,6 @@ class PatientViewSet(viewsets.ModelViewSet):
             return Response(TherapyNoteSerializer(visible_notes, many=True).data)
 
         # POST: create therapy note
-        enforce_tab_permission(request.user, 'physiotherapy', action='write')
         staff = getattr(request.user, 'staffmember', None)
         discipline = request.data.get('discipline')
         if not discipline:
@@ -306,8 +584,11 @@ class PatientViewSet(viewsets.ModelViewSet):
                 discipline = 'speech_therapy'
             elif staff and staff.role in ('psychologist', 'psychotherapist'):
                 discipline = 'psychotherapy'
+            elif staff and staff.role in ('dietician', 'nutritionist'):
+                discipline = 'dietetics'
             else:
                 discipline = 'physiotherapy'
+        enforce_clinical_write_permission(request.user, 'therapy_notes', discipline=discipline, patient=patient)
 
         booking_id = request.data.get('booking_id')
         booking = None
@@ -321,7 +602,7 @@ class PatientViewSet(viewsets.ModelViewSet):
             author=staff,
             booking=booking,
             discipline=discipline,
-            session_notes=request.data.get('session_notes', ''),
+            session_notes=request.data.get('session_notes') or request.data.get('notes', ''),
             plan=request.data.get('plan', ''),
             goals=request.data.get('goals', ''),
             exercises=request.data.get('exercises', []),
@@ -391,8 +672,8 @@ class PatientViewSet(viewsets.ModelViewSet):
     def sign_therapy_note(self, request, pk=None, note_id=None):
         patient = self.get_object()
         check_clinician_patient_access(request.user, patient)
-        enforce_tab_permission(request.user, 'physiotherapy', action='write')
         note = get_object_or_404(TherapyNote, pk=note_id, patient=patient)
+        enforce_clinical_write_permission(request.user, 'therapy_notes', discipline=note.discipline, patient=patient)
         if note.discipline == 'psychotherapy' and not can_view_psychotherapy_note(request.user, note):
             return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -448,7 +729,7 @@ class PatientViewSet(viewsets.ModelViewSet):
             return Response(ClinicalConsentSerializer(consents, many=True).data)
 
         # POST: create consent
-        enforce_tab_permission(request.user, 'consents', action='write')
+        enforce_clinical_write_permission(request.user, 'consents', patient=patient)
         staff = getattr(request.user, 'staffmember', None)
         consent = ClinicalConsent.objects.create(
             patient=patient,
@@ -513,8 +794,8 @@ class PatientViewSet(viewsets.ModelViewSet):
             ).select_related('staff', 'booking').order_by('-created_at')
             return Response(StaffRequestSerializer(requests, many=True).data)
 
-        # POST: create referral (Doctor, Physio, Speech, Psych)
-        enforce_tab_permission(request.user, 'referrals', action='write')
+        # POST: create referral (Doctor only per authorship matrix)
+        enforce_clinical_write_permission(request.user, 'referrals', patient=patient)
         staff = getattr(request.user, 'staffmember', None)
         if not staff:
             return Response({'error': 'No staff profile found.'}, status=status.HTTP_403_FORBIDDEN)
@@ -580,6 +861,7 @@ class PatientViewSet(viewsets.ModelViewSet):
     )
     def prescriptions(self, request, pk=None):
         patient = self.get_object()
+        check_clinician_patient_access(request.user, patient)
         if request.method == 'GET':
             return Response(
                 PrescriptionSerializer(
@@ -594,19 +876,27 @@ class PatientViewSet(viewsets.ModelViewSet):
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        # Attach staff member if available from authenticated user
-        staff = None
-        try:
-            from staff.models import StaffMember
-            staff = StaffMember.objects.filter(user=request.user).first()
-        except Exception:
-            pass
-
-        prescription = serializer.save(patient=patient, uploaded_by=staff)
+        prescription = _save_prescription_record(request, serializer, patient)
         return Response(
             PrescriptionSerializer(prescription, context={'request': request}).data,
             status=status.HTTP_201_CREATED,
         )
+
+    @action(detail=True, methods=['post'], url_path=r'prescriptions/(?P<rx_id>\d+)/verify')
+    def verify_prescription(self, request, pk=None, rx_id=None):
+        return _handle_prescription_action(request, pk, rx_id, 'verify')
+
+    @action(detail=True, methods=['post'], url_path=r'prescriptions/(?P<rx_id>\d+)/reject')
+    def reject_prescription(self, request, pk=None, rx_id=None):
+        return _handle_prescription_action(request, pk, rx_id, 'reject')
+
+    @action(detail=True, methods=['post'], url_path=r'prescriptions/(?P<rx_id>\d+)/discontinue')
+    def discontinue_prescription(self, request, pk=None, rx_id=None):
+        return _handle_prescription_action(request, pk, rx_id, 'discontinue')
+
+    @action(detail=True, methods=['post'], url_path=r'prescriptions/(?P<rx_id>\d+)/cancel')
+    def cancel_prescription(self, request, pk=None, rx_id=None):
+        return _handle_prescription_action(request, pk, rx_id, 'cancel')
 
     # ── Mobile: Daily Report Submission ───────────────────────────────────────
 
@@ -705,6 +995,8 @@ class PatientViewSet(viewsets.ModelViewSet):
         from staff.models import StaffMember
 
         patient = self.get_object()
+        check_clinician_patient_access(request.user, patient)
+        enforce_clinical_write_permission(request.user, 'mar_administer', patient=patient)
 
         try:
             staff = StaffMember.objects.get(user=request.user)
@@ -724,6 +1016,31 @@ class PatientViewSet(viewsets.ModelViewSet):
             prescription = Prescription.objects.get(pk=prescription_id, patient=patient)
         except Prescription.DoesNotExist:
             return Response({'error': 'Prescription not found for this patient.'}, status=status.HTTP_404_NOT_FOUND)
+
+        # 4. MAR verification status check
+        from django.conf import settings
+        admin_before_verification = getattr(settings, 'PRESCRIPTION_ADMIN_BEFORE_VERIFICATION', False)
+        if prescription.verification_status == Prescription.VerificationStatus.PENDING_VERIFICATION and not admin_before_verification:
+            return Response(
+                {
+                    'error': 'pending_verification',
+                    'detail': 'Cannot administer medication: Prescription is awaiting doctor verification.'
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if prescription.verification_status in (
+            Prescription.VerificationStatus.REJECTED,
+            Prescription.VerificationStatus.CANCELLED,
+            Prescription.VerificationStatus.DISCONTINUED
+        ):
+            return Response(
+                {
+                    'error': f'prescription_{prescription.verification_status}',
+                    'detail': f'Cannot administer medication: Prescription is {prescription.verification_status}.'
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         now = timezone.now()
 
@@ -896,7 +1213,7 @@ class PatientViewSet(viewsets.ModelViewSet):
 class PrescriptionViewSet(viewsets.ModelViewSet):
     queryset = Prescription.objects.all()
     serializer_class = PrescriptionSerializer
-    permission_classes = [IsPrescriptionManagementAllowed, IsPatientOrFamilyOwner]
+    permission_classes = [IsPrescriptionManagementAllowed, IsPatientOrFamilyOwner, DenyNonClinicalRoles]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get_queryset(self):
@@ -912,9 +1229,102 @@ class PrescriptionViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         patient = serializer.validated_data.get('patient')
-        if patient:
-            check_nurse_patient_access(self.request.user, patient)
-        serializer.save()
+        if not patient and 'patient' in self.request.data:
+            try:
+                patient = Patient.objects.get(pk=self.request.data.get('patient'))
+            except Exception:
+                pass
+        _save_prescription_record(self.request, serializer, patient)
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        raw_role = get_user_role(request.user)
+        role = normalize_clinical_role(raw_role)
+
+        if raw_role in ('super_admin', 'admin', 'branch_manager', 'care_manager'):
+            return Response(
+                {'detail': "Administrative modification of clinical prescriptions is not permitted. Author nurse may edit while pending; treating doctor may discontinue."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        if role not in ('nurse', 'nursing_assistant'):
+            return Response(
+                {'detail': "Only the author nurse may edit a pending transcribed prescription."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        if instance.verification_status != Prescription.VerificationStatus.PENDING_VERIFICATION:
+            return Response(
+                {'detail': f"Cannot edit prescription: Order is already {instance.verification_status}."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if instance.verified_at is not None or instance.administrations.exists():
+            return Response(
+                {'detail': "Cannot edit prescription: Order has been verified or dose administrations have occurred."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if instance.entered_by and instance.entered_by != request.user:
+            return Response(
+                {'detail': "Only the nurse who entered this transcribed order may edit it while pending."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        if getattr(instance, '_prefetched_objects_cache', None):
+            instance._prefetched_objects_cache = {}
+        log_chart_audit(request, instance.patient, 'Updated Pending Prescription Order', 'Prescriptions', record_id=instance.id)
+        return Response(serializer.data)
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        raw_role = get_user_role(request.user)
+        role = normalize_clinical_role(raw_role)
+
+        if role not in ('nurse', 'nursing_assistant'):
+            log_chart_audit(request, instance.patient, 'Prescription Delete Blocked', 'Prescriptions', record_id=instance.id)
+            return Response(
+                {'detail': 'Physical deletion of prescriptions is disabled. Please cancel or discontinue the order instead.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        if instance.entered_by and instance.entered_by != request.user:
+            log_chart_audit(request, instance.patient, 'Prescription Delete Blocked', 'Prescriptions', record_id=instance.id)
+            return Response(
+                {'detail': "Only the nurse who entered this transcribed order may cancel it."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        if instance.verification_status != Prescription.VerificationStatus.PENDING_VERIFICATION:
+            return Response(
+                {'detail': f"Cannot cancel prescription: Order is already {instance.verification_status}."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if instance.verified_at is not None or instance.administrations.exists():
+            return Response(
+                {'detail': "Cannot cancel prescription: Order has been verified or dose administrations have occurred."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        reason = (request.data.get('reason') if hasattr(request, 'data') else None) or request.query_params.get('reason') or ''
+        if not str(reason).strip():
+            return Response(
+                {'error': 'reason_required', 'detail': 'A cancellation reason is required to cancel a prescription.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        instance.verification_status = Prescription.VerificationStatus.CANCELLED
+        instance.status_reason = str(reason).strip()
+        instance.status_changed_by = request.user
+        instance.status_changed_at = timezone.now()
+        instance.save(update_fields=['verification_status', 'status_reason', 'status_changed_by', 'status_changed_at'])
+        log_chart_audit(request, instance.patient, 'Cancelled Prescription Order', 'Prescriptions', record_id=instance.id)
+        return Response({'detail': 'Prescription successfully cancelled.', 'status': 'cancelled'}, status=status.HTTP_200_OK)
 
     def get_object(self):
         user = self.request.user
@@ -937,10 +1347,10 @@ class PatientPrescriptionDetailView(APIView):
     Endpoint for /api/patients/{patient_pk}/prescriptions/{prescription_pk}/
     Supports:
     - GET: view prescription details and file URL
-    - PATCH / PUT: update prescription (Admins only)
-    - DELETE: delete prescription (Admins only)
+    - PATCH / PUT: update pending transcribed prescription (author nurse only; admins/CM denied)
+    - DELETE: permanently disabled (cancelled or discontinued instead; returns 403)
     """
-    permission_classes = [IsPrescriptionManagementAllowed, IsPatientOrFamilyOwner]
+    permission_classes = [IsPrescriptionManagementAllowed, IsPatientOrFamilyOwner, DenyNonClinicalRoles]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get_object(self, patient_pk, prescription_pk):
@@ -959,11 +1369,45 @@ class PatientPrescriptionDetailView(APIView):
 
     def patch(self, request, patient_pk, prescription_pk):
         prescription = self.get_object(patient_pk, prescription_pk)
+        raw_role = get_user_role(request.user)
+        role = normalize_clinical_role(raw_role)
+
+        if raw_role in ('super_admin', 'admin', 'branch_manager', 'care_manager'):
+            return Response(
+                {'detail': "Administrative modification of clinical prescriptions is not permitted. Author nurse may edit while pending; treating doctor may discontinue."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        if role not in ('nurse', 'nursing_assistant'):
+            return Response(
+                {'detail': "Only the author nurse may edit a pending transcribed prescription."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        if prescription.verification_status != Prescription.VerificationStatus.PENDING_VERIFICATION:
+            return Response(
+                {'detail': f"Cannot edit prescription: Order is already {prescription.verification_status}."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if prescription.verified_at is not None or prescription.administrations.exists():
+            return Response(
+                {'detail': "Cannot edit prescription: Order has been verified or dose administrations have occurred."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if prescription.entered_by and prescription.entered_by != request.user:
+            return Response(
+                {'detail': "Only the nurse who entered this transcribed order may edit it while pending."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
         serializer = PrescriptionSerializer(
             prescription, data=request.data, partial=True, context={'request': request}
         )
         if serializer.is_valid():
             serializer.save()
+            log_chart_audit(request, prescription.patient, 'Updated Pending Prescription Order', 'Prescriptions', record_id=prescription.id)
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -972,14 +1416,71 @@ class PatientPrescriptionDetailView(APIView):
 
     def delete(self, request, patient_pk, prescription_pk):
         prescription = self.get_object(patient_pk, prescription_pk)
-        prescription.delete()
-        return Response({'detail': 'Prescription deleted successfully.'}, status=status.HTTP_204_NO_CONTENT)
+        raw_role = get_user_role(request.user)
+        role = normalize_clinical_role(raw_role)
+
+        if role not in ('nurse', 'nursing_assistant'):
+            log_chart_audit(request, prescription.patient, 'Prescription Delete Blocked', 'Prescriptions', record_id=prescription.id)
+            return Response(
+                {'detail': 'Physical deletion of prescriptions is disabled. Please cancel or discontinue the order instead.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        if prescription.entered_by and prescription.entered_by != request.user:
+            log_chart_audit(request, prescription.patient, 'Prescription Delete Blocked', 'Prescriptions', record_id=prescription.id)
+            return Response(
+                {'detail': "Only the nurse who entered this transcribed order may cancel it."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        if prescription.verification_status != Prescription.VerificationStatus.PENDING_VERIFICATION:
+            return Response(
+                {'detail': f"Cannot cancel prescription: Order is already {prescription.verification_status}."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if prescription.verified_at is not None or prescription.administrations.exists():
+            return Response(
+                {'detail': "Cannot cancel prescription: Order has been verified or dose administrations have occurred."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        reason = (request.data.get('reason') if hasattr(request, 'data') else None) or request.query_params.get('reason') or ''
+        if not str(reason).strip():
+            return Response(
+                {'error': 'reason_required', 'detail': 'A cancellation reason is required to cancel a prescription.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        prescription.verification_status = Prescription.VerificationStatus.CANCELLED
+        prescription.status_reason = str(reason).strip()
+        prescription.status_changed_by = request.user
+        prescription.status_changed_at = timezone.now()
+        prescription.save(update_fields=['verification_status', 'status_reason', 'status_changed_by', 'status_changed_at'])
+        log_chart_audit(request, prescription.patient, 'Cancelled Prescription Order', 'Prescriptions', record_id=prescription.id)
+        return Response({'detail': 'Prescription successfully cancelled.', 'status': 'cancelled'}, status=status.HTTP_200_OK)
+
+
+class PatientPrescriptionActionView(APIView):
+    """
+    Direct endpoint for prescription verification workflows:
+    - /api/patients/{patient_pk}/prescriptions/{prescription_pk}/verify/
+    - /api/patients/{patient_pk}/prescriptions/{prescription_pk}/reject/
+    - /api/patients/{patient_pk}/prescriptions/{prescription_pk}/discontinue/
+    - /api/patients/{patient_pk}/prescriptions/{prescription_pk}/cancel/
+    """
+    permission_classes = [IsAuthenticated, IsPatientOrFamilyOwner, DenyNonClinicalRoles]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+    action = None
+
+    def post(self, request, patient_pk, prescription_pk):
+        return _handle_prescription_action(request, patient_pk, prescription_pk, self.action)
 
 
 class VitalSignViewSet(viewsets.ModelViewSet):
     queryset = VitalSign.objects.select_related('patient', 'recorded_by').all()
     serializer_class = VitalSignSerializer
-    permission_classes = [IsAuthenticated, IsPatientOrFamilyOwner]
+    permission_classes = [IsAuthenticated, IsPatientOrFamilyOwner, DenyNonClinicalRoles]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -996,7 +1497,28 @@ class VitalSignViewSet(viewsets.ModelViewSet):
         patient = serializer.validated_data.get('patient')
         if patient:
             check_nurse_patient_access(self.request.user, patient)
+        enforce_clinical_write_permission(self.request.user, 'vitals', patient=patient)
+        save_kwargs = {}
+        if not serializer.validated_data.get('recorded_at'):
+            save_kwargs['recorded_at'] = timezone.now()
+        staff_member = getattr(self.request.user, 'staffmember', None) or getattr(self.request.user, 'staff_profile', None)
+        if staff_member:
+            save_kwargs['recorded_by'] = staff_member
+        serializer.save(**save_kwargs)
+
+    def perform_update(self, serializer):
+        patient = serializer.instance.patient
+        if patient:
+            check_nurse_patient_access(self.request.user, patient)
+        enforce_clinical_write_permission(self.request.user, 'vitals', patient=patient)
         serializer.save()
+
+    def perform_destroy(self, instance):
+        patient = instance.patient
+        if patient:
+            check_nurse_patient_access(self.request.user, patient)
+        enforce_clinical_write_permission(self.request.user, 'vitals', patient=patient)
+        instance.delete()
 
     def get_object(self):
         user = self.request.user
@@ -1017,7 +1539,7 @@ class VitalSignViewSet(viewsets.ModelViewSet):
 class NurseNoteViewSet(viewsets.ModelViewSet):
     queryset = NurseNote.objects.select_related('patient', 'recorded_by').all()
     serializer_class = NurseNoteSerializer
-    permission_classes = [IsAuthenticated, IsPatientOrFamilyOwner]
+    permission_classes = [IsAuthenticated, IsPatientOrFamilyOwner, DenyNonClinicalRoles]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -1034,7 +1556,23 @@ class NurseNoteViewSet(viewsets.ModelViewSet):
         patient = serializer.validated_data.get('patient')
         if patient:
             check_nurse_patient_access(self.request.user, patient)
+        enforce_clinical_write_permission(self.request.user, 'nurse_notes', patient=patient)
+        staff_member = getattr(self.request.user, 'staffmember', None) or getattr(self.request.user, 'staff_profile', None)
+        serializer.save(recorded_by=staff_member)
+
+    def perform_update(self, serializer):
+        patient = serializer.instance.patient
+        if patient:
+            check_nurse_patient_access(self.request.user, patient)
+        enforce_clinical_write_permission(self.request.user, 'nurse_notes', patient=patient)
         serializer.save()
+
+    def perform_destroy(self, instance):
+        patient = instance.patient
+        if patient:
+            check_nurse_patient_access(self.request.user, patient)
+        enforce_clinical_write_permission(self.request.user, 'nurse_notes', patient=patient)
+        instance.delete()
 
     def get_object(self):
         user = self.request.user
@@ -1055,7 +1593,7 @@ class NurseNoteViewSet(viewsets.ModelViewSet):
 class LabResultViewSet(viewsets.ModelViewSet):
     queryset = LabResult.objects.all()
     serializer_class = LabResultSerializer
-    permission_classes = [IsAuthenticated, IsPatientOrFamilyOwner]
+    permission_classes = [IsAuthenticated, IsPatientOrFamilyOwner, DenyNonClinicalRoles]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -1072,7 +1610,22 @@ class LabResultViewSet(viewsets.ModelViewSet):
         patient = serializer.validated_data.get('patient')
         if patient:
             check_nurse_patient_access(self.request.user, patient)
+        enforce_clinical_write_permission(self.request.user, 'lab_orders', patient=patient)
         serializer.save()
+
+    def perform_update(self, serializer):
+        patient = serializer.instance.patient
+        if patient:
+            check_nurse_patient_access(self.request.user, patient)
+        enforce_clinical_write_permission(self.request.user, 'lab_orders', patient=patient)
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        patient = instance.patient
+        if patient:
+            check_nurse_patient_access(self.request.user, patient)
+        enforce_clinical_write_permission(self.request.user, 'lab_orders', patient=patient)
+        instance.delete()
 
     def get_object(self):
         user = self.request.user

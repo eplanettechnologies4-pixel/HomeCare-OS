@@ -32,6 +32,7 @@ export default function StaffIdCard({ staffMember }) {
   const contactText = targetStaff.contact || targetStaff.phone || targetStaff.email || 'Staff Dispatch';
   const empTypeText = targetStaff.employment_type || 'Full-time Clinical Staff';
   const dutyStatusText = targetStaff.duty_status || targetStaff.status || 'Active';
+  const hospitalContact = targetStaff.hospital_contact_phone || null;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
@@ -276,61 +277,32 @@ export default function StaffIdCard({ staffMember }) {
                   </div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
-                  <div>
-                    Valid Till: <strong style={{ color: '#FDE047' }}>2027-12-31</strong>
-                  </div>
-                  <div style={{ fontSize: '0.62rem', color: 'var(--status-green)', fontWeight: 600 }}>
-                    PMDC / Hospital Verified ✓
-                  </div>
+                  {targetStaff.expiry_date && (
+                    <div>
+                      Valid Till: <strong style={{ color: '#FDE047' }}>{targetStaff.expiry_date}</strong>
+                    </div>
+                  )}
+                  {targetStaff.hr_verified && (
+                    <div style={{ fontSize: '0.62rem', color: '#86EFAC', fontWeight: 600 }}>
+                      Verified by HR ✓
+                    </div>
+                  )}
                 </div>
               </div>
             </>
           ) : (
             /* ── BACK SIDE DESIGN WITH QR CODE ── */
-            <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', height: '100%', fontSize: '0.72rem', lineHeight: 1.45 }}>
-              <div>
-                <div style={{ fontWeight: 700, color: '#FDE047', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <ShieldCheck size={14} /> Official Medical Staff Credential
-                </div>
-                <div style={{ fontSize: '0.67rem', color: 'rgba(255,255,255,0.85)', marginBottom: 6, lineHeight: 1.35 }}>
-                  This card certifies that the cardholder is an authorized clinical staff member of eHealth Hospital at Home. If found, please return to Islamabad Operations Center.
-                </div>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', textAlign: 'center', gap: 14 }}>
+              {/* QR Code on Back */}
+              <div style={{ flexShrink: 0, padding: 8, background: '#FFFFFF', borderRadius: 8 }}>
+                <QRCodeDisplay token={targetStaff.verification_token} employeeId={targetStaff.employee_id} size={90} />
               </div>
-
-              <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                <div style={{ flex: 1, background: 'rgba(0,0,0,0.25)', padding: '6px 10px', borderRadius: 6, border: '1px solid rgba(255,255,255,0.1)', minWidth: 0 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
-                    <span style={{ color: 'rgba(255,255,255,0.7)' }}>Helpline:</span>
-                    <strong style={{ color: 'white' }}>+92-21-111-CARE-OS</strong>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
-                    <span style={{ color: 'rgba(255,255,255,0.7)' }}>Department:</span>
-                    <strong style={{ color: 'white', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{deptText}</strong>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
-                    <span style={{ color: 'rgba(255,255,255,0.7)' }}>Employee ID:</span>
-                    <strong style={{ color: '#FDE047', fontFamily: 'var(--font-mono)' }}>{targetStaff.employee_id}</strong>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: 'rgba(255,255,255,0.7)' }}>Duty Status:</span>
-                    <strong style={{ color: '#86EFAC', textTransform: 'capitalize' }}>{dutyStatusText}</strong>
-                  </div>
+              {/* Hospital Contact Line ONLY (hidden if no number configured) */}
+              {hospitalContact ? (
+                <div style={{ fontSize: '0.78rem', color: '#FDE047', fontWeight: 600 }}>
+                  eHealth Hospital at Home · Helpline: {hospitalContact}
                 </div>
-
-                {/* QR Code on Back */}
-                <div style={{ flexShrink: 0 }}>
-                  <QRCodeDisplay token={targetStaff.verification_token} employeeId={targetStaff.employee_id} size={58} />
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid rgba(255,255,255,0.15)', paddingTop: 6, marginTop: 2 }}>
-                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.68rem', letterSpacing: '2px', color: 'rgba(255,255,255,0.6)' }}>
-                  *{targetStaff.employee_id}*
-                </div>
-                <div style={{ fontSize: '0.62rem', color: 'rgba(255,255,255,0.6)', textAlign: 'right' }}>
-                  Authorized Signatory
-                </div>
-              </div>
+              ) : null}
             </div>
           )}
         </div>

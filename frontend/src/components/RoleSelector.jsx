@@ -60,16 +60,14 @@ export default function RoleSelector() {
         }}
         aria-label="Switch User Role"
       >
-        {(() => {
-          const seen = new Set();
-          return Object.entries(ROLE_CONFIG).filter(([key, cfg]) => {
-            if (!cfg?.label || seen.has(cfg.label)) return false;
-            seen.add(cfg.label);
-            return true;
-          }).map(([key, cfg]) => (
-            <option key={key} value={key}>{cfg.label}</option>
-          ));
-        })()}
+        {/* Canonical role list — explicit array avoids any Object.entries enumeration issues */}
+        {[
+          'super_admin', 'admin', 'branch_manager', 'care_manager',
+          'doctor', 'physiotherapist', 'speech_therapist', 'psychotherapist',
+          'nurse', 'dietician', 'accountant', 'crm_executive', 'patient_family',
+        ].filter(key => ROLE_CONFIG[key]?.label).map(key => (
+          <option key={key} value={key}>{ROLE_CONFIG[key].label}</option>
+        ))}
       </select>
     </div>
   );

@@ -23,9 +23,14 @@ from homecareOS.auth_views import (
 from homecareOS.location_resolver import ResolveLocationLinkView
 from lms.views import CertificateVerifyView
 from lms.media_views import ProtectedLMSMediaView
+from patients.views import PrescriptionViewSet
 
 urlpatterns = [
     path('django-admin/', admin.site.urls),
+
+    # ── Prescriptions Global Route Alias ──────────────────────────────────────
+    path('api/prescriptions/', PrescriptionViewSet.as_view({'get': 'list', 'post': 'create'}), name='prescription-root-list'),
+    path('api/prescriptions/<int:pk>/', PrescriptionViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='prescription-root-detail'),
 
     # ── Auth ──────────────────────────────────────────────────────────────────
     # simplejwt login with username/email & rich user payload

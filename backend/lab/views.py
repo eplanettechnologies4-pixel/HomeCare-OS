@@ -17,6 +17,7 @@ from .serializers import (
 from patients.models import Patient, LabResult
 from staff.models import StaffMember
 from notifications.models import Notification
+from homecareOS.permissions import DenyNonClinicalRoles, get_user_role
 
 
 class LabTestViewSet(viewsets.ModelViewSet):
@@ -27,7 +28,7 @@ class LabTestViewSet(viewsets.ModelViewSet):
     """
     queryset = LabTest.objects.filter(is_active=True)
     serializer_class = LabTestSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, DenyNonClinicalRoles]
 
     def get_queryset(self):
         qs = LabTest.objects.filter(is_active=True)
@@ -39,6 +40,27 @@ class LabTestViewSet(viewsets.ModelViewSet):
         if sample_type:
             qs = qs.filter(sample_type__iexact=sample_type)
         return qs
+
+    def perform_create(self, serializer):
+        role = get_user_role(self.request.user)
+        if role not in ('admin', 'super_admin', 'care_manager') and not self.request.user.is_superuser:
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("Only administrators or care managers may manage the lab test catalogue.")
+        serializer.save()
+
+    def perform_update(self, serializer):
+        role = get_user_role(self.request.user)
+        if role not in ('admin', 'super_admin', 'care_manager') and not self.request.user.is_superuser:
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("Only administrators or care managers may manage the lab test catalogue.")
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        role = get_user_role(self.request.user)
+        if role not in ('admin', 'super_admin', 'care_manager') and not self.request.user.is_superuser:
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("Only administrators or care managers may manage the lab test catalogue.")
+        instance.delete()
 
 
 class LabOrderViewSet(viewsets.ModelViewSet):
@@ -53,7 +75,7 @@ class LabOrderViewSet(viewsets.ModelViewSet):
     """
     queryset = LabOrder.objects.select_related('patient', 'collection_staff').prefetch_related('tests', 'reports').all()
     parser_classes = [MultiPartParser, FormParser, JSONParser]
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, DenyNonClinicalRoles]
 
     def get_serializer_class(self):
         if self.action == 'list':
@@ -106,6 +128,11 @@ class LabOrderViewSet(viewsets.ModelViewSet):
         except Patient.DoesNotExist:
             return Response({'error': 'Patient not found'}, status=status.HTTP_404_NOT_FOUND)
 
+        staff = getattr(request.user, 'staffmember', None)
+        if staff or request.user.is_staff or request.user.is_superuser:
+            from homecareOS.clinician_permissions import enforce_clinical_write_permission
+            enforce_clinical_write_permission(request.user, 'lab_orders', patient=patient)
+
         test_ids = data.get('test_ids', [])
         if isinstance(test_ids, str):
             try:
@@ -144,6 +171,10 @@ class LabOrderViewSet(viewsets.ModelViewSet):
         PATCH /api/lab/orders/{id}/assign-collector/
         Body: {"staff_id": <int>}
         """
+        role = get_user_role(request.user)
+        if role not in ('care_manager', 'admin', 'super_admin', 'branch_manager') and not request.user.is_superuser:
+            return Response({'error': 'Only care managers or administrators may assign lab collection staff.'}, status=status.HTTP_403_FORBIDDEN)
+
         order = self.get_object()
         staff_id = request.data.get('staff_id') or request.data.get('collection_staff')
         if not staff_id:
@@ -181,6 +212,10 @@ class LabOrderViewSet(viewsets.ModelViewSet):
           - lng: float
           - notes: str (optional)
         """
+        role = get_user_role(request.user)
+        if role not in ('nurse', 'nursing_assistant', 'lab_tech') and not request.user.is_superuser:
+            return Response({'error': 'Only field nurses and lab technicians may collect lab samples.'}, status=status.HTTP_403_FORBIDDEN)
+
         order = self.get_object()
         lat = request.data.get('lat') or request.data.get('latitude')
         lng = request.data.get('lng') or request.data.get('longitude')
@@ -219,6 +254,10 @@ class LabOrderViewSet(viewsets.ModelViewSet):
           - flagged_abnormal: bool (optional)
           - clinical_remarks: str (optional)
         """
+        role = get_user_role(request.user)
+        if role not in ('lab_tech', 'doctor', 'admin', 'super_admin') and not request.user.is_superuser:
+            return Response({'error': 'Only lab technicians, doctors, or administrators may upload diagnostic reports.'}, status=status.HTTP_403_FORBIDDEN)
+
         order = self.get_object()
         result_file = request.FILES.get('result_file')
         raw_result_data = request.data.get('result_data', {})

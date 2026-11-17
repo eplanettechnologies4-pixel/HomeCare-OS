@@ -145,6 +145,26 @@ export default function MarSheetFormC({ patient, isReadOnly = false }) {
                   <span className={`badge ${med.prescription_type === 'regular' ? 'badge-teal' : 'badge-amber'}`} style={{ fontSize: '0.68rem' }}>
                     {med.prescription_type === 'regular' ? 'Regular Prescription' : 'PRN Medication'}
                   </span>
+                  {med.verification_status === 'pending_verification' && (
+                    <span className="badge" style={{ fontSize: '0.68rem', background: '#FEF3C7', color: '#92400E', border: '1px solid #FCD34D' }}>
+                      Pending Doctor Verification
+                    </span>
+                  )}
+                  {med.verification_status === 'verified' && (
+                    <span className="badge badge-green" style={{ fontSize: '0.68rem' }}>
+                      Verified
+                    </span>
+                  )}
+                  {med.verification_status === 'rejected' && (
+                    <span className="badge badge-red" style={{ fontSize: '0.68rem' }}>
+                      Rejected
+                    </span>
+                  )}
+                  {med.verification_status === 'discontinued' && (
+                    <span className="badge" style={{ fontSize: '0.68rem', background: '#E2E8F0', color: '#475569' }}>
+                      Discontinued
+                    </span>
+                  )}
                 </div>
                 <div style={{ display: 'flex', gap: 16, marginTop: 4, fontSize: '0.82rem', color: '#4b5563' }}>
                   <span><strong>Dose:</strong> {med.dose}</span>
@@ -205,13 +225,24 @@ export default function MarSheetFormC({ patient, isReadOnly = false }) {
                               </div>
                             </div>
                           ) : dh.isToday && !isReadOnly ? (
-                            <button
-                              className="btn btn-primary btn-sm"
-                              style={{ fontSize: '0.7rem', padding: '4px 8px', gap: 4 }}
-                              onClick={() => administerMarDose(med.id, 7)}
-                            >
-                              <CheckCircle size={12} /> Administer & Sign
-                            </button>
+                            med.verification_status === 'pending_verification' ? (
+                              <button
+                                className="btn btn-secondary btn-sm"
+                                style={{ fontSize: '0.66rem', padding: '4px 6px', opacity: 0.65, cursor: 'not-allowed', color: '#92400E', background: '#FEF3C7', border: '1px solid #FCD34D' }}
+                                disabled
+                                title="Awaiting doctor verification"
+                              >
+                                Awaiting doctor verification
+                              </button>
+                            ) : (
+                              <button
+                                className="btn btn-primary btn-sm"
+                                style={{ fontSize: '0.7rem', padding: '4px 8px', gap: 4 }}
+                                onClick={() => administerMarDose(med.id, 7)}
+                              >
+                                <CheckCircle size={12} /> Administer & Sign
+                              </button>
+                            )
                           ) : (
                             <div style={{ color: '#d1d5db', fontSize: '0.75rem' }}>
                               {dh.dayIndex > 7 ? 'Future' : '—'}

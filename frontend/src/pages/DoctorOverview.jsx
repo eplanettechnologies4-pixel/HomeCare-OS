@@ -6,7 +6,9 @@ import {
   AlertCircle, ChevronDown, Check, ShieldCheck
 } from 'lucide-react';
 import apiFetch from '../services/api';
+import useStore from '../store/useStore';
 import StaffIdCard from '../components/StaffIdCard';
+import StaffOverviewHeader from '../components/StaffOverviewHeader';
 
 /**
  * DoctorOverview: Specialized Clinician Overview Layout for role 'doctor'
@@ -265,85 +267,203 @@ export default function DoctorOverview({
     setTierShowAll((prev) => ({ ...prev, [tierKey]: !prev[tierKey] }));
   };
 
+  const doctorRosterCard = (
+    <section
+      className="card"
+      style={{
+        background: '#FFFFFF',
+        borderRadius: 16,
+        border: '1px solid #EEF0F4',
+        borderTop: '4px solid #6D28D9',
+        boxShadow: '0 4px 20px rgba(109, 40, 217, 0.06)',
+        padding: 22,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 16,
+      }}
+    >
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: 10,
+              background: 'linear-gradient(135deg, #8B5CF6, #6D28D9)',
+              color: '#FFFFFF',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 2px 8px rgba(109,40,217,0.25)',
+            }}
+          >
+            <Calendar size={18} />
+          </div>
+          <div>
+            <h2 style={{ fontSize: '1.05rem', fontWeight: 800, color: '#1E1B4B', margin: 0 }}>
+              Today's Roster & Duty Schedule
+            </h2>
+            <div style={{ fontSize: '0.8rem', color: '#6B7280' }}>
+              Shift duty window, clinical presence, and weekly schedule coverage (Asia/Karachi)
+            </div>
+          </div>
+        </div>
+
+        {/* Status Badge */}
+        <div>
+          <span
+            style={{
+              fontSize: '0.75rem',
+              fontWeight: 700,
+              padding: '4px 12px',
+              borderRadius: 9999,
+              background:
+                dutyStatus === 'On duty' ? '#ECFDF5' : (dutyStatus === 'On leave' ? '#FEF3C7' : '#F3F4F6'),
+              color:
+                dutyStatus === 'On duty' ? '#047857' : (dutyStatus === 'On leave' ? '#B45309' : '#4B5563'),
+              border: `1.5px solid ${dutyStatus === 'On duty' ? '#A7F3D0' : (dutyStatus === 'On leave' ? '#FDE68A' : '#E5E7EB')}`,
+            }}
+          >
+            {dutyStatus === 'On duty' ? '• On duty' : dutyStatus}
+          </span>
+        </div>
+      </div>
+
+      {/* Duty Window Details & Next Duty */}
+      <div
+        style={{
+          background: 'linear-gradient(135deg, #FAF5FF 0%, #F5F3FF 100%)',
+          border: '1.5px solid #DDD6FE',
+          borderRadius: 14,
+          padding: '14px 18px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 10,
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 10 }}>
+          <div>
+            <div style={{ fontSize: '0.72rem', color: '#7C3AED', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              {todayShift ? (todayShift.type || 'Assigned Clinical Shift') : 'Official Duty Window'}
+            </div>
+            <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#1E1B4B', marginTop: 2 }}>
+              {todayShift
+                ? `${formatKarachiTime(todayShift.start)} – ${formatKarachiTime(todayShift.end)} (Asia/Karachi)`
+                : `${workingHours.start} – ${workingHours.end} (${workingHours.timezone || 'Asia/Karachi'})`}
+            </div>
+            <div style={{ fontSize: '0.8rem', color: '#4B5563', marginTop: 4, display: 'flex', alignItems: 'center', gap: 5 }}>
+              <MapPin size={13} style={{ color: '#7C3AED' }} />
+              {todayShift?.patient?.location || 'Islamabad Clinical Operations Center · Attending Physician Rounds'}
+            </div>
+          </div>
+
+          {/* Next Duty */}
+          <div style={{ textAlign: 'right', minWidth: 200 }}>
+            <div style={{ fontSize: '0.72rem', color: '#6B7280', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Next Scheduled Duty
+            </div>
+            {nextDuty ? (
+              <div style={{ marginTop: 2 }}>
+                <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#1F2937' }}>
+                  {formatKarachiDateTime(nextDuty.start)}
+                </div>
+                <div style={{ fontSize: '0.74rem', color: '#6D28D9', fontWeight: 600 }}>
+                  {nextDuty.patient?.name ? `Patient: ${nextDuty.patient.name}` : (nextDuty.type || 'Clinical Shift')}
+                </div>
+              </div>
+            ) : (
+              <div style={{ fontSize: '0.8rem', color: '#9CA3AF', fontStyle: 'italic', marginTop: 2 }}>
+                No further scheduled duties this week
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Compact 7-Day Strip of This Week's Roster */}
+      <div>
+        <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#4B5563', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+          7-Day Weekly Roster Strip (Mon – Sun)
+        </div>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(7, 1fr)',
+            gap: 8,
+          }}
+        >
+          {weekDays.map((day) => {
+            const hasShift = day.shifts.length > 0;
+            return (
+              <div
+                key={day.isoDate}
+                style={{
+                  padding: '10px 6px',
+                  borderRadius: 10,
+                  textAlign: 'center',
+                  background: day.isToday ? '#EDE9FE' : (hasShift ? '#FAF5FF' : '#F9FAFB'),
+                  border: day.isToday
+                    ? '2px solid #7C3AED'
+                    : `1px solid ${hasShift ? '#DDD6FE' : '#E5E7EB'}`,
+                  boxShadow: day.isToday ? '0 2px 8px rgba(109,40,217,0.15)' : 'none',
+                  transition: 'all 150ms ease',
+                }}
+                title={hasShift ? `${day.shifts.length} duty shift(s) scheduled on ${day.isoDate}` : `No duties scheduled on ${day.isoDate}`}
+              >
+                <div style={{ fontSize: '0.72rem', color: day.isToday ? '#6D28D9' : '#6B7280', fontWeight: 700 }}>
+                  {day.dayName}
+                </div>
+                <div style={{ fontSize: '1rem', fontWeight: 800, color: day.isToday ? '#6D28D9' : '#1F2937', margin: '2px 0' }}>
+                  {day.dayNum}
+                </div>
+                <div>
+                  {hasShift ? (
+                    <span
+                      style={{
+                        fontSize: '0.62rem',
+                        fontWeight: 700,
+                        background: '#6D28D9',
+                        color: '#FFFFFF',
+                        padding: '2px 6px',
+                        borderRadius: 999,
+                        display: 'inline-block',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {day.shifts.length > 1 ? `${day.shifts.length} Shifts` : 'Duty'}
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: '0.65rem', color: '#9CA3AF' }}>
+                      {day.isToday ? 'Standby' : 'Off'}
+                    </span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </section>
+  );
+
   return (
     <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '24px', maxWidth: '1440px', margin: '0 auto', fontFamily: 'Inter, sans-serif' }}>
       
-      {/* ── 1. Hero Band: Greeting, Working Hours, Live Refresh, Emergency Helpline ── */}
-      <div
-        className="card"
-        style={{
-          padding: '24px 28px',
-          background: 'linear-gradient(135deg, #FFFFFF 0%, #FAF5FF 60%, #F5F3FF 100%)',
-          borderTop: '4px solid #6D28D9',
-          borderRadius: 16,
-          boxShadow: '0 4px 20px rgba(109, 40, 217, 0.06)',
-          display: 'flex',
-          flexWrap: 'wrap',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 20,
-        }}
-      >
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 6 }}>
-            <span
-              style={{
-                fontSize: '0.75rem',
-                fontWeight: 700,
-                textTransform: 'uppercase',
-                padding: '3px 10px',
-                borderRadius: 999,
-                background: '#EDE9FE',
-                color: '#6D28D9',
-                letterSpacing: '0.04em',
-              }}
-            >
-              Doctors Portal
-            </span>
-            <span style={{ fontSize: '0.8rem', color: '#6B7280', display: 'flex', alignItems: 'center', gap: 4 }}>
-              <Clock size={13} />
-              Official Hours: {workingHours.start} – {workingHours.end} ({workingHours.timezone || 'Asia/Karachi'})
-            </span>
-            {lastUpdated && (
-              <span style={{ fontSize: '0.75rem', color: '#9CA3AF' }}>
-                • Updated {lastUpdated}
-              </span>
-            )}
-          </div>
-          <h1 style={{ margin: 0, fontSize: '1.75rem', fontWeight: 800, color: '#1F2937', letterSpacing: '-0.02em' }}>
-            Good day, {staff.name}
-          </h1>
-          <p style={{ margin: '6px 0 0 0', fontSize: '0.92rem', color: '#4B5563' }}>
-            <strong>{staff.designation}</strong> • Speciality: <em>{staff.specialities || 'Internal Medicine / Clinical Cardiology'}</em>
-          </p>
-        </div>
-
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-          <button
-            type="button"
-            onClick={handleRefreshAll}
-            className="btn btn-ghost btn-sm"
-            style={{ color: '#6D28D9', borderColor: '#DDD6FE', gap: 6 }}
-            title="Refresh doctor dashboard"
-          >
-            <RefreshCw size={14} /> Refresh
-          </button>
-          <button
-            type="button"
-            onClick={() => setActivePage('call-help')}
-            className="btn btn-sm"
-            style={{
-              background: 'linear-gradient(135deg, #FEF2F2 0%, #FEE2E2 100%)',
-              color: '#DC2626',
-              border: '1px solid #FCA5A5',
-              fontWeight: 700,
-              gap: 6,
-            }}
-          >
-            <Phone size={14} /> Emergency Helpline
-          </button>
-        </div>
-      </div>
+      {/* ── 1. Shared Staff Overview Header (Slim Greeting Strip + ID Card & Roster Grid) ── */}
+      <StaffOverviewHeader
+        staff={staff}
+        employeeCard={employeeCard}
+        roleTitle="Doctors Portal"
+        badgeColor="#6D28D9"
+        dutyStatus={dutyStatus}
+        workingHours={workingHours}
+        lastUpdated={lastUpdated}
+        onRefresh={handleRefreshAll}
+        onHelpClick={() => setActivePage('call-help')}
+        helpButtonLabel="Emergency Helpline"
+        rosterCard={doctorRosterCard}
+      />
 
       {/* ── 2. TWO-COLUMN RESPONSIVE LAYOUT (Desktop: Main ~2/3 left, Sticky Side ~1/3 right; Mobile/Tablet: Stacked) ── */}
       <div
@@ -637,185 +757,6 @@ export default function DoctorOverview({
             )}
           </section>
 
-          {/* ── CARD A: "Today's roster and duty" ── */}
-          <section
-            className="card"
-            style={{
-              background: '#FFFFFF',
-              borderRadius: 16,
-              border: '1px solid #EEF0F4',
-              borderTop: '4px solid #6D28D9',
-              boxShadow: '0 4px 20px rgba(109, 40, 217, 0.06)',
-              padding: 22,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 16,
-            }}
-          >
-            {/* Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div
-                  style={{
-                    width: 36,
-                    height: 36,
-                    borderRadius: 10,
-                    background: 'linear-gradient(135deg, #8B5CF6, #6D28D9)',
-                    color: '#FFFFFF',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    boxShadow: '0 2px 8px rgba(109,40,217,0.25)',
-                  }}
-                >
-                  <Calendar size={18} />
-                </div>
-                <div>
-                  <h2 style={{ fontSize: '1.05rem', fontWeight: 800, color: '#1E1B4B', margin: 0 }}>
-                    Today's Roster & Duty Schedule
-                  </h2>
-                  <div style={{ fontSize: '0.8rem', color: '#6B7280' }}>
-                    Shift duty window, clinical presence, and weekly schedule coverage (Asia/Karachi)
-                  </div>
-                </div>
-              </div>
-
-              {/* Status Badge */}
-              <div>
-                <span
-                  style={{
-                    fontSize: '0.75rem',
-                    fontWeight: 700,
-                    padding: '4px 12px',
-                    borderRadius: 9999,
-                    background:
-                      dutyStatus === 'On duty' ? '#ECFDF5' : (dutyStatus === 'On leave' ? '#FEF3C7' : '#F3F4F6'),
-                    color:
-                      dutyStatus === 'On duty' ? '#047857' : (dutyStatus === 'On leave' ? '#B45309' : '#4B5563'),
-                    border: `1.5px solid ${dutyStatus === 'On duty' ? '#A7F3D0' : (dutyStatus === 'On leave' ? '#FDE68A' : '#E5E7EB')}`,
-                  }}
-                >
-                  {dutyStatus === 'On duty' ? '• On duty' : dutyStatus}
-                </span>
-              </div>
-            </div>
-
-            {/* Duty Window Details & Next Duty */}
-            <div
-              style={{
-                background: 'linear-gradient(135deg, #FAF5FF 0%, #F5F3FF 100%)',
-                border: '1.5px solid #DDD6FE',
-                borderRadius: 14,
-                padding: '14px 18px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 10,
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 10 }}>
-                <div>
-                  <div style={{ fontSize: '0.72rem', color: '#7C3AED', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                    {todayShift ? (todayShift.type || 'Assigned Clinical Shift') : 'Official Duty Window'}
-                  </div>
-                  <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#1E1B4B', marginTop: 2 }}>
-                    {todayShift
-                      ? `${formatKarachiTime(todayShift.start)} – ${formatKarachiTime(todayShift.end)} (Asia/Karachi)`
-                      : `${workingHours.start} – ${workingHours.end} (${workingHours.timezone || 'Asia/Karachi'})`}
-                  </div>
-                  <div style={{ fontSize: '0.8rem', color: '#4B5563', marginTop: 4, display: 'flex', alignItems: 'center', gap: 5 }}>
-                    <MapPin size={13} style={{ color: '#7C3AED' }} />
-                    {todayShift?.patient?.location || 'Islamabad Clinical Operations Center · Attending Physician Rounds'}
-                  </div>
-                </div>
-
-                {/* Next Duty */}
-                <div style={{ textAlign: 'right', minWidth: 200 }}>
-                  <div style={{ fontSize: '0.72rem', color: '#6B7280', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                    Next Scheduled Duty
-                  </div>
-                  {nextDuty ? (
-                    <div style={{ marginTop: 2 }}>
-                      <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#1F2937' }}>
-                        {formatKarachiDateTime(nextDuty.start)}
-                      </div>
-                      <div style={{ fontSize: '0.74rem', color: '#6D28D9', fontWeight: 600 }}>
-                        {nextDuty.patient?.name ? `Patient: ${nextDuty.patient.name}` : (nextDuty.type || 'Clinical Shift')}
-                      </div>
-                    </div>
-                  ) : (
-                    <div style={{ fontSize: '0.8rem', color: '#9CA3AF', fontStyle: 'italic', marginTop: 2 }}>
-                      No further scheduled duties this week
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Compact 7-Day Strip of This Week's Roster */}
-            <div>
-              <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#4B5563', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                7-Day Weekly Roster Strip (Mon – Sun)
-              </div>
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(7, 1fr)',
-                  gap: 8,
-                }}
-              >
-                {weekDays.map((day) => {
-                  const hasShift = day.shifts.length > 0;
-                  return (
-                    <div
-                      key={day.isoDate}
-                      style={{
-                        padding: '10px 6px',
-                        borderRadius: 10,
-                        textAlign: 'center',
-                        background: day.isToday ? '#EDE9FE' : (hasShift ? '#FAF5FF' : '#F9FAFB'),
-                        border: day.isToday
-                          ? '2px solid #7C3AED'
-                          : `1px solid ${hasShift ? '#DDD6FE' : '#E5E7EB'}`,
-                        boxShadow: day.isToday ? '0 2px 8px rgba(109,40,217,0.15)' : 'none',
-                        transition: 'all 150ms ease',
-                      }}
-                      title={hasShift ? `${day.shifts.length} duty shift(s) scheduled on ${day.isoDate}` : `No duties scheduled on ${day.isoDate}`}
-                    >
-                      <div style={{ fontSize: '0.72rem', color: day.isToday ? '#6D28D9' : '#6B7280', fontWeight: 700 }}>
-                        {day.dayName}
-                      </div>
-                      <div style={{ fontSize: '1rem', fontWeight: 800, color: day.isToday ? '#6D28D9' : '#1F2937', margin: '2px 0' }}>
-                        {day.dayNum}
-                      </div>
-                      <div>
-                        {hasShift ? (
-                          <span
-                            style={{
-                              fontSize: '0.62rem',
-                              fontWeight: 700,
-                              background: '#6D28D9',
-                              color: '#FFFFFF',
-                              padding: '2px 6px',
-                              borderRadius: 999,
-                              display: 'inline-block',
-                              whiteSpace: 'nowrap',
-                            }}
-                          >
-                            {day.shifts.length > 1 ? `${day.shifts.length} Shifts` : 'Duty'}
-                          </span>
-                        ) : (
-                          <span style={{ fontSize: '0.65rem', color: '#9CA3AF' }}>
-                            {day.isToday ? 'Standby' : 'Off'}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </section>
-
           {/* ── TABLE B: "Today's scheduled visits" ── */}
           <section
             className="card"
@@ -949,45 +890,6 @@ export default function DoctorOverview({
             ════════════════════════════════════════════════════════════════ */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }} className="doctor-side-column">
 
-          {/* ── CARD C: Digital ID Card (Reusing StaffIdCard with live data) ── */}
-          <section
-            className="card doctor-id-card-section"
-            style={{
-              padding: '20px',
-              borderTop: '4px solid #6D28D9',
-              background: '#FFFFFF',
-              borderRadius: 16,
-              boxShadow: '0 4px 20px rgba(109, 40, 217, 0.06)',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-            }}
-          >
-            <div style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <ShieldCheck size={16} style={{ color: '#6D28D9' }} />
-                <span style={{ fontSize: '0.78rem', fontWeight: 800, textTransform: 'uppercase', color: '#6D28D9', letterSpacing: '0.05em' }}>
-                  Digital Clinician Credential
-                </span>
-              </div>
-              <span
-                style={{
-                  fontSize: '0.72rem',
-                  fontWeight: 700,
-                  color: dutyStatus === 'On duty' ? '#059669' : '#4B5563',
-                  background: dutyStatus === 'On duty' ? '#ECFDF5' : '#F3F4F6',
-                  padding: '2px 8px',
-                  borderRadius: 999,
-                }}
-              >
-                {dutyStatus}
-              </span>
-            </div>
-
-            {/* Existing StaffIdCard component with live doctor data */}
-            <StaffIdCard staffMember={employeeCard || staff} />
-          </section>
-
           {/* Remaining Side Column Cards (Requests + Tiers) */}
           <div className="doctor-side-rest" style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
 
@@ -1011,14 +913,14 @@ export default function DoctorOverview({
               </span>
             </div>
 
-            {/* 3 Clickable Count Tiles */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, textAlign: 'center' }}>
+            {/* 4 Clickable Count Tiles */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, textAlign: 'center' }}>
               <button
                 type="button"
                 onClick={() => setActiveRequestTab(activeRequestTab === 'referrals' ? null : 'referrals')}
                 aria-pressed={activeRequestTab === 'referrals'}
                 style={{
-                  padding: '12px 6px',
+                  padding: '10px 4px',
                   background: activeRequestTab === 'referrals' ? '#FDE68A' : '#FFFBEB',
                   borderRadius: 10,
                   border: `1.5px solid ${activeRequestTab === 'referrals' ? '#D97706' : '#FDE68A'}`,
@@ -1027,10 +929,10 @@ export default function DoctorOverview({
                   transition: 'all 150ms ease',
                 }}
               >
-                <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#B45309' }}>
+                <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#B45309' }}>
                   {pendingRequests.referrals?.length || 0}
                 </div>
-                <div style={{ fontSize: '0.72rem', color: '#92400E', fontWeight: 600, marginTop: 2 }}>
+                <div style={{ fontSize: '0.68rem', color: '#92400E', fontWeight: 600, marginTop: 2 }}>
                   Referrals
                 </div>
               </button>
@@ -1040,7 +942,7 @@ export default function DoctorOverview({
                 onClick={() => setActiveRequestTab(activeRequestTab === 'consultations' ? null : 'consultations')}
                 aria-pressed={activeRequestTab === 'consultations'}
                 style={{
-                  padding: '12px 6px',
+                  padding: '10px 4px',
                   background: activeRequestTab === 'consultations' ? '#BFDBFE' : '#EFF6FF',
                   borderRadius: 10,
                   border: `1.5px solid ${activeRequestTab === 'consultations' ? '#2563EB' : '#BFDBFE'}`,
@@ -1049,11 +951,11 @@ export default function DoctorOverview({
                   transition: 'all 150ms ease',
                 }}
               >
-                <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#1D4ED8' }}>
+                <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#1D4ED8' }}>
                   {pendingRequests.consultations?.length || 0}
                 </div>
-                <div style={{ fontSize: '0.72rem', color: '#1E40AF', fontWeight: 600, marginTop: 2 }}>
-                  Consultations
+                <div style={{ fontSize: '0.68rem', color: '#1E40AF', fontWeight: 600, marginTop: 2 }}>
+                  Consults
                 </div>
               </button>
 
@@ -1062,7 +964,7 @@ export default function DoctorOverview({
                 onClick={() => setActiveRequestTab(activeRequestTab === 'procedures' ? null : 'procedures')}
                 aria-pressed={activeRequestTab === 'procedures'}
                 style={{
-                  padding: '12px 6px',
+                  padding: '10px 4px',
                   background: activeRequestTab === 'procedures' ? '#BBF7D0' : '#F0FDF4',
                   borderRadius: 10,
                   border: `1.5px solid ${activeRequestTab === 'procedures' ? '#059669' : '#BBF7D0'}`,
@@ -1071,11 +973,33 @@ export default function DoctorOverview({
                   transition: 'all 150ms ease',
                 }}
               >
-                <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#047857' }}>
+                <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#047857' }}>
                   {pendingRequests.procedures?.length || 0}
                 </div>
-                <div style={{ fontSize: '0.72rem', color: '#065F46', fontWeight: 600, marginTop: 2 }}>
+                <div style={{ fontSize: '0.68rem', color: '#065F46', fontWeight: 600, marginTop: 2 }}>
                   Procedures
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveRequestTab(activeRequestTab === 'prescriptions_to_verify' ? null : 'prescriptions_to_verify')}
+                aria-pressed={activeRequestTab === 'prescriptions_to_verify'}
+                style={{
+                  padding: '10px 4px',
+                  background: activeRequestTab === 'prescriptions_to_verify' ? '#DDD6FE' : '#F5F3FF',
+                  borderRadius: 10,
+                  border: `1.5px solid ${activeRequestTab === 'prescriptions_to_verify' ? '#7C3AED' : '#DDD6FE'}`,
+                  cursor: 'pointer',
+                  textAlign: 'center',
+                  transition: 'all 150ms ease',
+                }}
+              >
+                <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#6D28D9' }}>
+                  {pendingRequests.prescriptions_to_verify_count || pendingRequests.prescriptions_to_verify?.length || 0}
+                </div>
+                <div style={{ fontSize: '0.68rem', color: '#5B21B6', fontWeight: 600, marginTop: 2 }}>
+                  Verify Rx
                 </div>
               </button>
             </div>
@@ -1084,7 +1008,7 @@ export default function DoctorOverview({
             {activeRequestTab && (
               <div style={{ marginTop: 14, borderTop: '1px solid #F3F4F6', paddingTop: 12 }}>
                 <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#4B5563', textTransform: 'capitalize', marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span>Pending {activeRequestTab}</span>
+                  <span>{activeRequestTab === 'prescriptions_to_verify' ? 'Prescriptions Awaiting Doctor Verification' : `Pending ${activeRequestTab}`}</span>
                   <button
                     type="button"
                     onClick={() => setActiveRequestTab(null)}
@@ -1096,10 +1020,10 @@ export default function DoctorOverview({
                 </div>
                 {(!pendingRequests[activeRequestTab] || pendingRequests[activeRequestTab].length === 0) ? (
                   <div style={{ fontSize: '0.78rem', color: '#9CA3AF', padding: '8px 0' }}>
-                    No pending {activeRequestTab} requests at this time.
+                    No pending {activeRequestTab.replace('_', ' ')} items at this time.
                   </div>
                 ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 220, overflowY: 'auto' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 240, overflowY: 'auto' }}>
                     {pendingRequests[activeRequestTab].map((r) => (
                       <div
                         key={r.id}
@@ -1112,26 +1036,48 @@ export default function DoctorOverview({
                         }}
                       >
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ fontWeight: 700, color: '#111827' }}>{r.patient_name}</span>
+                          <span style={{ fontWeight: 700, color: '#111827' }}>
+                            {r.patient_name} {r.mr_number ? `(${r.mr_number})` : ''}
+                          </span>
                           <span
                             style={{
                               fontSize: '0.65rem',
                               fontWeight: 700,
                               padding: '2px 6px',
                               borderRadius: 4,
-                              background: r.urgency === 'stat' ? '#FEE2E2' : (r.urgency === 'urgent' ? '#FEF3C7' : '#F3F4F6'),
-                              color: r.urgency === 'stat' ? '#DC2626' : (r.urgency === 'urgent' ? '#D97706' : '#4B5563'),
+                              background: r.type === 'prescription_verification' ? '#FEF3C7' : (r.urgency === 'stat' ? '#FEE2E2' : (r.urgency === 'urgent' ? '#FEF3C7' : '#F3F4F6')),
+                              color: r.type === 'prescription_verification' ? '#92400E' : (r.urgency === 'stat' ? '#DC2626' : (r.urgency === 'urgent' ? '#D97706' : '#4B5563')),
                               textTransform: 'uppercase',
                             }}
                           >
-                            {r.urgency || 'routine'}
+                            {r.type === 'prescription_verification' ? 'Pending Rx' : (r.urgency || 'routine')}
                           </span>
                         </div>
-                        <div style={{ fontSize: '0.72rem', color: '#4B5563', marginTop: 4 }}>
-                          {r.notes || 'No clinical notes provided.'}
-                        </div>
-                        <div style={{ fontSize: '0.68rem', color: '#9CA3AF', marginTop: 4 }}>
-                          Logged: {formatKarachiDateTime(r.created_at)}
+                        {r.medication ? (
+                          <div style={{ fontSize: '0.75rem', color: '#1E1B4B', fontWeight: 600, marginTop: 3 }}>
+                            Rx: {r.medication} ({r.dosage || 'Standard'} · {r.frequency}) · {r.route || 'Oral'}
+                            <div style={{ fontSize: '0.7rem', color: '#6B7280', fontWeight: 400, marginTop: 2 }}>
+                              Ordered by: {r.ordering_doctor_name || 'Doctor'} · Transcribed by: {r.entered_by} ({r.order_source === 'phone_order' ? 'Phone Order' : 'Written'})
+                            </div>
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: '0.72rem', color: '#4B5563', marginTop: 4 }}>
+                            {r.notes || 'No clinical notes provided.'}
+                          </div>
+                        )}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4, fontSize: '0.68rem', color: '#9CA3AF' }}>
+                          <span>Logged: {formatKarachiDateTime(r.created_at)}</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              useStore.getState().setSelectedPatient({ id: r.patient_id, full_name: r.patient_name, mr_number: r.mr_number });
+                              useStore.getState().setActivePage('patient-file');
+                            }}
+                            className="btn btn-ghost btn-sm"
+                            style={{ fontSize: '0.68rem', padding: '1px 6px', color: '#6D28D9' }}
+                          >
+                            Open File →
+                          </button>
                         </div>
                       </div>
                     ))}

@@ -58,6 +58,8 @@ ROLE_ALIASES = {
     'nurse': 'nurse',
     'nursing_assistant': 'nurse',
     'doctor': 'doctor',
+    'dietician': 'dietician',
+    'nutritionist': 'dietician',
 }
 
 
@@ -67,6 +69,131 @@ def normalize_clinical_role(role):
         return None
     r = str(role).strip().lower()
     return ROLE_ALIASES.get(r, r)
+
+
+# ==============================================================================
+# CLINICAL AUTHORSHIP & WRITE ROLES MATRIX (SINGLE SOURCE OF TRUTH)
+# ==============================================================================
+# A signed or recorded clinical entry means the logged-in user is the author.
+# Admin, super_admin, and care_manager can READ clinical records (within scoping)
+# but CANNOT create or sign clinical entries (doctor notes, prescriptions, lab orders,
+# referrals, consents, therapy notes, nursing notes, vitals, or MAR administrations).
+CLINICAL_WRITE_ROLES = {
+    'doctor_notes': ('doctor',),       # Assigned treating doctor only
+    'prescriptions': ('doctor', 'nurse'), # Doctor (prescribe) or Nurse (transcribed order)
+    'lab_orders': ('doctor',),         # Doctor only
+    'referrals': ('doctor',),          # Doctor only
+    'consents': ('doctor',),           # Doctor only
+    'therapy_notes': {
+        'physiotherapy': ('physiotherapist',),
+        'speech_therapy': ('speech_therapist',),
+        'psychotherapy': ('psychotherapist',),
+        'dietetics': ('dietician',),
+        'nutrition': ('dietician',),
+    },
+    'therapy_notes_all': ('physiotherapist', 'speech_therapist', 'psychotherapist', 'dietician'),
+    'vitals': ('nurse', 'doctor'),     # Nurse and doctor
+    'intake_output': ('nurse', 'doctor'), # Nurse and doctor
+    'nurse_notes': ('nurse',),         # Nurse only
+    'mar_administer': ('nurse',),      # Nurse only
+    # Management actions (unchanged):
+    'active_complaint': ('doctor', 'care_manager', 'admin', 'super_admin'),
+    'history_care_plan': ('doctor', 'care_manager', 'admin', 'super_admin'),
+    'scheduled_items': ('doctor', 'care_manager', 'admin', 'super_admin'),
+    'scheduled_items_mark_done': {
+        'procedure': ('nurse', 'doctor', 'care_manager', 'admin', 'super_admin'),
+        'blood_test': ('nurse', 'doctor', 'care_manager', 'admin', 'super_admin'),
+        'appointment': ('physiotherapist', 'speech_therapist', 'psychotherapist', 'dietician', 'doctor', 'care_manager', 'admin', 'super_admin'),
+    },
+    'addendum': ('author', 'treating_doctor', 'assigned_care_manager', 'super_admin', 'admin'),
+}
+
+
+TAB_TO_WRITE_ACTION = {
+    'doctor_notes': 'doctor_notes',
+    'prescriptions': 'prescriptions',
+    'consents': 'consents',
+    'referrals': 'referrals',
+    'lab_results': 'lab_orders',
+    'vital_charts': 'vitals',
+    'nursing_notes': 'nurse_notes',
+    'physiotherapy': 'therapy_notes',
+}
+
+
+def check_clinical_write_permission(user, action_key, discipline=None, patient=None):
+    """
+    Validates whether the user has authorization to perform a clinical write action.
+    Enforces that the logged-in user matches the authorized clinical authorship role.
+    Admin, super_admin, and care_manager cannot create or sign clinical entries.
+    """
+    if not user or not user.is_authenticated:
+        return False, "Authentication required."
+
+    from homecareOS.permissions import get_user_role
+    raw_role = get_user_role(user)
+    role = normalize_clinical_role(raw_role)
+
+    # Non-clinical support roles are always denied
+    if raw_role in ('accountant', 'crm_executive', 'patient_family', 'family') or role in ('accountant', 'crm_executive', 'patient_family', 'family'):
+        return False, f"Role '{raw_role}' is not authorized for clinical writes."
+
+    # Management actions
+    if action_key in ('active_complaint', 'history_care_plan', 'scheduled_items'):
+        allowed = CLINICAL_WRITE_ROLES.get(action_key, ())
+        if raw_role in allowed or role in allowed:
+            return True, ""
+        return False, f"Role '{raw_role}' is not authorized to perform management action '{action_key}'."
+
+    # Clinical entries: admin, super_admin, care_manager, branch_manager are strictly DENIED
+    if raw_role in ('super_admin', 'admin', 'care_manager', 'branch_manager') or role in ('super_admin', 'admin', 'care_manager', 'branch_manager'):
+        return False, f"Role '{raw_role}' cannot create or sign clinical entries ({action_key})."
+
+    if action_key == 'therapy_notes':
+        if not discipline:
+            if role in CLINICAL_WRITE_ROLES['therapy_notes_all']:
+                return True, ""
+            return False, f"Role '{role}' is not authorized to write therapy notes."
+        disc = str(discipline).lower().strip()
+        if disc in ('physio', 'physiotherapy'):
+            disc = 'physiotherapy'
+        elif disc in ('speech', 'speech_therapy'):
+            disc = 'speech_therapy'
+        elif disc in ('psych', 'psychotherapy', 'psychology'):
+            disc = 'psychotherapy'
+        elif disc in ('dietetics', 'nutrition', 'dietitian', 'dietician'):
+            disc = 'dietetics'
+        allowed_roles = CLINICAL_WRITE_ROLES['therapy_notes'].get(disc, ())
+        if not allowed_roles and disc in ('dietetics', 'nutrition'):
+            allowed_roles = ('dietician',)
+        if role in allowed_roles:
+            return True, ""
+        return False, f"Role '{role}' is not authorized to write {discipline} therapy notes."
+
+    allowed = CLINICAL_WRITE_ROLES.get(action_key, ())
+    if role not in allowed and raw_role not in allowed:
+        return False, f"Role '{role}' is not authorized to create or sign '{action_key}'. Allowed: {', '.join(allowed)}."
+
+    # Doctor note scoping check: must be assigned treating doctor within time window
+    if action_key == 'doctor_notes' and patient is not None:
+        from patients.scoping import is_treating_doctor_for_patient
+        if not is_treating_doctor_for_patient(user, patient):
+            return False, "Only the assigned treating doctor within the active care window may create or sign doctor notes."
+
+    # Doctor prescribing check: must be assigned treating doctor within time window
+    if action_key == 'prescriptions' and role == 'doctor' and patient is not None:
+        from patients.scoping import is_treating_doctor_for_patient
+        if not is_treating_doctor_for_patient(user, patient):
+            return False, "Only the assigned treating doctor within the active care window may prescribe medication."
+
+    return True, ""
+
+
+def enforce_clinical_write_permission(user, action_key, discipline=None, patient=None):
+    """Raises PermissionDenied if check_clinical_write_permission is False."""
+    allowed, msg = check_clinical_write_permission(user, action_key, discipline=discipline, patient=patient)
+    if not allowed:
+        raise PermissionDenied(msg)
 
 
 # Target rights matrix per user requirements
@@ -80,7 +207,7 @@ ROLE_CHART_RIGHTS = {
         'prescriptions': 'write',
         'nursing_notes': 'read',
         'physiotherapy': 'read',
-        'vital_charts': 'read',
+        'vital_charts': 'write',
         'lab_results': 'write',  # order labs
     },
     'physiotherapist': {
@@ -88,7 +215,7 @@ ROLE_CHART_RIGHTS = {
         'doctor_notes': 'read',
         'consents': 'read',
         'procedures': 'read',
-        'referrals': 'write',
+        'referrals': 'read',
         'prescriptions': 'read',  # no prescribing
         'nursing_notes': 'read',
         'physiotherapy': 'write',  # their own therapy notes and plan
@@ -100,7 +227,7 @@ ROLE_CHART_RIGHTS = {
         'doctor_notes': 'read',
         'consents': 'read',
         'procedures': 'read',
-        'referrals': 'write',
+        'referrals': 'read',
         'prescriptions': 'read',  # no prescribing
         'nursing_notes': 'read',
         'physiotherapy': 'write',  # their own speech therapy notes and plan
@@ -112,7 +239,7 @@ ROLE_CHART_RIGHTS = {
         'doctor_notes': 'read',
         'consents': 'read',
         'procedures': 'read',
-        'referrals': 'write',
+        'referrals': 'read',
         'prescriptions': 'read',  # no prescribing
         'nursing_notes': 'read',
         'physiotherapy': 'write',  # their own psychotherapy notes and plan
@@ -125,10 +252,22 @@ ROLE_CHART_RIGHTS = {
         'consents': 'read',
         'procedures': 'write',  # send requests
         'referrals': 'read',
-        'prescriptions': 'write',  # record medication administration
+        'prescriptions': 'read',  # only MAR administer
         'nursing_notes': 'write',  # vitals, intake/output, nursing notes
         'physiotherapy': 'read',
         'vital_charts': 'write',
+        'lab_results': 'read',
+    },
+    'dietician': {
+        'medical_records': 'read',
+        'doctor_notes': 'read',
+        'consents': 'read',
+        'procedures': 'read',
+        'referrals': 'read',
+        'prescriptions': 'read',
+        'nursing_notes': 'read',
+        'physiotherapy': 'write', # own dietetic notes
+        'vital_charts': 'read',
         'lab_results': 'read',
     },
 }
@@ -137,30 +276,45 @@ ROLE_CHART_RIGHTS = {
 def can_user_access_chart_tab(user, tab_name, action='read'):
     """
     Validates whether the user is permitted to read or write a given patient chart tab.
-    Admin / super_admin / care_manager bypass with full read/write rights.
+    Admin / super_admin / care_manager bypass with full read rights, but CANNOT
+    write or sign clinical entries.
     """
     if not user or not user.is_authenticated:
         return False
-    if user.is_superuser:
-        return True
 
     from homecareOS.permissions import get_user_role
     role = get_user_role(user)
-    if role in ('super_admin', 'admin', 'branch_manager', 'care_manager'):
-        return True
-
-    canonical = normalize_clinical_role(role)
-    if not canonical or canonical not in ROLE_CHART_RIGHTS:
-        return False
-
-    allowed_level = ROLE_CHART_RIGHTS[canonical].get(tab_name)
-    if not allowed_level:
-        return False
 
     if action == 'read':
+        if user.is_superuser:
+            return True
+        if role in ('super_admin', 'admin', 'branch_manager', 'care_manager'):
+            return True
+
+        canonical = normalize_clinical_role(role)
+        if not canonical or canonical not in ROLE_CHART_RIGHTS:
+            return False
+
+        allowed_level = ROLE_CHART_RIGHTS[canonical].get(tab_name)
+        if not allowed_level:
+            return False
         return allowed_level in ('read', 'write')
+
     elif action == 'write':
-        return allowed_level == 'write'
+        # Admin, super_admin, care_manager cannot create or sign clinical entries
+        if tab_name in TAB_TO_WRITE_ACTION:
+            action_key = TAB_TO_WRITE_ACTION[tab_name]
+            allowed, _ = check_clinical_write_permission(user, action_key)
+            return allowed
+        if tab_name == 'procedures':
+            canonical = normalize_clinical_role(role)
+            return canonical in ('doctor', 'nurse')
+
+        canonical = normalize_clinical_role(role)
+        if not canonical or canonical not in ROLE_CHART_RIGHTS:
+            return False
+        return ROLE_CHART_RIGHTS[canonical].get(tab_name) == 'write'
+
     return False
 
 

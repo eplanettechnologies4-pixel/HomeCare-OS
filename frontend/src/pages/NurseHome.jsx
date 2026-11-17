@@ -9,6 +9,7 @@ import {
 import useStore from '../store/useStore';
 import apiFetch from '../services/api';
 import StaffIdCard from '../components/StaffIdCard';
+import StaffOverviewHeader from '../components/StaffOverviewHeader';
 import { Modal, Input, Textarea, Button, Badge } from '../components/ui';
 
 export default function NurseHome() {
@@ -223,7 +224,13 @@ export default function NurseHome() {
     const interval = setInterval(() => {
       const now = new Date(Date.now() + offset);
       setCurrentTimeStr(
-        now.toLocaleTimeString('en-US', { hour12: true, hour: '2-digit', minute: '2-digit', second: '2-digit' })
+        new Intl.DateTimeFormat('en-US', {
+          timeZone: 'Asia/Karachi',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          hour12: true,
+        }).format(now)
       );
       setRemainingSeconds((prev) => Math.max(0, prev - 1));
     }, 1000);
@@ -443,6 +450,7 @@ export default function NurseHome() {
   // Format shift end time string
   const shiftEndCaption = useMemo(() => {
     if (isShiftEnded) return 'Shift ended';
+    if (dutyState === 'off_duty') return 'No active shift';
     if (dutyState === 'upcoming') return `Starts ${shiftStart ? new Date(shiftStart).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'soon'}`;
     if (shiftEnd) {
       return `Shift ends ${new Date(shiftEnd).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
@@ -486,6 +494,449 @@ export default function NurseHome() {
     );
   }
 
+  const nurseRosterCard = (
+    <section
+      className="card nurse-roster-fullwidth"
+      style={{
+        background: '#FFFFFF',
+        borderRadius: 20,
+        border: '1px solid #EEF0F4',
+        borderTop: '4px solid #8B5CF6',
+        boxShadow: '0 4px 20px rgba(139,92,246,0.06), 0 1px 3px rgba(0,0,0,0.03)',
+        padding: 22,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 16,
+      }}
+    >
+      {/* Header with Segmented Control */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ width: 36, height: 36, borderRadius: 10, background: 'linear-gradient(135deg, #8B5CF6, #6D28D9)', color: '#FFFFFF', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 8px rgba(109,40,217,0.25)' }}>
+            <Calendar size={18} />
+          </div>
+          <div>
+            <h2 style={{ fontSize: '16px', fontWeight: 700, color: '#1E1B4B', margin: 0 }}>
+              My Roster
+            </h2>
+            <div style={{ fontSize: '12px', color: '#6B7280' }}>
+              Assigned clinical shifts & support contacts
+            </div>
+          </div>
+        </div>
+
+        {/* Working Segmented Control: Daily / Weekly / Monthly */}
+        <div
+          style={{
+            display: 'inline-flex',
+            background: '#F3F4F6',
+            borderRadius: 10,
+            padding: 3,
+            border: '1px solid #E5E7EB',
+          }}
+        >
+          {['daily', 'weekly', 'monthly'].map((v) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => {
+                setRosterTab(v);
+                openRoster(v);
+              }}
+              style={{
+                fontSize: '13px',
+                fontWeight: 600,
+                padding: '5px 14px',
+                borderRadius: 8,
+                border: 'none',
+                background: rosterTab === v ? 'linear-gradient(135deg, #7C3AED, #6D28D9)' : 'transparent',
+                color: rosterTab === v ? '#FFFFFF' : '#4B5563',
+                boxShadow: rosterTab === v ? '0 2px 6px rgba(109,40,217,0.25)' : 'none',
+                cursor: 'pointer',
+                textTransform: 'capitalize',
+                transition: 'all 150ms ease',
+              }}
+            >
+              {v}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Roster View Content */}
+      {duty.shift ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {/* Active Shift Timing Banner */}
+          <div
+            style={{
+              background: 'linear-gradient(135deg, #FAF5FF 0%, #F5F3FF 100%)',
+              border: '1.5px solid #DDD6FE',
+              borderRadius: 14,
+              padding: '14px 18px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: 8,
+            }}
+          >
+            <div>
+              <div style={{ fontSize: '12px', color: '#7C3AED', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                {duty.shift.type || 'Clinical Shift'}
+              </div>
+              <div style={{ fontSize: '16px', fontWeight: 700, color: '#1E1B4B', marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>
+                {new Date(duty.shift.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} –{' '}
+                {new Date(duty.shift.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </div>
+              <div style={{ fontSize: '13px', color: '#6B7280', marginTop: 2 }}>
+                Break marker: <strong>{duty.shift.break_minutes || 30} mins</strong>
+              </div>
+            </div>
+
+            <span
+              style={{
+                fontSize: '12px',
+                fontWeight: 700,
+                padding: '5px 12px',
+                borderRadius: 9999,
+                background: isShiftEnded ? '#F3F4F6' : '#ECFDF5',
+                color: isShiftEnded ? '#4B5563' : '#047857',
+                border: `1.5px solid ${isShiftEnded ? '#E5E7EB' : '#A7F3D0'}`,
+              }}
+            >
+              {isShiftEnded ? 'Shift ended' : '• Active Duty'}
+            </span>
+          </div>
+
+          {/* Daily Horizontal Timeline */}
+          {rosterTab === 'daily' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#9CA3AF' }}>
+                <span>08:00 AM</span>
+                <span>12:00 PM</span>
+                <span>04:00 PM</span>
+                <span>08:00 PM</span>
+              </div>
+              <div style={{ height: 10, background: '#F3F4F6', borderRadius: 9999, overflow: 'hidden', position: 'relative' }}>
+                <div
+                  style={{
+                    position: 'absolute',
+                    left: '12%',
+                    width: '68%',
+                    height: '100%',
+                    background: 'linear-gradient(90deg, #8B5CF6, #6D28D9)',
+                    borderRadius: 9999,
+                  }}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Weekly / Monthly chips fallback */}
+          {rosterTab !== 'daily' && (
+            <div style={{ padding: '10px 14px', background: '#F9FAFB', borderRadius: 10, fontSize: '13px', color: '#4B5563', border: '1px solid #E5E7EB' }}>
+              Showing {rosterTab} schedule for registered staff nurse. Click &quot;Open Full Roster&quot; to view calendar.
+            </div>
+          )}
+        </div>
+      ) : (
+        <div style={{ textAlign: 'center', padding: '24px 16px', background: '#F9FAFB', borderRadius: 14, border: '1px dashed #E5E7EB' }}>
+          <Calendar size={28} style={{ color: '#9CA3AF', marginBottom: 8, margin: '0 auto' }} />
+          <div style={{ fontSize: '14px', fontWeight: 600, color: '#374151' }}>
+            No shift scheduled for today
+          </div>
+          <div style={{ fontSize: '13px', color: '#6B7280', marginTop: 4 }}>
+            Check weekly or monthly view for upcoming scheduled duties.
+          </div>
+        </div>
+      )}
+
+      {/* 3-Column Support Contacts Grid */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
+          gap: 12,
+        }}
+      >
+        {/* 1. Supervisor Contact */}
+        <div
+          className="card"
+          style={{
+            background: 'linear-gradient(145deg, #FFFFFF 0%, #FAF5FF 100%)',
+            borderRadius: 16,
+            border: '1.5px solid #E9D5FF',
+            borderTop: '3px solid #7C3AED',
+            boxShadow: '0 2px 10px rgba(124,58,237,0.06)',
+            padding: '14px 16px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 10,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ width: 38, height: 38, borderRadius: 12, background: 'linear-gradient(135deg, #7C3AED, #6D28D9)', color: '#FFFFFF', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '13px', boxShadow: '0 2px 8px rgba(109,40,217,0.2)' }}>
+              {supervisor?.name?.slice(0, 2).toUpperCase() || 'SP'}
+            </div>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: '14px', fontWeight: 700, color: '#1E1B4B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {supervisor?.name || 'Dr. Sara Ahmed'}
+              </div>
+              <div style={{ fontSize: '12px', color: '#6D28D9', fontWeight: 600 }}>Clinical Supervisor</div>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: 8 }}>
+            <a
+              href={`tel:${supervisor?.phone || '+92-300-1112233'}`}
+              className="btn btn-sm"
+              style={{ flex: 1, padding: '5px 8px', fontSize: '12px', fontWeight: 600, color: '#6D28D9', background: '#EDE9FE', border: '1px solid #DDD6FE', borderRadius: 8, textAlign: 'center', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}
+              title="Call Supervisor"
+              aria-label="Call Supervisor"
+            >
+              <Phone size={13} /> Call
+            </a>
+            <a
+              href={`https://wa.me/${(supervisor?.phone || '923001112233').replace(/[^0-9]/g, '')}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn btn-sm"
+              style={{ flex: 1, padding: '5px 8px', fontSize: '12px', fontWeight: 600, color: '#047857', background: '#D1FAE5', border: '1px solid #A7F3D0', borderRadius: 8, textAlign: 'center', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}
+              title="WhatsApp Supervisor"
+              aria-label="WhatsApp Supervisor"
+            >
+              <MessageSquare size={13} /> Chat
+            </a>
+          </div>
+        </div>
+
+        {/* 2. Transport Driver */}
+        <div
+          className="card"
+          style={{
+            background: 'linear-gradient(145deg, #FFFFFF 0%, #EFF6FF 100%)',
+            borderRadius: 16,
+            border: '1.5px solid #BFDBFE',
+            borderTop: '3px solid #2563EB',
+            boxShadow: '0 2px 10px rgba(37,99,235,0.06)',
+            padding: '14px 16px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 10,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ width: 38, height: 38, borderRadius: 12, background: 'linear-gradient(135deg, #3B82F6, #1D4ED8)', color: '#FFFFFF', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '14px', boxShadow: '0 2px 8px rgba(37,99,235,0.2)' }}>
+              <Car size={18} />
+            </div>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: '14px', fontWeight: 700, color: '#1E1B4B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {transport?.driver_name || 'Nadeem Khan'}
+              </div>
+              <div style={{ fontSize: '12px', color: '#1D4ED8', fontWeight: 600 }}>
+                {formatPickupTime(transport?.pickup_time)}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: 8 }}>
+            <a
+              href={`tel:${transport?.driver_phone || '+92-300-4445555'}`}
+              className="btn btn-sm"
+              style={{ flex: 1, padding: '5px 8px', fontSize: '12px', fontWeight: 600, color: '#1D4ED8', background: '#DBEAFE', border: '1px solid #BFDBFE', borderRadius: 8, textAlign: 'center', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}
+              title="Call Transport Driver"
+              aria-label="Call Driver"
+            >
+              <Phone size={13} /> Call
+            </a>
+            <a
+              href={`https://wa.me/${(transport?.driver_phone || '923004445555').replace(/[^0-9]/g, '')}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn btn-sm"
+              style={{ flex: 1, padding: '5px 8px', fontSize: '12px', fontWeight: 600, color: '#047857', background: '#D1FAE5', border: '1px solid #A7F3D0', borderRadius: 8, textAlign: 'center', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}
+              title="WhatsApp Transport Driver"
+              aria-label="WhatsApp Driver"
+            >
+              <MessageSquare size={13} /> Chat
+            </a>
+          </div>
+        </div>
+
+        {/* 3. Buddy Staff */}
+        <div
+          className="card"
+          style={{
+            background: 'linear-gradient(145deg, #FFFFFF 0%, #ECFDF5 100%)',
+            borderRadius: 16,
+            border: '1.5px solid #A7F3D0',
+            borderTop: '3px solid #059669',
+            boxShadow: '0 2px 10px rgba(5,150,105,0.06)',
+            padding: '14px 16px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 10,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ width: 38, height: 38, borderRadius: 12, background: 'linear-gradient(135deg, #10B981, #047857)', color: '#FFFFFF', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '13px', boxShadow: '0 2px 8px rgba(5,150,105,0.2)' }}>
+              {buddy?.name?.slice(0, 2).toUpperCase() || 'BD'}
+            </div>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: '14px', fontWeight: 700, color: '#1E1B4B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {buddy?.name || 'Bob Ahmed'}
+              </div>
+              <div style={{ fontSize: '12px', color: '#047857', fontWeight: 600 }}>Buddy Staff Nurse</div>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: 8 }}>
+            <a
+              href={`tel:${buddy?.phone || '+92-300-2222222'}`}
+              className="btn btn-sm"
+              style={{ flex: 1, padding: '5px 8px', fontSize: '12px', fontWeight: 600, color: '#0F766E', background: '#CCFBF1', border: '1px solid #99F6E4', borderRadius: 8, textAlign: 'center', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}
+              title="Call Buddy Nurse"
+              aria-label="Call Buddy"
+            >
+              <Phone size={13} /> Call
+            </a>
+            <a
+              href={`https://wa.me/${(buddy?.phone || '923002222222').replace(/[^0-9]/g, '')}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn btn-sm"
+              style={{ flex: 1, padding: '5px 8px', fontSize: '12px', fontWeight: 600, color: '#047857', background: '#D1FAE5', border: '1px solid #A7F3D0', borderRadius: 8, textAlign: 'center', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}
+              title="WhatsApp Buddy Nurse"
+              aria-label="WhatsApp Buddy"
+            >
+              <MessageSquare size={13} /> Chat
+            </a>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Standalone "Time left for duty" card (moved DOWN below roster, above Shift handover notes) ── */}
+      <div
+        className="card nurse-time-left-card"
+        style={{
+          background: 'linear-gradient(135deg, #FFFFFF 0%, #FAF5FF 100%)',
+          border: '1.5px solid #DDD6FE',
+          borderRadius: 16,
+          padding: '14px 18px',
+          boxShadow: '0 4px 14px rgba(109,40,217,0.06)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: 16,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          {dutyState !== 'off_duty' ? (
+            <div style={{ position: 'relative', width: 80, height: 80, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <svg width="80" height="80" viewBox="0 0 94 94" style={{ transform: 'rotate(-90deg)' }}>
+                <circle cx="47" cy="47" r={ringRadius} stroke="#EDE9FE" strokeWidth="7" fill="none" />
+                <circle
+                  cx="47"
+                  cy="47"
+                  r={ringRadius}
+                  stroke={isShiftEnded ? '#9CA3AF' : '#7C3AED'}
+                  strokeWidth="7"
+                  strokeDasharray={ringCircumference}
+                  strokeDashoffset={ringOffset}
+                  strokeLinecap="round"
+                  fill="none"
+                  style={{ transition: 'stroke-dashoffset 600ms ease' }}
+                />
+              </svg>
+              <div style={{ position: 'absolute', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                <span style={{ fontSize: '13px', fontWeight: 700, color: isShiftEnded ? '#6B7280' : '#7C3AED', fontVariantNumeric: 'tabular-nums' }}>
+                  {progressPercent}%
+                </span>
+                <span style={{ fontSize: '10px', color: '#9CA3AF', textTransform: 'uppercase' }}>Shift</span>
+              </div>
+            </div>
+          ) : (
+            <div style={{ width: 44, height: 44, borderRadius: 12, background: '#F3F4F6', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6B7280' }}>
+              <Clock size={22} />
+            </div>
+          )}
+
+          <div>
+            <div style={{ fontSize: '12px', color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 700 }}>
+              {dutyState === 'off_duty' ? 'Duty Status' : (isShiftEnded ? 'Duty Completed' : dutyState === 'upcoming' ? 'Shift Starts In' : 'Time Left for Duty')}
+            </div>
+            <div
+              aria-live="off"
+              style={{
+                fontSize: dutyState === 'off_duty' ? '22px' : '30px',
+                fontWeight: 800,
+                color: dutyState === 'off_duty' ? '#4B5563' : (isShiftEnded ? '#6B7280' : dutyState === 'upcoming' ? '#D97706' : '#6D28D9'),
+                fontVariantNumeric: 'tabular-nums',
+                lineHeight: 1.2,
+                letterSpacing: '-0.02em',
+              }}
+            >
+              {dutyState === 'off_duty' ? 'Off duty' : (isShiftEnded ? 'Shift ended' : formatCountdown(remainingSeconds))}
+            </div>
+            <div style={{ fontSize: '12px', color: '#6B7280', marginTop: 2, fontWeight: 500 }}>
+              {shiftEndCaption}
+            </div>
+          </div>
+        </div>
+
+        {dutyState !== 'off_duty' && !isShiftEnded && (
+          <span
+            style={{
+              fontSize: '11px',
+              fontWeight: 700,
+              padding: '4px 10px',
+              borderRadius: 999,
+              background: '#ECFDF5',
+              color: '#059669',
+              border: '1px solid #A7F3D0',
+            }}
+          >
+            ● Active Shift
+          </span>
+        )}
+      </div>
+
+      {/* Shift Handover Notes Card */}
+      <div
+        style={{
+          background: 'linear-gradient(135deg, #FFFBEB 0%, #FEF3C7 100%)',
+          borderRadius: 16,
+          border: '1.5px solid #FCD34D',
+          borderLeft: '5px solid #F59E0B',
+          padding: '14px 18px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 6,
+          boxShadow: '0 2px 8px rgba(245,158,11,0.06)',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7, color: '#B45309', fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+          <div style={{ width: 22, height: 22, borderRadius: 6, background: '#FDE68A', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <FileText size={13} />
+          </div>
+          <span>Shift Handover Notes</span>
+        </div>
+        <div
+          style={{
+            fontSize: '13px',
+            color: '#78350F',
+            lineHeight: 1.5,
+            maxHeight: 70,
+            overflowY: 'auto',
+          }}
+        >
+          {data?.handover_notes || 'Standard clinical bedside care. Maintain strict vital signs monitoring and timely medication administration according to MAR.'}
+        </div>
+      </div>
+    </section>
+  );
+
   return (
     <div
       style={{
@@ -521,671 +972,27 @@ export default function NurseHome() {
         </div>
       )}
 
-      {/* ── SECTION A: Hero Band Across Top ── */}
-      <section
-        className="card hero-band"
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          background: 'linear-gradient(135deg, #FFFFFF 0%, #FAF5FF 60%, #F5F3FF 100%)',
-          borderRadius: 20,
-          border: '1px solid #E9D5FF',
-          borderTop: '4px solid #7C3AED',
-          boxShadow: '0 4px 20px rgba(109,40,217,0.06), 0 1px 3px rgba(0,0,0,0.03)',
-          padding: '20px 24px',
-          gap: 16,
+      {/* ── SECTION A: Shared Staff Overview Header (Slim Greeting Strip + ID Card & Roster Grid) ── */}
+      <StaffOverviewHeader
+        staff={staff}
+        employeeCard={employeeCard}
+        roleTitle="Nurses Portal"
+        badgeColor="#7C3AED"
+        dutyStatus={dutyPill.label}
+        workingHours={officeHours}
+        lastUpdated={lastUpdatedTime ? lastUpdatedTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null}
+        onRefresh={() => {
+          fetchDashboardData(true);
+          fetchEmployeeCard();
         }}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
-          {/* Left: Greeting, Role, Date, Duty status & Clock */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 260 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-              <h1
-                style={{
-                  fontSize: '28px',
-                  fontWeight: 700,
-                  color: '#1E1B4B',
-                  margin: 0,
-                  letterSpacing: '-0.02em',
-                  lineHeight: 1.2,
-                }}
-              >
-                {greeting}, {staff.name?.split(' ')[0] || currentUser?.first_name || 'Mariam'}
-              </h1>
-
-              {/* Duty Status Pill */}
-              <div
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 7,
-                  padding: '4px 12px',
-                  borderRadius: 9999,
-                  background: dutyPill.bg,
-                  color: dutyPill.color,
-                  fontSize: '13px',
-                  fontWeight: 700,
-                  border: `1.5px solid ${dutyPill.color}40`,
-                  boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
-                }}
-              >
-                <span
-                  style={{
-                    width: 8,
-                    height: 8,
-                    borderRadius: '50%',
-                    background: dutyPill.dot,
-                    boxShadow: dutyState === 'on_duty' && !isShiftEnded ? `0 0 0 3px ${dutyPill.dot}30` : 'none',
-                  }}
-                />
-                {dutyPill.label}
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', fontSize: '14px', color: '#6B7280' }}>
-              <span style={{ fontWeight: 600, color: '#6D28D9', background: '#EDE9FE', padding: '2px 10px', borderRadius: 6 }}>
-                {staff.role_label || 'Registered Nurse (RN)'}
-              </span>
-              <span>•</span>
-              <span style={{ fontWeight: 500, color: '#374151' }}>{todayDateStr}</span>
-              <span>•</span>
-              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: '#FFFFFF', padding: '2px 10px', borderRadius: 8, border: '1px solid #E5E7EB', boxShadow: '0 1px 2px rgba(0,0,0,0.03)' }}>
-                <Clock size={15} style={{ color: '#7C3AED' }} />
-                <span style={{ fontWeight: 700, color: '#1E1B4B', fontVariantNumeric: 'tabular-nums' }}>
-                  {currentTimeStr || '09:00:00 AM'}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Right: Circular Progress Ring & Tabular Countdown */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 18,
-              background: 'linear-gradient(135deg, #FFFFFF 0%, #FAF5FF 100%)',
-              border: '1.5px solid #DDD6FE',
-              borderRadius: 18,
-              padding: '10px 18px',
-              boxShadow: '0 4px 14px rgba(109,40,217,0.06)',
-            }}
-          >
-            <div style={{ position: 'relative', width: 94, height: 94, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <svg width="94" height="94" viewBox="0 0 94 94" style={{ transform: 'rotate(-90deg)' }}>
-                {/* Background Ring */}
-                <circle
-                  cx="47"
-                  cy="47"
-                  r={ringRadius}
-                  stroke="#EDE9FE"
-                  strokeWidth="7"
-                  fill="none"
-                />
-                {/* Foreground Active Ring */}
-                <circle
-                  cx="47"
-                  cy="47"
-                  r={ringRadius}
-                  stroke={isShiftEnded ? '#9CA3AF' : '#7C3AED'}
-                  strokeWidth="7"
-                  strokeDasharray={ringCircumference}
-                  strokeDashoffset={ringOffset}
-                  strokeLinecap="round"
-                  fill="none"
-                  style={{ transition: 'stroke-dashoffset 600ms ease' }}
-                />
-              </svg>
-              {/* Inner ring progress percentage */}
-              <div
-                style={{
-                  position: 'absolute',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <span style={{ fontSize: '13px', fontWeight: 700, color: isShiftEnded ? '#6B7280' : '#7C3AED', fontVariantNumeric: 'tabular-nums' }}>
-                  {progressPercent}%
-                </span>
-                <span style={{ fontSize: '11px', color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                  Shift
-                </span>
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-              <div style={{ fontSize: '12px', color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600 }}>
-                {isShiftEnded ? 'Duty Completed' : dutyState === 'upcoming' ? 'Shift Starts In' : 'Time Left for Duty'}
-              </div>
-              <div
-                aria-live="off"
-                style={{
-                  fontSize: '36px',
-                  fontWeight: 700,
-                  color: isShiftEnded ? '#6B7280' : dutyState === 'upcoming' ? '#D97706' : '#6D28D9',
-                  fontVariantNumeric: 'tabular-nums',
-                  lineHeight: 1.1,
-                  letterSpacing: '-0.02em',
-                }}
-              >
-                {isShiftEnded ? 'Shift ended' : formatCountdown(remainingSeconds)}
-              </div>
-              <div style={{ fontSize: '13px', color: '#6B7280', marginTop: 3, fontWeight: 500 }}>
-                {shiftEndCaption}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Thin bottom strip: Office Hours & Call Help SOS */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            borderTop: '1px solid #EEF0F4',
-            paddingTop: 12,
-            fontSize: '13px',
-            color: '#6B7280',
-            flexWrap: 'wrap',
-            gap: 12,
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span>Official Office Hours: <strong>09:00 – 17:00</strong> ({officeHours.timezone || 'Asia/Karachi'})</span>
-            <span
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 5,
-                padding: '2px 9px',
-                borderRadius: 9999,
-                fontSize: '12px',
-                fontWeight: 600,
-                background: officeHours.is_open_now ? '#ECFDF5' : '#F3F4F6',
-                color: officeHours.is_open_now ? '#059669' : '#6B7280',
-                border: `1px solid ${officeHours.is_open_now ? '#A7F3D0' : '#E5E7EB'}`,
-              }}
-            >
-              <span
-                style={{
-                  width: 6,
-                  height: 6,
-                  borderRadius: '50%',
-                  background: officeHours.is_open_now ? '#10B981' : '#9CA3AF',
-                }}
-              />
-              {officeHours.is_open_now ? 'Open now' : 'Closed, opens 9:00 AM'}
-            </span>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-            {lastUpdatedTime && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '12px', color: '#9CA3AF' }}>
-                <span>Updated {lastUpdatedTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm"
-                  onClick={() => {
-                    fetchDashboardData(true);
-                    fetchEmployeeCard();
-                  }}
-                  title="Refresh Dashboard"
-                  aria-label="Refresh Dashboard"
-                  style={{ padding: '2px 5px', height: 24, borderRadius: 6, display: 'inline-flex', alignItems: 'center' }}
-                >
-                  <RefreshCw size={12} style={{ animation: refreshing ? 'spin 1s linear infinite' : 'none' }} />
-                </button>
-              </div>
-            )}
-
-            <button
-              className="btn btn-sm"
-              style={{
-                borderRadius: 9999,
-                border: '1.5px solid #FCA5A5',
-                background: 'linear-gradient(135deg, #FEF2F2 0%, #FEE2E2 100%)',
-                color: '#DC2626',
-                fontWeight: 700,
-                padding: '5px 14px',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                boxShadow: '0 2px 6px rgba(239,68,68,0.15)',
-                cursor: 'pointer',
-              }}
-              onClick={() => setActivePage('call-help')}
-              title="Supervisor Emergency Call Help"
-              aria-label="Call Help"
-            >
-              <Phone size={13} style={{ color: '#DC2626' }} />
-              <span>Call Help</span>
-            </button>
-          </div>
-        </div>
-      </section>
+        onHelpClick={() => setActivePage('call-help')}
+        helpButtonLabel="Call Help"
+        rosterCard={nurseRosterCard}
+      />
 
       {/* ── 2-COLUMN LAYOUT: Main Content Left, Narrow Sticky Right Column (StaffIdCard) ── */}
       <div className="nurse-layout-grid">
         <div className="nurse-main-column">
-          {/* ── SECTION B: Full-Width "My Roster" Card ── */}
-          <section
-            className="card nurse-roster-fullwidth"
-        style={{
-          background: '#FFFFFF',
-          borderRadius: 20,
-          border: '1px solid #EEF0F4',
-          borderTop: '4px solid #8B5CF6',
-          boxShadow: '0 4px 20px rgba(139,92,246,0.06), 0 1px 3px rgba(0,0,0,0.03)',
-          padding: 22,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 16,
-        }}
-      >
-        {/* Header with Segmented Control */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ width: 36, height: 36, borderRadius: 10, background: 'linear-gradient(135deg, #8B5CF6, #6D28D9)', color: '#FFFFFF', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 8px rgba(109,40,217,0.25)' }}>
-              <Calendar size={18} />
-            </div>
-            <div>
-              <h2 style={{ fontSize: '16px', fontWeight: 700, color: '#1E1B4B', margin: 0 }}>
-                My Roster
-              </h2>
-              <div style={{ fontSize: '12px', color: '#6B7280' }}>
-                Assigned clinical shifts & support contacts
-              </div>
-            </div>
-          </div>
-
-          {/* Working Segmented Control: Daily / Weekly / Monthly */}
-          <div
-            style={{
-              display: 'inline-flex',
-              background: '#F3F4F6',
-              borderRadius: 10,
-              padding: 3,
-              border: '1px solid #E5E7EB',
-            }}
-          >
-            {['daily', 'weekly', 'monthly'].map((v) => (
-              <button
-                key={v}
-                type="button"
-                onClick={() => {
-                  setRosterTab(v);
-                  openRoster(v);
-                }}
-                style={{
-                  fontSize: '13px',
-                  fontWeight: 600,
-                  padding: '5px 14px',
-                  borderRadius: 8,
-                  border: 'none',
-                  background: rosterTab === v ? 'linear-gradient(135deg, #7C3AED, #6D28D9)' : 'transparent',
-                  color: rosterTab === v ? '#FFFFFF' : '#4B5563',
-                  boxShadow: rosterTab === v ? '0 2px 6px rgba(109,40,217,0.25)' : 'none',
-                  cursor: 'pointer',
-                  textTransform: 'capitalize',
-                  transition: 'all 150ms ease',
-                }}
-              >
-                {v}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Roster View Content */}
-        {duty.shift ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {/* Active Shift Timing Banner */}
-            <div
-              style={{
-                background: 'linear-gradient(135deg, #FAF5FF 0%, #F5F3FF 100%)',
-                border: '1.5px solid #DDD6FE',
-                borderRadius: 14,
-                padding: '14px 18px',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                flexWrap: 'wrap',
-                gap: 8,
-              }}
-            >
-              <div>
-                <div style={{ fontSize: '12px', color: '#7C3AED', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                  {duty.shift.type || 'Clinical Shift'}
-                </div>
-                <div style={{ fontSize: '16px', fontWeight: 700, color: '#1E1B4B', marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>
-                  {new Date(duty.shift.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} –{' '}
-                  {new Date(duty.shift.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </div>
-                <div style={{ fontSize: '13px', color: '#6B7280', marginTop: 2 }}>
-                  Break marker: <strong>{duty.shift.break_minutes || 30} mins</strong>
-                </div>
-              </div>
-
-              <span
-                style={{
-                  fontSize: '12px',
-                  fontWeight: 700,
-                  padding: '5px 12px',
-                  borderRadius: 9999,
-                  background: isShiftEnded ? '#F3F4F6' : '#ECFDF5',
-                  color: isShiftEnded ? '#4B5563' : '#047857',
-                  border: `1.5px solid ${isShiftEnded ? '#E5E7EB' : '#A7F3D0'}`,
-                }}
-              >
-                {isShiftEnded ? 'Shift ended' : '• Active Duty'}
-              </span>
-            </div>
-
-            {/* Daily Horizontal Timeline */}
-            {rosterTab === 'daily' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#9CA3AF' }}>
-                  <span>08:00 AM</span>
-                  <span>12:00 PM (Break)</span>
-                  <span>04:00 PM</span>
-                  <span>08:33 PM</span>
-                </div>
-                {/* Horizontal Bar with Break and Now marker */}
-                <div
-                  style={{
-                    position: 'relative',
-                    height: 20,
-                    background: '#EDE9FE',
-                    borderRadius: 10,
-                    overflow: 'hidden',
-                    display: 'flex',
-                    alignItems: 'center',
-                  }}
-                >
-                  {/* Shift Bar */}
-                  <div
-                    style={{
-                      position: 'absolute',
-                      left: '0%',
-                      width: `${progressPercent}%`,
-                      height: '100%',
-                      background: 'linear-gradient(90deg, #7C3AED, #9333EA)',
-                      transition: 'width 600ms ease',
-                    }}
-                  />
-                  {/* Break marker */}
-                  <div
-                    style={{
-                      position: 'absolute',
-                      left: '45%',
-                      width: '10%',
-                      height: '100%',
-                      background: 'repeating-linear-gradient(45deg, #FDE68A, #FDE68A 4px, #F59E0B 4px, #F59E0B 8px)',
-                      opacity: 0.9,
-                    }}
-                    title="30-min Clinical Break"
-                  />
-                </div>
-                <div style={{ fontSize: '12px', color: '#6B7280', display: 'flex', justifyContent: 'space-between' }}>
-                  <span>Start: 08:33 AM</span>
-                  <span style={{ color: '#7C3AED', fontWeight: 700 }}>{progressPercent}% Elapsed</span>
-                  <span>End: 08:33 PM</span>
-                </div>
-              </div>
-            )}
-
-            {/* Weekly / Monthly chips fallback */}
-            {rosterTab !== 'daily' && (
-              <div style={{ padding: '10px 14px', background: '#F9FAFB', borderRadius: 10, fontSize: '13px', color: '#4B5563', border: '1px solid #E5E7EB' }}>
-                Showing {rosterTab} schedule for registered staff nurse. Click below to inspect calendar shifts.
-              </div>
-            )}
-          </div>
-        ) : (
-          <div
-            style={{
-              textAlign: 'center',
-              padding: '28px 16px',
-              background: 'linear-gradient(135deg, #F8FAFC 0%, #FAF5FF 100%)',
-              borderRadius: 16,
-              border: '1.5px dashed #C4B5FD',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              gap: 10,
-            }}
-          >
-            <div style={{ width: 48, height: 48, borderRadius: 14, background: '#EDE9FE', color: '#7C3AED', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <Calendar size={24} />
-            </div>
-            <div>
-              <h3 style={{ margin: '0 0 4px', fontSize: '15px', fontWeight: 700, color: '#1E1B4B' }}>
-                No Active Shift Scheduled Today
-              </h3>
-              <p style={{ margin: 0, fontSize: '13px', color: '#6B7280', maxWidth: 440 }}>
-                You are currently in standby / off-duty mode. Emergency coordination lines and shift handover logs remain active.
-              </p>
-            </div>
-            <button
-              type="button"
-              className="btn btn-sm"
-              onClick={() => openRoster('weekly')}
-              style={{
-                marginTop: 4,
-                background: '#EDE9FE',
-                color: '#6D28D9',
-                border: '1px solid #DDD6FE',
-                borderRadius: 8,
-                fontWeight: 600,
-                padding: '6px 14px',
-                cursor: 'pointer',
-              }}
-            >
-              Open Full Roster Calendar →
-            </button>
-          </div>
-        )}
-
-        {/* Contact Cards Row: Supervisor, Driver + Pickup, Buddy Staff */}
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-            gap: 12,
-          }}
-        >
-          {/* 1. Supervisor */}
-          <div
-            className="card"
-            style={{
-              background: 'linear-gradient(145deg, #FFFFFF 0%, #FAF5FF 100%)',
-              borderRadius: 16,
-              border: '1.5px solid #DDD6FE',
-              borderTop: '3px solid #7C3AED',
-              boxShadow: '0 2px 10px rgba(109,40,217,0.06)',
-              padding: '14px 16px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 10,
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <div style={{ width: 38, height: 38, borderRadius: 12, background: 'linear-gradient(135deg, #7C3AED, #6D28D9)', color: '#FFFFFF', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '13px', boxShadow: '0 2px 8px rgba(109,40,217,0.2)' }}>
-                {supervisor?.name?.slice(0, 2).toUpperCase() || 'SP'}
-              </div>
-              <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontSize: '14px', fontWeight: 700, color: '#1E1B4B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {supervisor?.name || 'Dr. Sara Ahmed'}
-                </div>
-                <div style={{ fontSize: '12px', color: '#6D28D9', fontWeight: 600 }}>Clinical Supervisor</div>
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', gap: 8 }}>
-              <a
-                href={`tel:${supervisor?.phone || '+92-300-3333333'}`}
-                className="btn btn-sm"
-                style={{ flex: 1, padding: '5px 8px', fontSize: '12px', fontWeight: 600, color: '#6D28D9', background: '#EDE9FE', border: '1px solid #DDD6FE', borderRadius: 8, textAlign: 'center', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}
-                title="Call Supervisor"
-                aria-label="Call Supervisor"
-              >
-                <Phone size={13} /> Call
-              </a>
-              <a
-                href={`https://wa.me/${(supervisor?.phone || '923003333333').replace(/[^0-9]/g, '')}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="btn btn-sm"
-                style={{ flex: 1, padding: '5px 8px', fontSize: '12px', fontWeight: 600, color: '#047857', background: '#D1FAE5', border: '1px solid #A7F3D0', borderRadius: 8, textAlign: 'center', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}
-                title="WhatsApp Supervisor"
-                aria-label="WhatsApp Supervisor"
-              >
-                <MessageSquare size={13} /> Chat
-              </a>
-            </div>
-          </div>
-
-          {/* 2. Transport Driver */}
-          <div
-            className="card"
-            style={{
-              background: 'linear-gradient(145deg, #FFFFFF 0%, #EFF6FF 100%)',
-              borderRadius: 16,
-              border: '1.5px solid #BFDBFE',
-              borderTop: '3px solid #2563EB',
-              boxShadow: '0 2px 10px rgba(37,99,235,0.06)',
-              padding: '14px 16px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 10,
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <div style={{ width: 38, height: 38, borderRadius: 12, background: 'linear-gradient(135deg, #3B82F6, #1D4ED8)', color: '#FFFFFF', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '14px', boxShadow: '0 2px 8px rgba(37,99,235,0.2)' }}>
-                <Car size={18} />
-              </div>
-              <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontSize: '14px', fontWeight: 700, color: '#1E1B4B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {transport?.driver_name || 'Nadeem Khan'}
-                </div>
-                <div style={{ fontSize: '12px', color: '#1D4ED8', fontWeight: 600 }}>
-                  {formatPickupTime(transport?.pickup_time)}
-                </div>
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', gap: 8 }}>
-              <a
-                href={`tel:${transport?.driver_phone || '+92-300-4445555'}`}
-                className="btn btn-sm"
-                style={{ flex: 1, padding: '5px 8px', fontSize: '12px', fontWeight: 600, color: '#1D4ED8', background: '#DBEAFE', border: '1px solid #BFDBFE', borderRadius: 8, textAlign: 'center', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}
-                title="Call Transport Driver"
-                aria-label="Call Driver"
-              >
-                <Phone size={13} /> Call
-              </a>
-              <a
-                href={`https://wa.me/${(transport?.driver_phone || '923004445555').replace(/[^0-9]/g, '')}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="btn btn-sm"
-                style={{ flex: 1, padding: '5px 8px', fontSize: '12px', fontWeight: 600, color: '#047857', background: '#D1FAE5', border: '1px solid #A7F3D0', borderRadius: 8, textAlign: 'center', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}
-                title="WhatsApp Transport Driver"
-                aria-label="WhatsApp Driver"
-              >
-                <MessageSquare size={13} /> Chat
-              </a>
-            </div>
-          </div>
-
-          {/* 3. Buddy Staff */}
-          <div
-            className="card"
-            style={{
-              background: 'linear-gradient(145deg, #FFFFFF 0%, #ECFDF5 100%)',
-              borderRadius: 16,
-              border: '1.5px solid #A7F3D0',
-              borderTop: '3px solid #059669',
-              boxShadow: '0 2px 10px rgba(5,150,105,0.06)',
-              padding: '14px 16px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 10,
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <div style={{ width: 38, height: 38, borderRadius: 12, background: 'linear-gradient(135deg, #10B981, #047857)', color: '#FFFFFF', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '13px', boxShadow: '0 2px 8px rgba(5,150,105,0.2)' }}>
-                {buddy?.name?.slice(0, 2).toUpperCase() || 'BD'}
-              </div>
-              <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontSize: '14px', fontWeight: 700, color: '#1E1B4B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {buddy?.name || 'Bob Ahmed'}
-                </div>
-                <div style={{ fontSize: '12px', color: '#047857', fontWeight: 600 }}>Buddy Staff Nurse</div>
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', gap: 8 }}>
-              <a
-                href={`tel:${buddy?.phone || '+92-300-2222222'}`}
-                className="btn btn-sm"
-                style={{ flex: 1, padding: '5px 8px', fontSize: '12px', fontWeight: 600, color: '#0F766E', background: '#CCFBF1', border: '1px solid #99F6E4', borderRadius: 8, textAlign: 'center', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}
-                title="Call Buddy Nurse"
-                aria-label="Call Buddy"
-              >
-                <Phone size={13} /> Call
-              </a>
-              <a
-                href={`https://wa.me/${(buddy?.phone || '923002222222').replace(/[^0-9]/g, '')}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="btn btn-sm"
-                style={{ flex: 1, padding: '5px 8px', fontSize: '12px', fontWeight: 600, color: '#047857', background: '#D1FAE5', border: '1px solid #A7F3D0', borderRadius: 8, textAlign: 'center', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}
-                title="WhatsApp Buddy Nurse"
-                aria-label="WhatsApp Buddy"
-              >
-                <MessageSquare size={13} /> Chat
-              </a>
-            </div>
-          </div>
-        </div>
-
-        {/* Shift Handover Notes Card */}
-        <div
-          style={{
-            background: 'linear-gradient(135deg, #FFFBEB 0%, #FEF3C7 100%)',
-            borderRadius: 16,
-            border: '1.5px solid #FCD34D',
-            borderLeft: '5px solid #F59E0B',
-            padding: '14px 18px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 6,
-            boxShadow: '0 2px 8px rgba(245,158,11,0.06)',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 7, color: '#B45309', fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-            <div style={{ width: 22, height: 22, borderRadius: 6, background: '#FDE68A', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <FileText size={13} />
-            </div>
-            <span>Shift Handover Notes</span>
-          </div>
-          <div
-            style={{
-              fontSize: '13px',
-              color: '#78350F',
-              lineHeight: 1.5,
-              maxHeight: 70,
-              overflowY: 'auto',
-            }}
-          >
-            {data?.handover_notes || 'Standard clinical bedside care. Maintain strict vital signs monitoring and timely medication administration according to MAR.'}
-          </div>
-        </div>
-      </section>
 
       {/* ── SECTION C: 2-Column Row (My Patient on left, Alerts/Actions/Claims/ID on right) ── */}
       <div className="nurse-overview-columns">
@@ -1924,12 +1731,6 @@ export default function NurseHome() {
       </div>
       </div>
 
-      {/* ── RIGHT COLUMN: Narrow Sticky Column (Desktop) / Header Stacking (Mobile) ── */}
-      <aside className="nurse-side-column">
-        <div className="nurse-id-card-wrapper">
-          <StaffIdCard staffMember={employeeCard || staff} />
-        </div>
-      </aside>
     </div>
 
     {/* Responsive Stacking & Sticky Right Column Styles for Nurses Portal */}

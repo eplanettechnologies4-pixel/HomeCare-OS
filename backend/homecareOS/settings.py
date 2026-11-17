@@ -371,6 +371,16 @@ NURSE_PATIENT_ACCESS_DAYS_AFTER_VISIT = config('NURSE_PATIENT_ACCESS_DAYS_AFTER_
 CLINICIAN_PATIENT_ACCESS_DAYS_AFTER_VISIT = config('CLINICIAN_PATIENT_ACCESS_DAYS_AFTER_VISIT', default=7, cast=int)
 RECENT_VITALS_WINDOW_HOURS = config('RECENT_VITALS_WINDOW_HOURS', default=24, cast=int)
 
+# Hospital / Central Dispatch Contact Phone
+# Defaults to the hospital contact number used by the mobile app (+923415339483).
+# Note: HOSPITAL_CONTACT_PHONE can be set in the environment (.env) to override this value.
+# If empty or not configured, helpline / contact lines are hidden rather than displaying fake placeholders.
+HOSPITAL_CONTACT_PHONE = config('HOSPITAL_CONTACT_PHONE', default='+923415339483').strip()
+
+# PROVISIONAL - needs clinical policy sign-off
+# Governs whether a nurse can administer a medication order prior to doctor verification.
+PRESCRIPTION_ADMIN_BEFORE_VERIFICATION = config('PRESCRIPTION_ADMIN_BEFORE_VERIFICATION', default=False, cast=bool)
+
 VITALS_THRESHOLDS = {
     'systolic_max': 140,
     'systolic_min': 90,

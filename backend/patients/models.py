@@ -1,7 +1,9 @@
 import os
 import uuid
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.contrib.auth.models import User
+from django.utils import timezone
 from patients.encryption import encrypt
 
 
@@ -126,6 +128,23 @@ class Patient(models.Model):
 
 
 class Prescription(models.Model):
+    class EntryMode(models.TextChoices):
+        DOCTOR = 'doctor', 'Doctor Order'
+        TRANSCRIBED = 'transcribed', 'Transcribed Order'
+
+    class OrderSource(models.TextChoices):
+        WRITTEN = 'written', 'Written Prescription'
+        PHONE_ORDER = 'phone_order', 'Phone Order'
+
+    class VerificationStatus(models.TextChoices):
+        VERIFIED = 'verified', 'Verified'
+        PENDING_VERIFICATION = 'pending_verification', 'Pending Verification'
+        REJECTED = 'rejected', 'Rejected'
+        CANCELLED = 'cancelled', 'Cancelled'
+        DISCONTINUED = 'discontinued', 'Discontinued'
+
+    LOCKED_CLINICAL_FIELDS = ('medication', 'dosage', 'frequency', 'route', 'date', 'duration_days')
+
     patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name='prescriptions')
     booking = models.ForeignKey(
         'bookings.Booking', on_delete=models.SET_NULL, null=True, blank=True, related_name='prescriptions'
@@ -144,11 +163,133 @@ class Prescription(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
 
+    # ── Authorship, Transcribed Orders & Verification Fields ──────────────────
+    entry_mode = models.CharField(
+        max_length=20,
+        choices=EntryMode.choices,
+        default=EntryMode.DOCTOR,
+        help_text='Whether authored directly by doctor or transcribed by nurse from order'
+    )
+    entered_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='entered_prescriptions',
+        help_text='The user account that recorded or entered this prescription order'
+    )
+    ordering_doctor = models.ForeignKey(
+        'staff.StaffMember',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='ordered_prescriptions',
+        help_text='Optional StaffMember doctor who issued the order'
+    )
+    ordering_doctor_name = models.CharField(
+        max_length=200,
+        blank=True,
+        default='',
+        help_text='Name of the ordering physician for transcribed or normal orders'
+    )
+    order_source = models.CharField(
+        max_length=20,
+        choices=OrderSource.choices,
+        default=OrderSource.WRITTEN,
+        blank=True,
+        help_text='Written prescription or phone order'
+    )
+    verification_status = models.CharField(
+        max_length=30,
+        choices=VerificationStatus.choices,
+        default=VerificationStatus.VERIFIED,
+        help_text='Clinical verification status'
+    )
+    verified_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='verified_prescriptions'
+    )
+    verified_at = models.DateTimeField(null=True, blank=True)
+    verification_note = models.TextField(blank=True, default='')
+    status_reason = models.TextField(blank=True, default='', help_text='Reason for rejection, cancellation, or discontinuation')
+    status_changed_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='status_changed_prescriptions'
+    )
+    status_changed_at = models.DateTimeField(null=True, blank=True)
+
     class Meta:
         ordering = ['-date', '-created_at']
 
     def __str__(self):
-        return f"{self.medication} ({self.dosage}) for {self.patient}"
+        return f"{self.medication} ({self.dosage}) for {self.patient} [{self.verification_status}]"
+
+    def clean(self):
+        super().clean()
+        if self.pk:
+            orig = Prescription.objects.filter(pk=self.pk).first()
+            if orig:
+                # 1. Immutability of order fields once verified or administered, or if terminal status
+                has_been_verified = orig.verified_at is not None
+                has_administrations = orig.administrations.exists()
+                is_terminal_or_verified = orig.verification_status in (
+                    self.VerificationStatus.VERIFIED,
+                    self.VerificationStatus.DISCONTINUED,
+                    self.VerificationStatus.REJECTED,
+                    self.VerificationStatus.CANCELLED,
+                )
+                is_locked = has_been_verified or has_administrations or is_terminal_or_verified
+
+                if is_locked:
+                    for field in self.LOCKED_CLINICAL_FIELDS:
+                        if getattr(self, field) != getattr(orig, field):
+                            raise ValidationError({
+                                field: f"Clinical prescription field '{field}' is locked and immutable after verification, dose administration, or closure."
+                            })
+
+                # 2. Status transition rules
+                # If it has ever been verified (verified_at is not null) or is currently verified:
+                if has_been_verified or orig.verification_status == self.VerificationStatus.VERIFIED:
+                    if self.verification_status not in (self.VerificationStatus.VERIFIED, self.VerificationStatus.DISCONTINUED):
+                        raise ValidationError({
+                            'verification_status': 'A verified prescription cannot be reverted to pending, rejected, or cancelled. It can only be discontinued.'
+                        })
+                elif orig.verification_status in (
+                    self.VerificationStatus.DISCONTINUED,
+                    self.VerificationStatus.REJECTED,
+                    self.VerificationStatus.CANCELLED
+                ):
+                    if self.verification_status != orig.verification_status:
+                        raise ValidationError({
+                            'verification_status': f"A {orig.verification_status} prescription status cannot be modified."
+                        })
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        has_been_verified = self.verified_at is not None
+        has_administrations = self.administrations.exists()
+        is_terminal = self.verification_status in (
+            self.VerificationStatus.VERIFIED,
+            self.VerificationStatus.DISCONTINUED,
+            self.VerificationStatus.REJECTED,
+            self.VerificationStatus.CANCELLED,
+        )
+        if has_been_verified or has_administrations or is_terminal:
+            raise ValidationError(
+                "Verified, administered, rejected, cancelled, or discontinued prescriptions cannot be physically deleted. Order is permanently locked."
+            )
+        raise ValidationError(
+            "Physical deletion of prescriptions is prohibited. Cancel pending orders instead."
+        )
 
     # Ergonomic property aliases
     @property

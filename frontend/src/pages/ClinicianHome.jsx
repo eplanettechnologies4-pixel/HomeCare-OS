@@ -10,6 +10,7 @@ import apiFetch from '../services/api';
 import { getClinicianConfig, normalizeRole } from '../config/clinicianRoleConfig';
 import DoctorOverview from './DoctorOverview';
 import StaffIdCard from '../components/StaffIdCard';
+import StaffOverviewHeader from '../components/StaffOverviewHeader';
 
 export default function ClinicianHome() {
   const currentRole = useStore((s) => s.currentRole);
@@ -22,6 +23,28 @@ export default function ClinicianHome() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
+  const [currentTimeStr, setCurrentTimeStr] = useState('');
+
+  // PKT clock — updated every second using Intl so AM/PM is always correct
+  useEffect(() => {
+    const getPKT = () => new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Karachi',
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true,
+    }).format(new Date());
+    setCurrentTimeStr(getPKT());
+    const id = setInterval(() => setCurrentTimeStr(getPKT()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Time-sensitive greeting (Asia/Karachi hour)
+  const greeting = (() => {
+    const pktHour = Number(new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Karachi', hour: 'numeric', hour12: false,
+    }).format(new Date()));
+    if (pktHour >= 5 && pktHour < 12) return 'Good morning';
+    if (pktHour >= 12 && pktHour < 17) return 'Good afternoon';
+    return 'Good evening';
+  })();
 
   const config = getClinicianConfig(currentRole);
   const inFlightRef = useRef(false);
@@ -147,83 +170,128 @@ export default function ClinicianHome() {
   const quickLinks = data?.quick_links || [];
   const placeholders = data?.placeholders || [];
 
-  return (
-    <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '24px', maxWidth: '1440px', margin: '0 auto' }}>
+  const clinicianRosterCard = (
+    <section
+      className="card clinician-roster-top-card"
+      style={{
+        background: '#FFFFFF',
+        borderRadius: 16,
+        border: '1px solid #EEF0F4',
+        borderTop: `4px solid ${config.badgeColor}`,
+        boxShadow: '0 4px 20px rgba(109, 40, 217, 0.06)',
+        padding: 22,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 16,
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: 10,
+              background: `linear-gradient(135deg, ${config.badgeColor}, #4C1D95)`,
+              color: '#FFFFFF',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 2px 8px rgba(109,40,217,0.25)',
+            }}
+          >
+            <Calendar size={18} />
+          </div>
+          <div>
+            <h2 style={{ fontSize: '1.05rem', fontWeight: 800, color: '#1E1B4B', margin: 0 }}>
+              Today's Clinical Roster & Duty Window
+            </h2>
+            <div style={{ fontSize: '0.8rem', color: '#6B7280' }}>
+              Scheduled patient sessions and clinical presence ({workingHours.timezone || 'Asia/Karachi'})
+            </div>
+          </div>
+        </div>
 
-      {/* ── 1. Hero Band: Greeting, Working Hours, Live Refresh ── */}
+        <span
+          style={{
+            fontSize: '0.75rem',
+            fontWeight: 700,
+            padding: '4px 12px',
+            borderRadius: 9999,
+            background: '#ECFDF5',
+            color: '#047857',
+            border: '1.5px solid #A7F3D0',
+          }}
+        >
+          • Active Shift
+        </span>
+      </div>
+
       <div
-        className="card"
         style={{
-          padding: '24px 28px',
-          background: 'linear-gradient(135deg, #FFFFFF 0%, #FAF5FF 60%, #F5F3FF 100%)',
-          borderTop: `4px solid ${config.badgeColor}`,
-          borderRadius: 16,
-          boxShadow: '0 4px 20px rgba(124, 58, 237, 0.06)',
+          background: 'linear-gradient(135deg, #FAF5FF 0%, #F5F3FF 100%)',
+          border: '1.5px solid #DDD6FE',
+          borderRadius: 14,
+          padding: '14px 18px',
           display: 'flex',
-          flexWrap: 'wrap',
-          alignItems: 'center',
           justifyContent: 'space-between',
-          gap: 20,
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: 12,
         }}
       >
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 6 }}>
-            <span
-              style={{
-                fontSize: '0.75rem',
-                fontWeight: 700,
-                textTransform: 'uppercase',
-                padding: '3px 10px',
-                borderRadius: 999,
-                background: '#EDE9FE',
-                color: config.badgeColor,
-                letterSpacing: '0.04em',
-              }}
-            >
-              {config.title}
-            </span>
-            <span style={{ fontSize: '0.8rem', color: '#6B7280', display: 'flex', alignItems: 'center', gap: 4 }}>
-              <Clock size={13} />
-              Official Hours: {workingHours.start} – {workingHours.end} ({workingHours.timezone})
-            </span>
-            {lastUpdated && (
-              <span style={{ fontSize: '0.75rem', color: '#9CA3AF' }}>
-                • Updated {lastUpdated}
-              </span>
-            )}
+          <div style={{ fontSize: '0.72rem', color: config.badgeColor, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+            Duty Window (Official Hours)
           </div>
-          <h1 style={{ margin: 0, fontSize: '1.75rem', fontWeight: 800, color: '#1F2937', letterSpacing: '-0.02em' }}>
-            Good day, {staff.name}
-          </h1>
-          <p style={{ margin: '6px 0 0 0', fontSize: '0.92rem', color: '#4B5563' }}>
-            <strong>{staff.designation}</strong> • Speciality: <em>{staff.specialities}</em>
-          </p>
+          <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#1E1B4B', marginTop: 2 }}>
+            {workingHours.start} – {workingHours.end} ({workingHours.timezone})
+          </div>
+          <div style={{ fontSize: '0.8rem', color: '#4B5563', marginTop: 4, display: 'flex', alignItems: 'center', gap: 5 }}>
+            <MapPin size={13} style={{ color: config.badgeColor }} />
+            Islamabad Clinical Operations Center · Outpatient & Home Therapy Rounds
+          </div>
         </div>
 
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-          <button
-            onClick={() => fetchClinicianData(false)}
-            className="btn btn-ghost btn-sm"
-            style={{ color: config.badgeColor, borderColor: '#DDD6FE', gap: 6 }}
-            title="Refresh clinician dashboard"
-          >
-            <RefreshCw size={14} /> Refresh
-          </button>
-          <button
-            onClick={() => setActivePage('call-help')}
-            className="btn btn-sm"
-            style={{
-              background: 'linear-gradient(135deg, #FEF2F2 0%, #FEE2E2 100%)',
-              color: '#DC2626',
-              border: '1px solid #FCA5A5',
-              fontWeight: 700,
-              gap: 6,
-            }}
-          >
-            <Phone size={14} /> Emergency Helpline
-          </button>
+        <div style={{ display: 'flex', gap: 16 }}>
+          <div style={{ textAlign: 'center', background: '#FFFFFF', padding: '8px 16px', borderRadius: 10, border: '1px solid #E5E7EB' }}>
+            <div style={{ fontSize: '1.25rem', fontWeight: 800, color: config.badgeColor }}>
+              {todayVisits.length}
+            </div>
+            <div style={{ fontSize: '0.72rem', color: '#6B7280', fontWeight: 600 }}>
+              Today's Visits
+            </div>
+          </div>
+          <div style={{ textAlign: 'center', background: '#FFFFFF', padding: '8px 16px', borderRadius: 10, border: '1px solid #E5E7EB' }}>
+            <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#059669' }}>
+              {pendingRequests.total_pending ?? 0}
+            </div>
+            <div style={{ fontSize: '0.72rem', color: '#6B7280', fontWeight: 600 }}>
+              Pending Tasks
+            </div>
+          </div>
         </div>
       </div>
+    </section>
+  );
+
+  return (
+    <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '24px', maxWidth: '1440px', margin: '0 auto' }}>
+
+      {/* ── 1. Shared Staff Overview Header (Slim Greeting Strip + ID Card & Roster Grid) ── */}
+      <StaffOverviewHeader
+        staff={staff}
+        employeeCard={employeeCard}
+        roleTitle={config.title}
+        badgeColor={config.badgeColor}
+        dutyStatus="On duty"
+        workingHours={workingHours}
+        lastUpdated={lastUpdated}
+        onRefresh={() => fetchClinicianData(false)}
+        onHelpClick={() => setActivePage('call-help')}
+        helpButtonLabel="Emergency Helpline"
+        rosterCard={clinicianRosterCard}
+      />
 
       {/* ── 2-COLUMN RESPONSIVE LAYOUT (Desktop: Main left, Narrow Sticky Right Column; Mobile/Tablet: Stacked) ── */}
       <div className="clinician-layout-grid">
@@ -251,7 +319,7 @@ export default function ClinicianHome() {
               </span>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, textAlign: 'center' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: currentRole === 'doctor' ? 'repeat(4, 1fr)' : 'repeat(3, 1fr)', gap: 10, textAlign: 'center' }}>
               <div style={{ padding: '12px 8px', background: '#FFFBEB', borderRadius: 10, border: '1px solid #FDE68A' }}>
                 <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#B45309' }}>
                   {pendingRequests.referrals?.length || 0}
@@ -278,6 +346,17 @@ export default function ClinicianHome() {
                   Procedures
                 </div>
               </div>
+
+              {currentRole === 'doctor' && (
+                <div style={{ padding: '12px 8px', background: '#F5F3FF', borderRadius: 10, border: '1px solid #DDD6FE' }}>
+                  <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#6D28D9' }}>
+                    {pendingRequests.prescriptions_to_verify_count || pendingRequests.prescriptions_to_verify?.length || 0}
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: '#5B21B6', fontWeight: 600, marginTop: 2 }}>
+                    Verify Rx
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -731,58 +810,20 @@ export default function ClinicianHome() {
 
         </div>{/* /clinician-main-column */}
 
-        {/* ════════════════════════════════════════════════════════════════
-            NARROW STICKY RIGHT COLUMN (Contains StaffIdCard only)
-            ════════════════════════════════════════════════════════════════ */}
-        <aside className="clinician-side-column">
-          <div className="clinician-id-card-wrapper">
-            <StaffIdCard staffMember={employeeCard || staff} />
-          </div>
-        </aside>
-
       </div>{/* /clinician-layout-grid */}
 
-      {/* Responsive Stacking & Sticky Right Column Styles for Clinician Overviews */}
+      {/* Responsive Stacking Styles for Clinician Overviews */}
       <style>{`
         .clinician-layout-grid {
           display: flex;
           flex-direction: column;
           gap: 20px;
         }
-        .clinician-side-column {
-          display: contents;
-        }
-        .clinician-id-card-wrapper {
-          order: 1;
-          display: flex;
-          justify-content: center;
-        }
         .clinician-main-column {
-          order: 2;
           display: flex;
           flex-direction: column;
           gap: 24px;
           min-width: 0;
-        }
-        @media (min-width: 1024px) {
-          .clinician-layout-grid {
-            display: grid;
-            grid-template-columns: minmax(0, 1fr) 380px;
-            gap: 24px;
-            align-items: start;
-          }
-          .clinician-side-column {
-            display: block;
-            position: sticky;
-            top: 24px;
-            align-self: start;
-          }
-          .clinician-id-card-wrapper {
-            order: unset;
-          }
-          .clinician-main-column {
-            order: unset;
-          }
         }
       `}</style>
 

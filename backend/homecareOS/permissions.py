@@ -127,8 +127,10 @@ class IsPrescriptionManagementAllowed(BasePermission):
     """
     RBAC for Prescriptions:
     - SAFE_METHODS (GET, HEAD, OPTIONS): all authenticated users (including patient/family portal).
-    - POST (create): Doctors, Nurses, Care Managers, Branch Managers, and Admins.
-    - PATCH / PUT / DELETE: Admins, Super Admins, Branch Managers only.
+    - POST (create): Doctor (prescribe) or Nurse (transcribed order per CLINICAL_WRITE_ROLES).
+    - PATCH / PUT (edit): Nurse author only while pending verification and has no administrations.
+    - DELETE: Denied for everyone (cancelled or discontinued instead; physical deletion removed).
+    - Admins, Super Admins, Branch Managers, Care Managers are read-only.
     - Family portal users are strictly read-only.
     """
     message = "You do not have permission to modify or add prescriptions."
@@ -138,11 +140,26 @@ class IsPrescriptionManagementAllowed(BasePermission):
             return False
         if request.method in SAFE_METHODS:
             return True
-        role = get_user_role(request.user)
+        from homecareOS.clinician_permissions import CLINICAL_WRITE_ROLES, normalize_clinical_role
+        role = normalize_clinical_role(get_user_role(request.user))
         if request.method == 'POST':
-            return role in ('super_admin', 'admin', 'branch_manager', 'doctor', 'nurse', 'care_manager')
-        if request.method in ('PATCH', 'PUT', 'DELETE'):
-            return role in ('super_admin', 'admin', 'branch_manager')
+            allowed = role in CLINICAL_WRITE_ROLES.get('prescriptions', ('doctor', 'nurse'))
+            if not allowed:
+                patient_pk = (
+                    getattr(view, 'kwargs', {}).get('pk')
+                    or getattr(view, 'kwargs', {}).get('patient_pk')
+                    or (request.data.get('patient') if hasattr(request, 'data') else None)
+                    or (request.data.get('patient_id') if hasattr(request, 'data') else None)
+                )
+                if patient_pk:
+                    from homecareOS.clinician_permissions import log_chart_audit
+                    log_chart_audit(request, patient_pk, 'Prescription Create Blocked', 'Prescriptions')
+            return allowed
+        if request.method in ('PATCH', 'PUT'):
+            return role in ('nurse', 'nursing_assistant')
+        if request.method == 'DELETE':
+            # Nurse author may cancel a pending transcribed prescription via DELETE route
+            return role in ('nurse', 'nursing_assistant')
         return False
 
 
@@ -164,6 +181,22 @@ def is_family_user(user):
     return False
 
 
+class DenyNonClinicalRoles(BasePermission):
+    """
+    Explicitly denies non-clinical support roles (accountant, crm_executive)
+    from accessing clinical records, views, or endpoints.
+    """
+    message = "Non-clinical roles (accountant, CRM executive) are forbidden from accessing clinical records."
+
+    def has_permission(self, request, view):
+        if not request.user or not request.user.is_authenticated:
+            return False
+        role = get_user_role(request.user)
+        if role in ('accountant', 'crm_executive'):
+            return False
+        return True
+
+
 class IsPatientOrFamilyOwner(BasePermission):
     """
     Object-level permission check:
@@ -172,6 +205,9 @@ class IsPatientOrFamilyOwner(BasePermission):
       to their own patient (patient.portal_user == request.user).
     """
     message = "You do not have permission to access records for this patient."
+
+    def has_permission(self, request, view):
+        return bool(request.user and request.user.is_authenticated)
 
     def has_object_permission(self, request, view, obj):
         if not request.user or not request.user.is_authenticated:

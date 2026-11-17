@@ -746,11 +746,45 @@ class ClinicianPortalHomeView(APIView):
             elif r.request_type == 'procedure_change':
                 pending_procedures.append(item)
 
+        # For Doctor role: Prescriptions requiring clinical verification
+        prescriptions_to_verify = []
+        if user_role == 'doctor' or (staff and staff.role == 'doctor'):
+            from patients.models import Prescription
+            from patients.scoping import get_assigned_patient_ids_for_clinician
+            assigned_doc_pids = get_assigned_patient_ids_for_clinician(request.user)
+            rx_qs = Prescription.objects.filter(
+                verification_status='pending_verification'
+            ).select_related('patient', 'entered_by', 'uploaded_by')
+            if assigned_doc_pids is not None:
+                rx_qs = rx_qs.filter(patient_id__in=assigned_doc_pids)
+
+            for rx in rx_qs.order_by('-created_at')[:20]:
+                entered_name = rx.entered_by.get_full_name() if rx.entered_by else (rx.uploaded_by.full_name if rx.uploaded_by else rx.prescribed_by)
+                prescriptions_to_verify.append({
+                    'id': rx.id,
+                    'patient_id': rx.patient_id,
+                    'patient_name': rx.patient.full_name if rx.patient else 'Unknown',
+                    'patient_code': rx.patient.patient_code if rx.patient else '',
+                    'mr_number': rx.patient.mr_number if rx.patient else '',
+                    'medication': rx.medication,
+                    'dosage': rx.dosage,
+                    'frequency': rx.frequency,
+                    'route': rx.route,
+                    'duration_days': rx.duration_days,
+                    'ordering_doctor_name': rx.ordering_doctor_name,
+                    'entered_by': entered_name,
+                    'order_source': rx.order_source,
+                    'created_at': rx.created_at.isoformat(),
+                    'type': 'prescription_verification',
+                })
+
         pending_requests = {
-            'total_pending': len(pending_referrals) + len(pending_consultations) + len(pending_procedures),
+            'total_pending': len(pending_referrals) + len(pending_consultations) + len(pending_procedures) + len(prescriptions_to_verify),
             'referrals': pending_referrals,
             'consultations': pending_consultations,
             'procedures': pending_procedures,
+            'prescriptions_to_verify': prescriptions_to_verify,
+            'prescriptions_to_verify_count': len(prescriptions_to_verify),
         }
 
         # 5. High-Alert Patients (Critical, Less critical, Mild, Stable)
@@ -1846,6 +1880,7 @@ class EmployeeCardView(APIView):
             'employment_type': 'Full-time Clinical Specialist',
             'duty_status': staff.status or 'available',
             'status': staff.status or 'available',
+            'hospital_contact_phone': getattr(settings, 'HOSPITAL_CONTACT_PHONE', '') or None,
             'verification_token': signed_token,
             'verify_url': f"/api/staff/verify/{signed_token}/",
         })

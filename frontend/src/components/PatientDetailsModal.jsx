@@ -125,9 +125,6 @@ export default function PatientDetailsModal({ isOpen, onClose, patientData, guar
                 <span style={{ fontSize: '12px', fontWeight: 600, color: '#6D28D9', background: '#DDD6FE', padding: '2px 8px', borderRadius: '10px' }}>
                   MR: {formatVal(patientData?.mr_number)}
                 </span>
-                <span style={{ fontSize: '12px', color: '#4B5563' }}>
-                  Code: {formatVal(patientData?.patient_code)}
-                </span>
               </div>
             </div>
           </div>
@@ -168,10 +165,6 @@ export default function PatientDetailsModal({ isOpen, onClose, patientData, guar
                 <strong style={{ color: '#0F172A' }}>{formatVal(patientData?.blood_type)}</strong>
               </div>
               <div>
-                <span style={{ color: '#64748B', display: 'block', fontSize: '11px' }}>Patient Phone</span>
-                <strong style={{ color: '#0F172A' }}>{formatVal(patientData?.phone)}</strong>
-              </div>
-              <div>
                 <span style={{ color: '#64748B', display: 'block', fontSize: '11px' }}>Location / City</span>
                 <strong style={{ color: '#0F172A' }}>{formatVal(patientData?.location)}</strong>
               </div>
@@ -198,7 +191,14 @@ export default function PatientDetailsModal({ isOpen, onClose, patientData, guar
                   <div style={{ fontWeight: 700, color: '#1E1B4B' }}>{treatingConsultant.name}</div>
                   <div style={{ color: '#6B7280' }}>{treatingConsultant.specialization} ({treatingConsultant.employee_id || '-'})</div>
                   <div style={{ marginTop: '4px', color: '#374151', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <Phone size={12} /> {formatVal(treatingConsultant.phone)}
+                    <Phone size={12} />
+                    {treatingConsultant.phone && treatingConsultant.phone !== '-' ? (
+                      <a href={`tel:${treatingConsultant.phone}`} style={{ color: '#6D28D9', textDecoration: 'none', fontWeight: 600 }}>
+                        {treatingConsultant.phone}
+                      </a>
+                    ) : (
+                      <span>-</span>
+                    )}
                   </div>
                 </div>
               ) : (
@@ -216,7 +216,14 @@ export default function PatientDetailsModal({ isOpen, onClose, patientData, guar
                   <div style={{ fontWeight: 700, color: '#14532D' }}>{careManager.name}</div>
                   <div style={{ color: '#4B5563' }}>{careManager.role_display} ({careManager.employee_id || '-'})</div>
                   <div style={{ marginTop: '4px', color: '#374151', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <Phone size={12} /> {formatVal(careManager.phone)}
+                    <Phone size={12} />
+                    {careManager.phone && careManager.phone !== '-' ? (
+                      <a href={`tel:${careManager.phone}`} style={{ color: '#15803D', textDecoration: 'none', fontWeight: 600 }}>
+                        {careManager.phone}
+                      </a>
+                    ) : (
+                      <span>-</span>
+                    )}
                   </div>
                 </div>
               ) : (
@@ -319,7 +326,14 @@ export default function PatientDetailsModal({ isOpen, onClose, patientData, guar
                         {s.shift_hours}
                       </span>
                       <span style={{ color: '#475569', fontSize: '11px' }}>
-                        📞 {formatVal(s.phone)}
+                        📞{' '}
+                        {s.phone && s.phone !== '-' ? (
+                          <a href={`tel:${s.phone}`} style={{ color: '#6D28D9', textDecoration: 'none', fontWeight: 600 }}>
+                            {s.phone}
+                          </a>
+                        ) : (
+                          '-'
+                        )}
                       </span>
                     </div>
                   </div>

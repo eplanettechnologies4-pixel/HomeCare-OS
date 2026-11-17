@@ -342,7 +342,7 @@ export default function UniversalPrintButton({
                         {(rec.activeMeds || []).map((med, mIdx) => (
                           <div key={mIdx} style={{ border: '1px solid #cbd5e1', borderRadius: 6, padding: 8, marginBottom: 12 }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', fontSize: '0.85rem' }}>
-                              <span>{med.brand_name} ({med.generic_name}) — {med.dose} [{med.route}]</span>
+                              <span>{med.brand_name} ({med.generic_name}) — {med.dose} [{med.route}]{med.verification_status ? ` · Status: ${med.verification_status.replace('_', ' ').toUpperCase()}` : ''}</span>
                               <span>Freq: {med.frequency}</span>
                             </div>
                             <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: 6, fontSize: '0.72rem', textAlign: 'center' }}>

@@ -58,6 +58,30 @@ export const CHART_TABS = [
   { id: 'medications',     label: 'Medication Record',     icon: Pill,          desc: 'Prescriptions & Form C MAR' },
 ];
 
+// ── Clinical Authorship & Write Roles Matrix (Single Source of Truth) ──────
+// Governs button visibility across clinical files. Mirrored by backend clinician_permissions.py.
+export const CLINICAL_WRITE_ROLES = {
+  doctor_notes: ['doctor'],
+  prescriptions: ['doctor', 'nurse'],
+  lab_orders: ['doctor'],
+  referrals: ['doctor'],
+  consents: ['doctor'],
+  therapy_notes: ['physiotherapist', 'speech_therapist', 'psychotherapist', 'dietician'],
+  vitals: ['nurse', 'doctor'],
+  intake_output: ['nurse', 'doctor'],
+  nurse_notes: ['nurse'],
+  mar_administer: ['nurse'],
+  active_complaint: ['doctor', 'care_manager', 'admin', 'super_admin'],
+  history_care_plan: ['doctor', 'care_manager', 'admin', 'super_admin'],
+  scheduled_items: ['doctor', 'care_manager', 'admin', 'super_admin'],
+};
+
+export function canRoleWriteClinical(role, actionKey) {
+  const norm = normalizeRole(role);
+  const allowed = CLINICAL_WRITE_ROLES[actionKey] || [];
+  return allowed.includes(norm) || allowed.includes(role);
+}
+
 // ── Target Rights Matrix ────────────────────────────────────────────────────
 // Values: 'write' (full read/write), 'read' (view only), null (hidden)
 export const ROLE_CHART_PERMISSIONS = {
@@ -148,22 +172,14 @@ export const CLINICIAN_ROLE_CONFIG = {
     title: 'Doctors Portal',
     designation: 'Attending Physician',
     badgeColor: '#7C3AED',
+    defaultPatientFileTile: 'doctor_notes',
+    patientFileTiles: ['doctor_notes', 'nursing_notes', 'monitoring', 'medications', 'lab_reports', 'consents', 'history_sheets', 'rehabilitation_notes', 'manager_checklist', 'safety_checklist'],
     homeWidgets: ['hero', 'digital_id', 'today_visits', 'pending_requests', 'high_alert_patients', 'quick_links', 'placeholders'],
     sidebarGroups: [
       {
         title: 'Overview',
         items: [
           { id: 'overview', label: 'Overview', icon: LayoutDashboard },
-        ],
-      },
-      {
-        title: 'Clinical Care',
-        items: [
-          { id: 'patient-file',  label: 'Patient File',  icon: FolderHeart },
-          { id: 'patient-chart', label: 'Patient Chart', icon: Activity },
-          { id: 'pharmacy',      label: 'Pharmacy',      icon: Pill },
-          { id: 'lab-orders',    label: 'Lab Orders',    icon: FlaskConical },
-          { id: 'call-help',     label: 'Emergency Call',icon: PhoneCall },
         ],
       },
       {
@@ -175,6 +191,15 @@ export const CLINICIAN_ROLE_CONFIG = {
           { id: 'company-policies', label: 'Hospital Policies', icon: ShieldCheck },
         ],
       },
+      {
+        title: 'Clinical Care',
+        items: [
+          { id: 'patient-file',  label: 'Patient File',  icon: FolderHeart },
+          { id: 'pharmacy',      label: 'Pharmacy',      icon: Pill },
+          { id: 'lab-orders',    label: 'Lab Orders',    icon: FlaskConical },
+          { id: 'call-help',     label: 'Emergency Call',icon: PhoneCall },
+        ],
+      },
     ],
   },
   physiotherapist: {
@@ -182,21 +207,14 @@ export const CLINICIAN_ROLE_CONFIG = {
     title: 'Physiotherapy Portal',
     designation: 'Physical Rehabilitation Specialist',
     badgeColor: '#0284C7',
+    defaultPatientFileTile: 'rehabilitation_notes',
+    patientFileTiles: ['rehabilitation_notes', 'nursing_notes', 'monitoring', 'medications', 'doctor_notes', 'consents', 'history_sheets', 'lab_reports', 'manager_checklist', 'safety_checklist'],
     homeWidgets: ['hero', 'digital_id', 'today_visits', 'pending_requests', 'high_alert_patients', 'quick_links', 'placeholders'],
     sidebarGroups: [
       {
         title: 'Overview',
         items: [
           { id: 'overview', label: 'Overview', icon: LayoutDashboard },
-        ],
-      },
-      {
-        title: 'Rehabilitation Care',
-        items: [
-          { id: 'patient-file',  label: 'Patient File',  icon: FolderHeart },
-          { id: 'patient-chart', label: 'Patient Chart', icon: Activity },
-          { id: 'equipment',     label: 'Equipment',     icon: Truck },
-          { id: 'call-help',     label: 'Emergency Call',icon: PhoneCall },
         ],
       },
       {
@@ -208,6 +226,14 @@ export const CLINICIAN_ROLE_CONFIG = {
           { id: 'company-policies', label: 'Hospital Policies', icon: ShieldCheck },
         ],
       },
+      {
+        title: 'Rehabilitation Care',
+        items: [
+          { id: 'patient-file',  label: 'Patient File',  icon: FolderHeart },
+          { id: 'equipment',     label: 'Equipment',     icon: Truck },
+          { id: 'call-help',     label: 'Emergency Call',icon: PhoneCall },
+        ],
+      },
     ],
   },
   speech_therapist: {
@@ -215,20 +241,14 @@ export const CLINICIAN_ROLE_CONFIG = {
     title: 'Speech & Language Therapy Portal',
     designation: 'Speech-Language Pathologist (SLP)',
     badgeColor: '#0D9488',
+    defaultPatientFileTile: 'rehabilitation_notes',
+    patientFileTiles: ['rehabilitation_notes', 'nursing_notes', 'monitoring', 'medications', 'doctor_notes', 'consents', 'history_sheets', 'lab_reports', 'manager_checklist', 'safety_checklist'],
     homeWidgets: ['hero', 'digital_id', 'today_visits', 'pending_requests', 'high_alert_patients', 'quick_links', 'placeholders'],
     sidebarGroups: [
       {
         title: 'Overview',
         items: [
           { id: 'overview', label: 'Overview', icon: LayoutDashboard },
-        ],
-      },
-      {
-        title: 'Speech Pathology',
-        items: [
-          { id: 'patient-file',  label: 'Patient File',  icon: FolderHeart },
-          { id: 'patient-chart', label: 'Patient Chart', icon: Activity },
-          { id: 'call-help',     label: 'Emergency Call',icon: PhoneCall },
         ],
       },
       {
@@ -240,6 +260,13 @@ export const CLINICIAN_ROLE_CONFIG = {
           { id: 'company-policies', label: 'Hospital Policies', icon: ShieldCheck },
         ],
       },
+      {
+        title: 'Speech Pathology',
+        items: [
+          { id: 'patient-file',  label: 'Patient File',  icon: FolderHeart },
+          { id: 'call-help',     label: 'Emergency Call',icon: PhoneCall },
+        ],
+      },
     ],
   },
   psychotherapist: {
@@ -247,20 +274,14 @@ export const CLINICIAN_ROLE_CONFIG = {
     title: 'Psychotherapy & Clinical Psychology',
     designation: 'Licensed Clinical Psychologist / Psychotherapist',
     badgeColor: '#9333EA',
+    defaultPatientFileTile: 'rehabilitation_notes',
+    patientFileTiles: ['rehabilitation_notes', 'nursing_notes', 'monitoring', 'medications', 'doctor_notes', 'consents', 'history_sheets', 'lab_reports', 'manager_checklist', 'safety_checklist'],
     homeWidgets: ['hero', 'digital_id', 'today_visits', 'pending_requests', 'high_alert_patients', 'quick_links', 'placeholders'],
     sidebarGroups: [
       {
         title: 'Overview',
         items: [
           { id: 'overview', label: 'Overview', icon: LayoutDashboard },
-        ],
-      },
-      {
-        title: 'Mental Health & CBT',
-        items: [
-          { id: 'patient-file',  label: 'Patient File',  icon: FolderHeart },
-          { id: 'patient-chart', label: 'Patient Chart', icon: Activity },
-          { id: 'call-help',     label: 'Emergency Call',icon: PhoneCall },
         ],
       },
       {
@@ -272,6 +293,13 @@ export const CLINICIAN_ROLE_CONFIG = {
           { id: 'company-policies', label: 'Hospital Policies', icon: ShieldCheck },
         ],
       },
+      {
+        title: 'Mental Health & CBT',
+        items: [
+          { id: 'patient-file',  label: 'Patient File',  icon: FolderHeart },
+          { id: 'call-help',     label: 'Emergency Call',icon: PhoneCall },
+        ],
+      },
     ],
   },
   nurse: {
@@ -279,21 +307,14 @@ export const CLINICIAN_ROLE_CONFIG = {
     title: 'Nurses Portal',
     designation: 'Registered Nurse (RN)',
     badgeColor: '#10B981',
+    defaultPatientFileTile: 'nursing_notes',
+    patientFileTiles: ['nursing_notes', 'monitoring', 'medications', 'doctor_notes', 'consents', 'lab_reports', 'history_sheets', 'manager_checklist', 'safety_checklist', 'rehabilitation_notes'],
     homeWidgets: ['hero', 'digital_id', 'today_visits', 'my_roster', 'my_patient', 'alerts', 'actions', 'claims'],
     sidebarGroups: [
       {
         title: 'Overview',
         items: [
           { id: 'overview', label: 'Overview', icon: LayoutDashboard },
-        ],
-      },
-      {
-        title: 'Care',
-        items: [
-          { id: 'patient-file',         label: 'Patient File',  icon: FolderHeart },
-          { id: 'nurse-patient-detail', label: 'Patient Chart', icon: Activity },
-          { id: 'call-help',            label: 'Call Help',     icon: PhoneCall },
-          { id: 'my-reviews',           label: 'My Reviews',    icon: Star },
         ],
       },
       {
@@ -309,6 +330,14 @@ export const CLINICIAN_ROLE_CONFIG = {
           { id: 'company-policies',  label: 'Company Policies',  icon: ShieldCheck },
         ],
       },
+      {
+        title: 'Care',
+        items: [
+          { id: 'patient-file',         label: 'Patient File',  icon: FolderHeart },
+          { id: 'call-help',            label: 'Call Help',     icon: PhoneCall },
+          { id: 'my-reviews',           label: 'My Reviews',    icon: Star },
+        ],
+      },
     ],
   },
   dietician: {
@@ -316,6 +345,8 @@ export const CLINICIAN_ROLE_CONFIG = {
     title: 'Dietetics & Nutrition Portal',
     designation: 'Clinical Dietitian / Nutritionist',
     badgeColor: '#059669',
+    defaultPatientFileTile: 'rehabilitation_notes',
+    patientFileTiles: ['rehabilitation_notes', 'nursing_notes', 'monitoring', 'medications', 'doctor_notes', 'consents', 'history_sheets', 'lab_reports', 'manager_checklist', 'safety_checklist'],
     homeWidgets: ['hero', 'digital_id', 'today_visits', 'pending_requests', 'high_alert_patients', 'quick_links', 'placeholders'],
     sidebarGroups: [
       {
@@ -325,20 +356,19 @@ export const CLINICIAN_ROLE_CONFIG = {
         ],
       },
       {
-        title: 'Nutritional Care',
-        items: [
-          { id: 'patient-file',  label: 'Patient File',  icon: FolderHeart },
-          { id: 'patient-chart', label: 'Patient Chart', icon: Activity },
-          { id: 'call-help',     label: 'Emergency Call',icon: PhoneCall },
-        ],
-      },
-      {
         title: 'Clinician Profile',
         items: [
           { id: 'my-docs',          label: 'My Credentials',    icon: FileText },
           { id: 'my-timesheet',     label: 'Clinical Roster',   icon: Clock },
           { id: 'leave-application',label: 'Leave Application', icon: CalendarDays },
           { id: 'company-policies', label: 'Hospital Policies', icon: ShieldCheck },
+        ],
+      },
+      {
+        title: 'Nutritional Care',
+        items: [
+          { id: 'patient-file',  label: 'Patient File',  icon: FolderHeart },
+          { id: 'call-help',     label: 'Emergency Call',icon: PhoneCall },
         ],
       },
     ],

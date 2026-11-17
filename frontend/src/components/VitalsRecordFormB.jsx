@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Activity, Plus, ShieldCheck, Clock, TrendingUp, Table, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import useStore from '../store/useStore';
+import apiFetch from '../services/api';
 import UniversalPrintButton from './UniversalPrintButton';
 import { format } from 'date-fns';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
@@ -41,12 +42,51 @@ export default function VitalsRecordFormB({ patient, isReadOnly = false }) {
     notes: ''
   });
 
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   const handleInputChange = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
-  const handleSaveVitals = (e) => {
+  const handleSaveVitals = async (e) => {
     e.preventDefault();
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+
+    const intakeTotal = (Number(formData.intake_ng) || 0) + (Number(formData.intake_iv) || 0);
+    const outputTotal = (Number(formData.output_urine) || 0) + (Number(formData.output_drain) || 0);
+
+    const apiPayload = {
+      patient: patient.id,
+      blood_pressure_systolic: formData.blood_pressure_systolic ? parseInt(formData.blood_pressure_systolic, 10) : null,
+      blood_pressure_diastolic: formData.blood_pressure_diastolic ? parseInt(formData.blood_pressure_diastolic, 10) : null,
+      temperature: formData.temperature ? parseFloat(formData.temperature) : null,
+      heart_rate: formData.heart_rate ? parseInt(formData.heart_rate, 10) : null,
+      respiratory_rate: formData.respiratory_rate ? parseInt(formData.respiratory_rate, 10) : null,
+      spo2: formData.spo2 ? parseInt(formData.spo2, 10) : null,
+      weight_kg: formData.weight_kg ? parseFloat(formData.weight_kg) : null,
+      blood_glucose: formData.bsr ? parseFloat(formData.bsr) : null,
+      intake_ml: intakeTotal > 0 ? intakeTotal : null,
+      output_ml: outputTotal > 0 ? outputTotal : null,
+      notes: [
+        formData.notes,
+        formData.insulin ? `Insulin: ${formData.insulin}` : null,
+        formData.intake_ng || formData.intake_iv ? `Intake: NG ${formData.intake_ng || 0}ml, IV ${formData.intake_iv || 0}ml` : null,
+        formData.output_urine || formData.output_drain ? `Output: Urine ${formData.output_urine || 0}ml, Drain ${formData.output_drain || 0}ml` : null,
+      ].filter(Boolean).join(' | '),
+    };
+
+    try {
+      await apiFetch('/vitals/', {
+        method: 'POST',
+        body: JSON.stringify(apiPayload),
+      });
+    } catch (err) {
+      console.warn('[VitalsRecordFormB] Server save error:', err);
+    } finally {
+      setIsSubmitting(false);
+    }
+
     addVitalReading({
       patient_id: patient.id,
       consultant_name: consultantName,
@@ -416,7 +456,9 @@ export default function VitalsRecordFormB({ patient, isReadOnly = false }) {
 
               <div className="modal-footer">
                 <button type="button" className="btn btn-secondary" onClick={() => setShowAddModal(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary btn-pill">Save Vitals & Run AI Check →</button>
+                <button type="submit" disabled={isSubmitting} className="btn btn-primary btn-pill">
+                  {isSubmitting ? 'Saving Observation...' : 'Save Vitals & Run AI Check →'}
+                </button>
               </div>
             </form>
           </div>

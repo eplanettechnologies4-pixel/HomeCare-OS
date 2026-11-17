@@ -58,3 +58,4 @@ dist/
 *.swo
 .DS_Store
 Thumbs.db
+test_out_cert.pdf

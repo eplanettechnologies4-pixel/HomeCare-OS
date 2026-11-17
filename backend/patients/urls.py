@@ -2,7 +2,8 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
     PatientViewSet, PrescriptionViewSet, VitalSignViewSet,
-    NurseNoteViewSet, LabResultViewSet, PatientPrescriptionDetailView
+    NurseNoteViewSet, LabResultViewSet, PatientPrescriptionDetailView,
+    PatientPrescriptionActionView,
 )
 from quality.views import PatientFeedbackView, PatientManagerChecklistView
 from .patient_file_views import (
@@ -34,11 +35,15 @@ urlpatterns = [
     path('<int:pk>/scheduled-items/', PatientScheduledItemView.as_view(), name='patient-scheduled-items'),
     path('<int:pk>/scheduled-items/<int:item_id>/', PatientScheduledItemView.as_view(), name='patient-scheduled-items-detail'),
     path('<int:pk>/records/<str:record_type>/', PatientRecordsTimelineView.as_view(), name='patient-records-timeline'),
-    path('<int:pk>/records/<str:record_type>/<int:record_id>/', PatientSingleRecordDetailView.as_view(), name='patient-record-detail'),
-    path('<int:pk>/records/<str:record_type>/<int:record_id>/addendum/', PatientRecordAddendumView.as_view(), name='patient-record-addendum'),
+    path('<int:pk>/records/<str:record_type>/<str:record_id>/', PatientSingleRecordDetailView.as_view(), name='patient-record-detail'),
+    path('<int:pk>/records/<str:record_type>/<str:record_id>/addendum/', PatientRecordAddendumView.as_view(), name='patient-record-addendum'),
 
     # Nested prescription detail: /api/patients/{id}/prescriptions/{prescription_id}/
     path('<int:patient_pk>/prescriptions/<int:prescription_pk>/', PatientPrescriptionDetailView.as_view(), name='patient-prescription-detail'),
+    path('<int:patient_pk>/prescriptions/<int:prescription_pk>/verify/', PatientPrescriptionActionView.as_view(action='verify'), name='patient-prescription-verify'),
+    path('<int:patient_pk>/prescriptions/<int:prescription_pk>/reject/', PatientPrescriptionActionView.as_view(action='reject'), name='patient-prescription-reject'),
+    path('<int:patient_pk>/prescriptions/<int:prescription_pk>/discontinue/', PatientPrescriptionActionView.as_view(action='discontinue'), name='patient-prescription-discontinue'),
+    path('<int:patient_pk>/prescriptions/<int:prescription_pk>/cancel/', PatientPrescriptionActionView.as_view(action='cancel'), name='patient-prescription-cancel'),
     path('', include(router.urls)),
     # Quality forms — nested under patient
     path('<int:patient_pk>/feedback/', PatientFeedbackView.as_view(), name='patient-feedback'),

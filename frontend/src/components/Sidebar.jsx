@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, memo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, memo } from 'react';
 import useStore from '../store/useStore';
 import { ROLE_CONFIG } from '../data/mockData';
 import { isClinicianRole, getClinicianConfig } from '../config/clinicianRoleConfig';
@@ -8,7 +8,7 @@ import {
   Activity, Kanban, PieChart, Shield, GraduationCap,
   Pill, Truck, FlaskConical, FileText, LogOut,
   Star, AlertCircle, PhoneCall, CalendarDays, Clock, UserMinus, ShieldCheck,
-  ChevronLeft, ChevronRight, FolderHeart
+  ChevronLeft, ChevronRight, FolderHeart, Pin, PinOff
 } from 'lucide-react';
 
 const NURSE_NAV_GROUPS = [
@@ -22,7 +22,6 @@ const NURSE_NAV_GROUPS = [
     title: 'Care',
     items: [
       { id: 'patient-file',         label: 'Patient File',  icon: FolderHeart },
-      { id: 'nurse-patient-detail', label: 'Patient Chart', icon: Activity },
       { id: 'call-help',            label: 'Call Help',     icon: PhoneCall },
       { id: 'my-reviews',           label: 'My Reviews',    icon: Star },
     ],
@@ -86,14 +85,31 @@ const NAV_GROUPS = [
 ];
 
 function Sidebar() {
-  // Expanded by default on desktop; collapsible to icons with tooltips
-  const [isCollapsed, setIsCollapsed] = useState(() => {
+  const [isPinned, setIsPinned] = useState(() => {
     if (typeof window !== 'undefined') {
-      return localStorage.getItem('sidebar_collapsed') === 'true';
+      try {
+        return localStorage.getItem('sidebar_pinned') === 'true';
+      } catch (e) {
+        return false;
+      }
     }
     return false;
   });
+
+  const [isCollapsed, setIsCollapsed] = useState(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        return localStorage.getItem('sidebar_collapsed') === 'true';
+      } catch (e) {
+        return false;
+      }
+    }
+    return false;
+  });
+
   const [isHovered, setIsHovered] = useState(false);
+  const hoverTimerRef = useRef(null);
+
   const activePage    = useStore((s) => s.activePage);
   const setActivePage = useStore((s) => s.setActivePage);
   const sidebarOpen   = useStore((s) => s.sidebarOpen);
@@ -101,16 +117,6 @@ function Sidebar() {
   const currentRole   = useStore((s) => s.currentRole);
   const currentUser   = useStore((s) => s.currentUser);
   const logout        = useStore((s) => s.logout);
-
-  // Dev-only remount tracker: logs if Sidebar unmounts and remounts
-  useEffect(() => {
-    if (import.meta.env.DEV) {
-      window.__sidebarMountCount = (window.__sidebarMountCount || 0) + 1;
-      if (window.__sidebarMountCount > 1) {
-        console.warn(`[DEV] <Sidebar /> remounted! (Total mounts: ${window.__sidebarMountCount})`);
-      }
-    }
-  }, []);
 
   const resolvedRole = currentRole || (typeof window !== 'undefined' ? localStorage.getItem('currentRole') : null) || 'nurse';
   const allowedNav = useMemo(() => {
@@ -120,7 +126,6 @@ function Sidebar() {
   const isClinician = useMemo(() => isClinicianRole(resolvedRole), [resolvedRole]);
   const clinicianConfig = useMemo(() => getClinicianConfig(resolvedRole), [resolvedRole]);
   const clinicianNavGroups = useMemo(() => clinicianConfig.sidebarGroups, [clinicianConfig]);
-  const nurseNavGroups = useMemo(() => NURSE_NAV_GROUPS, []);
   const adminNavGroups = useMemo(() => {
     return NAV_GROUPS.map((group) => ({
       ...group,
@@ -128,15 +133,51 @@ function Sidebar() {
     })).filter((group) => group.items.length > 0);
   }, [allowedNav]);
 
-  // Keep CSS variable synchronized so main-area adjusts smoothly
+  // For staff roles, rail is 72px unless pinned. For admin, follows isCollapsed.
+  const effectiveCollapsed = isClinician ? !isPinned : isCollapsed;
+  const isExpanded = isClinician
+    ? isPinned || isHovered || sidebarOpen
+    : !isCollapsed || isHovered || sidebarOpen;
+
+  // Synchronize CSS variable: stays 72px for staff unless pinned so overlay does NOT shift layout!
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const activeWidth = isCollapsed ? '68px' : '240px';
+      const activeWidth = effectiveCollapsed ? '72px' : '240px';
       document.documentElement.style.setProperty('--sidebar-collapsed', activeWidth);
     }
-  }, [isCollapsed]);
+  }, [effectiveCollapsed]);
 
-  const isExpanded = !isCollapsed || isHovered || sidebarOpen;
+  // Esc key closes hover overlay and mobile drawer
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+        setIsHovered(false);
+        if (sidebarOpen && toggleSidebar) toggleSidebar();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [sidebarOpen, toggleSidebar]);
+
+  // 120ms debounce for hover open & close
+  const handleMouseEnter = () => {
+    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+    hoverTimerRef.current = setTimeout(() => setIsHovered(true), 120);
+  };
+
+  const handleMouseLeave = () => {
+    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+    hoverTimerRef.current = setTimeout(() => setIsHovered(false), 120);
+  };
+
+  const handleTogglePin = () => {
+    const next = !isPinned;
+    setIsPinned(next);
+    try {
+      localStorage.setItem('sidebar_pinned', String(next));
+    } catch (e) {}
+  };
 
   return (
     <>
@@ -146,13 +187,27 @@ function Sidebar() {
       )}
 
       <aside
-        className={`sidebar ${isCollapsed ? 'is-collapsed' : 'is-expanded'}${sidebarOpen ? ' open' : ''}${isHovered ? ' is-hovered' : ''}`}
+        className={`sidebar ${effectiveCollapsed ? 'is-collapsed' : 'is-expanded'}${sidebarOpen ? ' open' : ''}${isHovered ? ' is-hovered' : ''}`}
         style={{
-          width: isExpanded ? 240 : 68,
+          width: isExpanded ? 240 : 72,
           transition: 'width 150ms cubic-bezier(0.4, 0, 0.2, 1)',
+          ...(isClinician && isHovered && !isPinned ? {
+            position: 'fixed',
+            left: 0,
+            top: 0,
+            bottom: 0,
+            zIndex: 50,
+            boxShadow: '4px 0 24px rgba(0,0,0,0.22)',
+          } : {}),
         }}
-        onMouseEnter={() => setIsHovered(true)}
-        onMouseLeave={() => setIsHovered(false)}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+        onFocus={() => setIsHovered(true)}
+        onBlur={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget)) {
+            setIsHovered(false);
+          }
+        }}
       >
         {/* Logo Header */}
         <div className="sidebar-logo">
@@ -183,29 +238,54 @@ function Sidebar() {
               </div>
             </div>
 
-            {/* Desktop collapse toggle button */}
-            <button
-              onClick={() => {
-                const next = !isCollapsed;
-                setIsCollapsed(next);
-                try { localStorage.setItem('sidebar_collapsed', String(next)); } catch (e) {}
-              }}
-              className="btn btn-ghost btn-sm"
-              style={{
-                color: '#94A3B8',
-                padding: '4px',
-                borderRadius: '6px',
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: 26,
-                height: 26,
-              }}
-              title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-              aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            >
-              {isCollapsed ? <ChevronRight size={15} /> : <ChevronLeft size={15} />}
-            </button>
+            {/* Pin Toggle Button for Staff Roles */}
+            {isClinician && (
+              <button
+                onClick={handleTogglePin}
+                className="btn btn-ghost btn-sm"
+                style={{
+                  color: isPinned ? '#8B5CF6' : '#94A3B8',
+                  background: isPinned ? 'rgba(139, 92, 246, 0.15)' : 'transparent',
+                  padding: '4px',
+                  borderRadius: '6px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: 26,
+                  height: 26,
+                }}
+                title={isPinned ? 'Unpin sidebar (auto-collapse to 72px rail)' : 'Pin sidebar expanded (240px)'}
+                aria-label={isPinned ? 'Unpin sidebar' : 'Pin sidebar'}
+              >
+                {isPinned ? <PinOff size={14} /> : <Pin size={14} />}
+              </button>
+            )}
+
+            {/* Desktop collapse toggle button for Admin */}
+            {!isClinician && (
+              <button
+                onClick={() => {
+                  const next = !isCollapsed;
+                  setIsCollapsed(next);
+                  try { localStorage.setItem('sidebar_collapsed', String(next)); } catch (e) {}
+                }}
+                className="btn btn-ghost btn-sm"
+                style={{
+                  color: '#94A3B8',
+                  padding: '4px',
+                  borderRadius: '6px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: 26,
+                  height: 26,
+                }}
+                title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+                aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              >
+                {isCollapsed ? <ChevronRight size={15} /> : <ChevronLeft size={15} />}
+              </button>
+            )}
 
             {/* Mobile close button */}
             <button
@@ -270,8 +350,21 @@ function Sidebar() {
                         transition: 'background-color 150ms ease, color 150ms ease',
                       }}
                     >
-                      <div className="nav-icon-wrap" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <div className="nav-icon-wrap" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
                         <Icon size={18} className="nav-icon" style={{ color: isActive ? '#FFFFFF' : '#94A3B8' }} />
+                        {(id === 'patient-file' || id === 'call-help' || id === 'my-reviews') && (
+                          <span
+                            style={{
+                              position: 'absolute',
+                              top: -2,
+                              right: -2,
+                              width: 6,
+                              height: 6,
+                              borderRadius: '50%',
+                              background: '#8B5CF6',
+                            }}
+                          />
+                        )}
                       </div>
                       <span
                         className="nav-label"

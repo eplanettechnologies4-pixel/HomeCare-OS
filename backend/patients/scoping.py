@@ -123,7 +123,8 @@ CLINICAL_ROLES = (
     'doctor',
     'physio', 'physiotherapist',
     'speech', 'speech_therapist',
-    'psychologist', 'psychotherapist'
+    'psychologist', 'psychotherapist',
+    'dietician',
 )
 
 

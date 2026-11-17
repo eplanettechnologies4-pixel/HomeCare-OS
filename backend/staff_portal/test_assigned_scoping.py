@@ -422,6 +422,8 @@ class AssignedPatientScopingTests(TestCase):
         self.assertEqual(res_mar.status_code, status.HTTP_200_OK)
 
         # 5. AddPrescription: POST /api/patients/{id}/prescriptions/
+        # Under transcribed order workflow, nurse may record a doctor's order.
+        # It creates a transcribed order pending doctor verification with 201 Created.
         res_rx = self.client.post(f"/api/patients/{self.patient_a.id}/prescriptions/", {
             'medication': 'Paracetamol',
             'dosage': '500mg',
@@ -430,6 +432,9 @@ class AssignedPatientScopingTests(TestCase):
             'date': timezone.now().date().isoformat(),
         })
         self.assertEqual(res_rx.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(res_rx.data['verification_status'], 'pending_verification')
+        self.assertEqual(res_rx.data['entry_mode'], 'transcribed')
+        self.assertEqual(res_rx.data['ordering_doctor_name'], 'Dr. Alam')
 
         # 6. PatientDetail: GET /api/patients/{id}/
         res_detail = self.client.get(f"/api/patients/{self.patient_a.id}/")

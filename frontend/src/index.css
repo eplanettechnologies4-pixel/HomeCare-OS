@@ -74,7 +74,7 @@
 
   /* Layout Dimensions */
   --sidebar-w:          240px;
-  --sidebar-collapsed:  240px;
+  --sidebar-collapsed:  72px;
   --topbar-h:           64px;
 
   /* Transitions & Focus */
@@ -225,7 +225,7 @@ h4 {
 }
 
 .sidebar.is-collapsed:not(:hover):not(.is-hovered) {
-  width: 68px;
+  width: 72px;
 }
 
 .main-area {

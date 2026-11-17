@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   Pill, Plus, FileText, Download, Eye, Trash2, Calendar,
-  Clock, AlertCircle, CheckCircle, Upload, X, ExternalLink
+  Clock, AlertCircle, CheckCircle, Upload, X, ExternalLink, Check, Ban
 } from 'lucide-react';
 import api from '../services/api';
 import useStore from '../store/useStore';
@@ -17,6 +17,15 @@ export default function PrescriptionsTab({ patient }) {
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState(null);
 
+  // Action Modals State (Verify, Reject, Discontinue, Cancel)
+  const [actionLoading, setActionLoading] = useState(false);
+  const [rejectModalRx, setRejectModalRx] = useState(null);
+  const [rejectReason, setRejectReason] = useState('');
+  const [discontinueModalRx, setDiscontinueModalRx] = useState(null);
+  const [discontinueReason, setDiscontinueReason] = useState('');
+  const [cancelModalRx, setCancelModalRx] = useState(null);
+  const [cancelReason, setCancelReason] = useState('');
+
   // Preview Modal
   const [previewFile, setPreviewFile] = useState(null);
 
@@ -25,14 +34,20 @@ export default function PrescriptionsTab({ patient }) {
   const [dosage, setDosage] = useState('');
   const [frequency, setFrequency] = useState('Twice daily');
   const [durationDays, setDurationDays] = useState('7');
+  const [route, setRoute] = useState('Oral');
   const [prescribedBy, setPrescribedBy] = useState('Dr. Asim Raza (Consultant)');
+  const [orderingDoctorName, setOrderingDoctorName] = useState('');
+  const [orderSource, setOrderSource] = useState('written');
   const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
   const [notes, setNotes] = useState('');
   const [file, setFile] = useState(null);
 
   // RBAC permissions
-  const canAdd = ['super_admin', 'admin', 'branch_manager', 'doctor', 'nurse', 'care_manager'].includes(currentRole);
-  const canDelete = ['super_admin', 'admin', 'branch_manager'].includes(currentRole);
+  const isDoctor = currentRole === 'doctor';
+  const isNurse = ['nurse', 'nursing_assistant'].includes(currentRole);
+  const canAdd = isDoctor || isNurse;
+  // Physical deletion is removed; old UI button hidden
+  const canDelete = false;
 
   const fetchPrescriptions = async () => {
     if (!patient?.id) return;
@@ -59,6 +74,10 @@ export default function PrescriptionsTab({ patient }) {
       setFormError('Drug name is required.');
       return;
     }
+    if (isNurse && !orderingDoctorName.trim() && !prescribedBy.trim()) {
+      setFormError('Ordering doctor name is required for transcribed orders.');
+      return;
+    }
 
     setSubmitting(true);
     setFormError(null);
@@ -68,10 +87,19 @@ export default function PrescriptionsTab({ patient }) {
       formData.append('drug_name', drugName.trim());
       formData.append('dosage', dosage.trim() || 'Standard');
       formData.append('frequency', frequency);
+      formData.append('route', route);
       formData.append('days_prescribed', durationDays || '7');
-      formData.append('prescribed_by', prescribedBy.trim() || 'Attending Physician');
       formData.append('start_date', startDate);
       formData.append('notes', notes.trim());
+
+      if (isNurse) {
+        formData.append('ordering_doctor_name', orderingDoctorName.trim() || prescribedBy.trim());
+        formData.append('order_source', orderSource);
+        formData.append('prescribed_by', orderingDoctorName.trim() || prescribedBy.trim());
+      } else {
+        formData.append('prescribed_by', prescribedBy.trim() || 'Attending Physician');
+        formData.append('order_source', 'written');
+      }
 
       if (file) {
         formData.append('prescription_file', file);
@@ -88,6 +116,7 @@ export default function PrescriptionsTab({ patient }) {
       setDosage('');
       setNotes('');
       setFile(null);
+      setOrderingDoctorName('');
       setShowAddModal(false);
       await fetchPrescriptions();
     } catch (err) {
@@ -96,6 +125,73 @@ export default function PrescriptionsTab({ patient }) {
       setFormError(`Failed to save prescription: ${msg}`);
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleVerify = async (rx) => {
+    if (!window.confirm(`Verify and digitally sign prescription for ${rx.medication || rx.drug_name}? This action confirms physician authorization and cannot be undone.`)) return;
+    setActionLoading(true);
+    try {
+      await api.post(`/api/patients/${patient.id}/prescriptions/${rx.id}/verify/`);
+      await fetchPrescriptions();
+    } catch (err) {
+      alert('Verification failed: ' + (err.response?.data?.detail || err.message));
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleRejectSubmit = async (e) => {
+    e.preventDefault();
+    if (!rejectReason.trim()) return;
+    setActionLoading(true);
+    try {
+      await api.post(`/api/patients/${patient.id}/prescriptions/${rejectModalRx.id}/reject/`, {
+        reason: rejectReason.trim()
+      });
+      setRejectModalRx(null);
+      setRejectReason('');
+      await fetchPrescriptions();
+    } catch (err) {
+      alert('Rejection failed: ' + (err.response?.data?.detail || err.message));
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleDiscontinueSubmit = async (e) => {
+    e.preventDefault();
+    if (!discontinueReason.trim()) return;
+    setActionLoading(true);
+    try {
+      await api.post(`/api/patients/${patient.id}/prescriptions/${discontinueModalRx.id}/discontinue/`, {
+        reason: discontinueReason.trim()
+      });
+      setDiscontinueModalRx(null);
+      setDiscontinueReason('');
+      await fetchPrescriptions();
+    } catch (err) {
+      alert('Discontinuation failed: ' + (err.response?.data?.detail || err.message));
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleCancelSubmit = async (e) => {
+    e.preventDefault();
+    if (!cancelReason.trim()) return;
+    setActionLoading(true);
+    try {
+      await api.post(`/api/patients/${patient.id}/prescriptions/${cancelModalRx.id}/cancel/`, {
+        reason: cancelReason.trim()
+      });
+      setCancelModalRx(null);
+      setCancelReason('');
+      await fetchPrescriptions();
+    } catch (err) {
+      alert('Cancellation failed: ' + (err.response?.data?.detail || err.message));
+    } finally {
+      setActionLoading(false);
     }
   };
 
@@ -118,7 +214,7 @@ export default function PrescriptionsTab({ patient }) {
             <Pill size={22} style={{ color: 'var(--teal-600)' }} /> Prescriptions & Medication Orders
           </h3>
           <p style={{ color: 'var(--status-grey)', fontSize: '0.85rem', margin: 0 }}>
-            Active prescriptions, medical orders, and uploaded prescription documents for {patient.full_name}.
+            Active prescriptions, transcribed doctor orders, and MAR medication schedules for {patient.full_name}.
           </p>
         </div>
 
@@ -128,7 +224,7 @@ export default function PrescriptionsTab({ patient }) {
             onClick={() => setShowAddModal(true)}
             style={{ display: 'flex', alignItems: 'center', gap: 6 }}
           >
-            <Plus size={16} /> + Add Prescription
+            <Plus size={16} /> {isDoctor ? '+ New Prescription' : isNurse ? "+ Enter doctor's order" : '+ Add Prescription'}
           </button>
         )}
       </div>
@@ -156,7 +252,7 @@ export default function PrescriptionsTab({ patient }) {
           </p>
           {canAdd && (
             <button className="btn btn-secondary btn-sm" onClick={() => setShowAddModal(true)} style={{ marginTop: 14 }}>
-              + Upload First Prescription
+              {isDoctor ? '+ Prescribe Medication' : "+ Enter Doctor's Order"}
             </button>
           )}
         </div>
@@ -171,11 +267,11 @@ export default function PrescriptionsTab({ patient }) {
                 <th>Dosage & Route</th>
                 <th>Frequency</th>
                 <th>Duration</th>
-                <th>Prescribed By</th>
+                <th>Prescribed / Transcribed By</th>
                 <th>Start Date</th>
+                <th>Verification & Status</th>
                 <th>Document / Photo</th>
-                <th>Status</th>
-                {canDelete && <th style={{ textAlign: 'right' }}>Action</th>}
+                <th style={{ textAlign: 'right' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -204,12 +300,44 @@ export default function PrescriptionsTab({ patient }) {
                       {rx.duration_days || rx.days_prescribed ? `${rx.duration_days || rx.days_prescribed} days` : 'Ongoing'}
                     </td>
                     <td>
-                      <div style={{ fontSize: '0.85rem' }}>{rx.prescribed_by || 'Physician'}</div>
-                      {rx.uploaded_by_name && (
-                        <div style={{ fontSize: '0.72rem', color: '#9ca3af' }}>Uploaded: {rx.uploaded_by_name}</div>
+                      <div style={{ fontSize: '0.85rem', fontWeight: 600 }}>{rx.prescribed_by || 'Physician'}</div>
+                      {rx.ordering_doctor_name && rx.entry_mode === 'transcribed' && (
+                        <div style={{ fontSize: '0.74rem', color: '#4B5563' }}>
+                          Ordering Doctor: <strong>{rx.ordering_doctor_name}</strong> ({rx.order_source === 'phone_order' ? 'Phone Order' : 'Written'})
+                        </div>
+                      )}
+                      {rx.entered_by_name && rx.entry_mode === 'transcribed' && (
+                        <div style={{ fontSize: '0.72rem', color: '#9CA3AF' }}>Recorded by: {rx.entered_by_name}</div>
                       )}
                     </td>
                     <td className="ts">{rx.date || rx.start_date}</td>
+                    <td>
+                      {rx.verification_status === 'verified' && (
+                        <span className="badge badge-green" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                          <Check size={12} /> Verified {rx.verified_by_name ? `by Dr. ${rx.verified_by_name}` : ''}
+                        </span>
+                      )}
+                      {rx.verification_status === 'pending_verification' && (
+                        <span className="badge" style={{ background: '#FEF3C7', color: '#92400E', border: '1px solid #FCD34D' }}>
+                          ⏳ Pending Doctor Verification
+                        </span>
+                      )}
+                      {rx.verification_status === 'rejected' && (
+                        <span className="badge badge-red" title={rx.status_reason}>
+                          ✗ Rejected {rx.status_reason ? `(${rx.status_reason})` : ''}
+                        </span>
+                      )}
+                      {rx.verification_status === 'discontinued' && (
+                        <span className="badge" style={{ background: '#E2E8F0', color: '#475569' }}>
+                          Discontinued {rx.status_reason ? `(${rx.status_reason})` : ''}
+                        </span>
+                      )}
+                      {rx.verification_status === 'cancelled' && (
+                        <span className="badge badge-grey">
+                          Cancelled {rx.status_reason ? `(${rx.status_reason})` : ''}
+                        </span>
+                      )}
+                    </td>
                     <td>
                       {docUrl ? (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -237,23 +365,64 @@ export default function PrescriptionsTab({ patient }) {
                         <span style={{ fontSize: '0.75rem', color: '#9ca3af' }}>No file attached</span>
                       )}
                     </td>
-                    <td>
-                      <span className={`badge ${rx.is_active !== false ? 'badge-green' : 'badge-grey'}`}>
-                        {rx.is_active !== false ? 'Active' : 'Completed'}
-                      </span>
+                    <td style={{ textAlign: 'right' }}>
+                      <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                        {isDoctor && rx.verification_status === 'pending_verification' && (
+                          <>
+                            <button
+                              className="btn btn-primary btn-sm"
+                              style={{ padding: '3px 8px', fontSize: '0.75rem', background: '#16A34A', border: 'none' }}
+                              onClick={() => handleVerify(rx)}
+                              disabled={actionLoading}
+                              title="Verify Order"
+                            >
+                              Verify
+                            </button>
+                            <button
+                              className="btn btn-secondary btn-sm"
+                              style={{ padding: '3px 8px', fontSize: '0.75rem', color: '#DC2626' }}
+                              onClick={() => { setRejectModalRx(rx); setRejectReason(''); }}
+                              disabled={actionLoading}
+                              title="Reject Order"
+                            >
+                              Reject
+                            </button>
+                          </>
+                        )}
+                        {isDoctor && rx.verification_status === 'verified' && (
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            style={{ padding: '3px 8px', fontSize: '0.75rem', color: '#64748B' }}
+                            onClick={() => { setDiscontinueModalRx(rx); setDiscontinueReason(''); }}
+                            disabled={actionLoading}
+                            title="Discontinue Order"
+                          >
+                            Discontinue
+                          </button>
+                        )}
+                        {isNurse && rx.verification_status === 'pending_verification' && (
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            style={{ padding: '3px 8px', fontSize: '0.75rem', color: '#DC2626' }}
+                            onClick={() => { setCancelModalRx(rx); setCancelReason(''); }}
+                            disabled={actionLoading}
+                            title="Cancel Order"
+                          >
+                            Cancel
+                          </button>
+                        )}
+                        {canDelete && (
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            style={{ color: 'var(--status-red)', padding: '4px 6px' }}
+                            onClick={() => handleDelete(rx.id)}
+                            title="Delete Prescription"
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        )}
+                      </div>
                     </td>
-                    {canDelete && (
-                      <td style={{ textAlign: 'right' }}>
-                        <button
-                          className="btn btn-ghost btn-sm"
-                          style={{ color: 'var(--status-red)', padding: '4px 6px' }}
-                          onClick={() => handleDelete(rx.id)}
-                          title="Delete Prescription"
-                        >
-                          <Trash2 size={15} />
-                        </button>
-                      </td>
-                    )}
                   </tr>
                 );
               })}
@@ -268,7 +437,8 @@ export default function PrescriptionsTab({ patient }) {
           <div className="modal" style={{ maxWidth: 580 }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h3 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Pill size={18} style={{ color: 'var(--teal-600)' }} /> Add Prescription & Medicine Order
+                <Pill size={18} style={{ color: 'var(--teal-600)' }} />
+                {isDoctor ? 'New Doctor Prescription & Order' : "Transcribe Doctor's Prescription Order"}
               </h3>
               <button className="btn-close" onClick={() => setShowAddModal(false)}>✕</button>
             </div>
@@ -278,6 +448,39 @@ export default function PrescriptionsTab({ patient }) {
                 {formError && (
                   <div style={{ background: '#fef2f2', border: '1px solid #fecaca', padding: 10, borderRadius: 6, color: '#991b1b', fontSize: '0.85rem' }}>
                     {formError}
+                  </div>
+                )}
+
+                {isNurse && (
+                  <div style={{ padding: '10px 14px', background: '#FEF3C7', border: '1px solid #FCD34D', borderRadius: 8, fontSize: '0.82rem', color: '#92400E' }}>
+                    <strong>Transcribed Order Notice:</strong> Nurse enters written or phone order. A treating doctor must review and verify before standard administration.
+                  </div>
+                )}
+
+                {isNurse && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    <div className="form-group">
+                      <label className="form-label" style={{ fontWeight: 600 }}>Ordering Doctor Name *</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="e.g. Dr. Tariq Alam"
+                        value={orderingDoctorName}
+                        onChange={(e) => setOrderingDoctorName(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label" style={{ fontWeight: 600 }}>Order Source *</label>
+                      <select
+                        className="form-input"
+                        value={orderSource}
+                        onChange={(e) => setOrderSource(e.target.value)}
+                      >
+                        <option value="written">Written Prescription Slip</option>
+                        <option value="phone_order">Phone / Verbal Order</option>
+                      </select>
+                    </div>
                   </div>
                 )}
 
@@ -305,6 +508,19 @@ export default function PrescriptionsTab({ patient }) {
                     />
                   </div>
                   <div className="form-group">
+                    <label className="form-label">Route</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      placeholder="e.g. Oral, IV, IM, SC, Topical"
+                      value={route}
+                      onChange={(e) => setRoute(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div className="form-group">
                     <label className="form-label">Frequency</label>
                     <select
                       className="form-input"
@@ -321,9 +537,6 @@ export default function PrescriptionsTab({ patient }) {
                       <option value="As needed (PRN)">As needed (PRN)</option>
                     </select>
                   </div>
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                   <div className="form-group">
                     <label className="form-label">Duration (Days)</label>
                     <input
@@ -335,6 +548,9 @@ export default function PrescriptionsTab({ patient }) {
                       onChange={(e) => setDurationDays(e.target.value)}
                     />
                   </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: isDoctor ? '1fr 1fr' : '1fr', gap: 12 }}>
                   <div className="form-group">
                     <label className="form-label">Start Date</label>
                     <input
@@ -344,17 +560,18 @@ export default function PrescriptionsTab({ patient }) {
                       onChange={(e) => setStartDate(e.target.value)}
                     />
                   </div>
-                </div>
-
-                <div className="form-group">
-                  <label className="form-label">Prescribing Doctor / Consultant</label>
-                  <input
-                    type="text"
-                    className="form-input"
-                    placeholder="Doctor name"
-                    value={prescribedBy}
-                    onChange={(e) => setPrescribedBy(e.target.value)}
-                  />
+                  {isDoctor && (
+                    <div className="form-group">
+                      <label className="form-label">Prescribing Physician</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="Doctor name"
+                        value={prescribedBy}
+                        onChange={(e) => setPrescribedBy(e.target.value)}
+                      />
+                    </div>
+                  )}
                 </div>
 
                 <div className="form-group">
@@ -398,10 +615,159 @@ export default function PrescriptionsTab({ patient }) {
                   className="btn btn-primary"
                   disabled={submitting}
                 >
-                  {submitting ? 'Saving...' : 'Save Prescription'}
+                  {submitting ? 'Saving...' : (isNurse ? "Submit Transcribed Order" : "Save Prescription")}
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Reject Order Modal */}
+      {rejectModalRx && (
+        <div className="modal-backdrop" onClick={() => setRejectModalRx(null)}>
+          <div className="modal" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title" style={{ color: '#DC2626' }}>Reject Prescription Order</h3>
+              <button className="btn-close" onClick={() => setRejectModalRx(null)}>✕</button>
+            </div>
+            <form onSubmit={handleRejectSubmit}>
+              <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <p style={{ margin: 0, fontSize: '0.88rem', color: '#374151' }}>
+                  Please state the clinical reason for rejecting this order for <strong>{rejectModalRx.medication}</strong>:
+                </p>
+                <textarea
+                  className="form-input"
+                  rows="3"
+                  placeholder="e.g. Inappropriate dosage, drug interaction with current care plan, duplicate order..."
+                  value={rejectReason}
+                  onChange={(e) => setRejectReason(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="modal-footer">
+                <button type="button" className="btn btn-secondary" onClick={() => setRejectModalRx(null)}>Cancel</button>
+                <button type="submit" className="btn btn-primary" style={{ background: '#DC2626', border: 'none' }} disabled={actionLoading}>
+                  Confirm Rejection
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Discontinue Order Modal */}
+      {discontinueModalRx && (
+        <div className="modal-backdrop" onClick={() => setDiscontinueModalRx(null)}>
+          <div className="modal" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title" style={{ color: '#475569' }}>Discontinue Medication</h3>
+              <button className="btn-close" onClick={() => setDiscontinueModalRx(null)}>✕</button>
+            </div>
+            <form onSubmit={handleDiscontinueSubmit}>
+              <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <p style={{ margin: 0, fontSize: '0.88rem', color: '#374151' }}>
+                  State the clinical reason for discontinuing <strong>{discontinueModalRx.medication}</strong>:
+                </p>
+                <textarea
+                  className="form-input"
+                  rows="3"
+                  placeholder="e.g. Course completed, symptoms resolved, adverse side effect..."
+                  value={discontinueReason}
+                  onChange={(e) => setDiscontinueReason(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="modal-footer">
+                <button type="button" className="btn btn-secondary" onClick={() => setDiscontinueModalRx(null)}>Cancel</button>
+                <button type="submit" className="btn btn-primary" style={{ background: '#475569', border: 'none' }} disabled={actionLoading}>
+                  Confirm Discontinuation
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Cancel Pending Order Modal */}
+      {cancelModalRx && (
+        <div className="modal-backdrop" onClick={() => setCancelModalRx(null)}>
+          <div className="modal" style={{ maxWidth: 460 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title" style={{ color: '#DC2626' }}>Cancel Transcribed Order</h3>
+              <button className="btn-close" onClick={() => setCancelModalRx(null)}>✕</button>
+            </div>
+            <form onSubmit={handleCancelSubmit}>
+              <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <p style={{ margin: 0, fontSize: '0.88rem', color: '#374151' }}>
+                  State the reason for cancelling this pending transcribed order for <strong>{cancelModalRx.medication}</strong>:
+                </p>
+                <textarea
+                  className="form-input"
+                  rows="3"
+                  placeholder="e.g. Entered in error, patient refused order, corrected on subsequent slip..."
+                  value={cancelReason}
+                  onChange={(e) => setCancelReason(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="modal-footer">
+                <button type="button" className="btn btn-secondary" onClick={() => setCancelModalRx(null)}>Back</button>
+                <button type="submit" className="btn btn-primary" style={{ background: '#DC2626', border: 'none' }} disabled={actionLoading}>
+                  Confirm Cancellation
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* File Preview Modal */}
+      {previewFile && (
+        <div className="modal-backdrop" onClick={() => setPreviewFile(null)}>
+          <div className="modal" style={{ maxWidth: 700 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <FileText size={18} /> {previewFile.name} — Prescription Document
+              </h3>
+              <button className="btn-close" onClick={() => setPreviewFile(null)}>✕</button>
+            </div>
+            <div className="modal-body" style={{ textAlign: 'center', padding: 20 }}>
+              {previewFile.isImage ? (
+                <img
+                  src={previewFile.url}
+                  alt={previewFile.name}
+                  style={{ maxWidth: '100%', maxHeight: 480, objectFit: 'contain', borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}
+                />
+              ) : (
+                <div style={{ padding: 40, background: '#f8fafc', borderRadius: 8 }}>
+                  <FileText size={48} style={{ color: 'var(--teal-600)', marginBottom: 12 }} />
+                  <p style={{ margin: '0 0 16px', fontWeight: 600 }}>PDF Document Attached</p>
+                  <a
+                    href={previewFile.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="btn btn-primary"
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                  >
+                    <ExternalLink size={16} /> Open Document in New Tab
+                  </a>
+                </div>
+              )}
+            </div>
+            <div className="modal-footer" style={{ justifyContent: 'space-between' }}>
+              <a
+                href={previewFile.url}
+                download
+                className="btn btn-secondary btn-sm"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              >
+                <Download size={15} /> Download Copy
+              </a>
+              <button className="btn btn-ghost btn-sm" onClick={() => setPreviewFile(null)}>
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

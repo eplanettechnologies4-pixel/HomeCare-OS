@@ -1,47 +1,59 @@
-import React from 'react';
+import React, { lazy, Suspense } from 'react';
 import { Shield, Smartphone } from 'lucide-react';
 import Sidebar from './components/Sidebar';
 import Topbar from './components/Topbar';
+import ChunkErrorBoundary from './components/ChunkErrorBoundary';
 import useStore from './store/useStore';
 import { ROLE_CONFIG } from './data/mockData';
-import Overview      from './pages/Overview';
-import LiveTracking  from './pages/LiveTracking';
-import Bookings      from './pages/Bookings';
-import Staff         from './pages/Staff';
-import Patients      from './pages/Patients';
-import Patient360    from './pages/Patient360';
-import Therapy       from './pages/Therapy';
-import AdminHR       from './pages/AdminHR';
-import Accounts      from './pages/Accounts';
-import Billing       from './pages/Billing';
-import CRM           from './pages/CRM';
-import Reports       from './pages/Reports';
-import Analytics     from './pages/Analytics';
-import UserManagement from './pages/UserManagement';
-import FamilyPortal  from './pages/FamilyPortal';
 import Login         from './pages/Login';
-import LMS            from './pages/LMS';
-import MyTrainings    from './pages/MyTrainings';
-import Pharmacy       from './pages/Pharmacy';
-import Equipment      from './pages/Equipment';
-import LabOrders      from './pages/LabOrders';
-import FormBuilder    from './pages/FormBuilder';
-import NurseHome      from './pages/NurseHome';
-import NursePatientDetail from './pages/NursePatientDetail';
-import NurseDocs      from './pages/NurseDocs';
-import NurseReviews   from './pages/NurseReviews';
-import NurseComplaints from './pages/NurseComplaints';
-import NurseLeave     from './pages/NurseLeave';
-import NursePermission from './pages/NursePermission';
-import NurseResignation from './pages/NurseResignation';
-import NurseTimesheet from './pages/NurseTimesheet';
-import NursePolicies  from './pages/NursePolicies';
-import NurseCallHelp  from './pages/NurseCallHelp';
-import ClinicianHome  from './pages/ClinicianHome';
-import ClinicianPatientChart from './pages/ClinicianPatientChart';
-import PatientFile from './pages/PatientFile';
+import FamilyPortal  from './pages/FamilyPortal';
 import { isClinicianRole, normalizeRole, getClinicianConfig } from './config/clinicianRoleConfig';
 import { useRealtimeEvents } from './hooks/useRealtimeEvents';
+
+// Code-split page components for faster initial load
+const Overview            = lazy(() => import('./pages/Overview'));
+const LiveTracking        = lazy(() => import('./pages/LiveTracking'));
+const Bookings            = lazy(() => import('./pages/Bookings'));
+const Staff               = lazy(() => import('./pages/Staff'));
+const Patients            = lazy(() => import('./pages/Patients'));
+const Patient360          = lazy(() => import('./pages/Patient360'));
+const Therapy             = lazy(() => import('./pages/Therapy'));
+const AdminHR             = lazy(() => import('./pages/AdminHR'));
+const Accounts            = lazy(() => import('./pages/Accounts'));
+const Billing             = lazy(() => import('./pages/Billing'));
+const CRM                 = lazy(() => import('./pages/CRM'));
+const Reports             = lazy(() => import('./pages/Reports'));
+const Analytics           = lazy(() => import('./pages/Analytics'));
+const UserManagement      = lazy(() => import('./pages/UserManagement'));
+const LMS                 = lazy(() => import('./pages/LMS'));
+const MyTrainings         = lazy(() => import('./pages/MyTrainings'));
+const Pharmacy            = lazy(() => import('./pages/Pharmacy'));
+const Equipment           = lazy(() => import('./pages/Equipment'));
+const LabOrders           = lazy(() => import('./pages/LabOrders'));
+const FormBuilder         = lazy(() => import('./pages/FormBuilder'));
+const NurseHome           = lazy(() => import('./pages/NurseHome'));
+const NursePatientDetail  = lazy(() => import('./pages/NursePatientDetail'));
+const NurseDocs           = lazy(() => import('./pages/NurseDocs'));
+const NurseReviews        = lazy(() => import('./pages/NurseReviews'));
+const NurseComplaints     = lazy(() => import('./pages/NurseComplaints'));
+const NurseLeave          = lazy(() => import('./pages/NurseLeave'));
+const NursePermission     = lazy(() => import('./pages/NursePermission'));
+const NurseResignation    = lazy(() => import('./pages/NurseResignation'));
+const NurseTimesheet      = lazy(() => import('./pages/NurseTimesheet'));
+const NursePolicies       = lazy(() => import('./pages/NursePolicies'));
+const NurseCallHelp       = lazy(() => import('./pages/NurseCallHelp'));
+const ClinicianHome       = lazy(() => import('./pages/ClinicianHome'));
+const ClinicianPatientChart = lazy(() => import('./pages/ClinicianPatientChart'));
+const PatientFile         = lazy(() => import('./pages/PatientFile'));
+
+function PageSkeleton() {
+  return (
+    <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{ height: 80, background: '#F1F5F9', borderRadius: 16, opacity: 0.6 }} />
+      <div style={{ height: 280, background: '#F1F5F9', borderRadius: 16, opacity: 0.6 }} />
+    </div>
+  );
+}
 
 const PAGE_META = {
   'overview':       { title: 'Overview',            subtitle: 'Live operations at a glance' },
@@ -248,7 +260,11 @@ export default function App() {
       <div className="main-area">
         <Topbar pageTitle={meta.title} pageSubtitle={meta.subtitle} />
         <main className="page-content">
-          <PageComponent />
+          <ChunkErrorBoundary>
+            <Suspense fallback={<PageSkeleton />}>
+              <PageComponent />
+            </Suspense>
+          </ChunkErrorBoundary>
         </main>
       </div>
     </div>

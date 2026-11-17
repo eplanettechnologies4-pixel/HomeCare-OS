@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   Search, Eye, Printer, Plus, Check, X, Calendar, Clock,
   AlertCircle, AlertTriangle, FileText, Activity, Droplet,
@@ -17,21 +17,27 @@ import VitalsRecordFormB from '../components/VitalsRecordFormB';
 import NursesNotesFormA from '../components/NursesNotesFormA';
 import MarSheetFormC from '../components/MarSheetFormC';
 import PrescriptionsTab from '../components/PrescriptionsTab';
-import { normalizeRole, isClinicianRole } from '../config/clinicianRoleConfig';
+import { normalizeRole, isClinicianRole, getClinicianConfig, canRoleWriteClinical, CLINICAL_WRITE_ROLES } from '../config/clinicianRoleConfig';
 
-// 11 Clinical Records Tiles definition
-const CLINICAL_TILES = [
-  { id: 'medications', label: 'Medication chart', icon: Pill, color: '#0284C7', bg: '#E0F2FE' },
-  { id: 'vitals', label: 'Vital signs chart', icon: Activity, color: '#DC2626', bg: '#FEE2E2' },
-  { id: 'intake_output', label: 'Intake / Output chart', icon: Droplet, color: '#2563EB', bg: '#DBEAFE' },
-  { id: 'doctor_notes', label: "Consultations / Doctor's notes", icon: Stethoscope, color: '#6D28D9', bg: '#EDE9FE' },
-  { id: 'consents', label: 'Consent forms', icon: FileCheck, color: '#059669', bg: '#D1FAE5' },
-  { id: 'history_sheets', label: 'History sheets', icon: FileText, color: '#D97706', bg: '#FEF3C7' },
-  { id: 'lab_reports', label: 'Lab reports', icon: FlaskConical, color: '#7C3AED', bg: '#EDE9FE' },
-  { id: 'manager_checklist', label: "Manager's visit checklist", icon: ClipboardCheck, color: '#4F46E5', bg: '#EEF2FF' },
-  { id: 'safety_checklist', label: 'Safety checklist', icon: ShieldCheck, color: '#0D9488', bg: '#CCFBF1' },
-  { id: 'nursing_notes', label: "Nurses' notes", icon: ClipboardList, color: '#EA580C', bg: '#FFEDD5' },
-  { id: 'rehabilitation_notes', label: 'Rehabilitation notes', icon: HeartHandshake, color: '#16A34A', bg: '#DCFCE7' },
+// Master Clinical Records Tiles Catalog
+const TILES_CATALOG = {
+  nursing_notes:        { id: 'nursing_notes',        label: "Nurses' notes",              icon: ClipboardList,   color: '#EA580C', bg: '#FFEDD5' },
+  monitoring:           { id: 'monitoring',           label: 'Vitals & Intake / Output',   icon: Activity,        color: '#DC2626', bg: '#FEE2E2' },
+  medications:          { id: 'medications',          label: 'Medication chart',           icon: Pill,            color: '#0284C7', bg: '#E0F2FE' },
+  doctor_notes:         { id: 'doctor_notes',         label: "Consultations / Doctor's notes", icon: Stethoscope, color: '#6D28D9', bg: '#EDE9FE' },
+  consents:             { id: 'consents',             label: 'Consent forms',              icon: FileCheck,       color: '#059669', bg: '#D1FAE5' },
+  history_sheets:       { id: 'history_sheets',       label: 'History sheets',             icon: FileText,        color: '#D97706', bg: '#FEF3C7' },
+  lab_reports:          { id: 'lab_reports',          label: 'Lab reports',                icon: FlaskConical,    color: '#7C3AED', bg: '#EDE9FE' },
+  manager_checklist:    { id: 'manager_checklist',    label: "Manager's visit checklist",  icon: ClipboardCheck,  color: '#4F46E5', bg: '#EEF2FF' },
+  safety_checklist:     { id: 'safety_checklist',     label: 'Safety checklist',           icon: ShieldCheck,     color: '#0D9488', bg: '#CCFBF1' },
+  rehabilitation_notes: { id: 'rehabilitation_notes', label: 'Rehabilitation notes',      icon: HeartHandshake,  color: '#16A34A', bg: '#DCFCE7' },
+};
+
+// Fallback order when not configured for role
+const DEFAULT_TILES_ORDER = [
+  'nursing_notes', 'monitoring', 'medications', 'doctor_notes',
+  'consents', 'history_sheets', 'lab_reports', 'manager_checklist',
+  'safety_checklist', 'rehabilitation_notes',
 ];
 
 export default function PatientFile() {
@@ -72,15 +78,35 @@ export default function PatientFile() {
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [newScheduleItem, setNewScheduleItem] = useState({ kind: 'procedure', title: '', due_at: '', notes: '' });
 
-  // Section C Tiles & Timeline
-  const [activeTile, setActiveTile] = useState('medications');
+  // Role-specific tiles config
+  const roleConfig = useMemo(() => getClinicianConfig(currentRole), [currentRole]);
+  const clinicalTiles = useMemo(() => {
+    const order = roleConfig?.patientFileTiles || DEFAULT_TILES_ORDER;
+    return order.map((id) => TILES_CATALOG[id]).filter(Boolean);
+  }, [roleConfig]);
+
+  // Section C Tiles & Timeline — initial tile matches the role's primary focus
+  const [activeTile, setActiveTile] = useState(() => {
+    return roleConfig?.defaultPatientFileTile || 'nursing_notes';
+  });
   const [dateFilter, setDateFilter] = useState('6months'); // '6months' | '1year' | 'all' | 'custom'
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
   const [timelineSearch, setTimelineSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [timelineRecords, setTimelineRecords] = useState([]);
   const [timelineLoading, setTimelineLoading] = useState(false);
   const [timelinePagination, setTimelinePagination] = useState({ page: 1, total_pages: 1, count: 0 });
+
+  // 300ms search debounce
+  useEffect(() => {
+    const handler = setTimeout(() => setDebouncedSearch(timelineSearch), 300);
+    return () => clearTimeout(handler);
+  }, [timelineSearch]);
+
+  // Request abort and 60-second in-memory cache refs
+  const timelineAbortRef = useRef(null);
+  const timelineCacheRef = useRef(new Map()); // key -> { timestamp, data }
 
   // Side Drawer for Single Record
   const [selectedRecord, setSelectedRecord] = useState(null);
@@ -186,31 +212,54 @@ export default function PatientFile() {
     }
   }, [activePatientId, loadPatientFile]);
 
-  // ── Fetch Timeline Records ────────────────────────────────────────────────
+  // ── Fetch Timeline Records with Caching & Abort ──────────────────────────
   const loadTimeline = useCallback(async () => {
     if (!activePatientId) return;
+
+    let queryParams = `?page=${timelinePagination.page}`;
+    if (debouncedSearch) {
+      queryParams += `&q=${encodeURIComponent(debouncedSearch)}`;
+    }
+    if (dateFilter === 'all') {
+      queryParams += `&all_time=true`;
+    } else if (dateFilter === '1year') {
+      const oneYearAgo = new Date();
+      oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+      queryParams += `&from=${oneYearAgo.toISOString().split('T')[0]}`;
+    } else if (dateFilter === 'custom') {
+      if (customFrom) queryParams += `&from=${customFrom}`;
+      if (customTo) queryParams += `&to=${customTo}`;
+    }
+
+    const cacheKey = `${activePatientId}:${activeTile}:${queryParams}`;
+    const cached = timelineCacheRef.current.get(cacheKey);
+    const now = Date.now();
+    if (cached && now - cached.timestamp < 60000) {
+      setTimelineRecords(cached.data.results || []);
+      setTimelinePagination({
+        page: cached.data.page || 1,
+        total_pages: cached.data.total_pages || 1,
+        count: cached.data.count || 0,
+      });
+      return;
+    }
+
+    // Abort previous in-flight request
+    if (timelineAbortRef.current) {
+      timelineAbortRef.current.abort();
+    }
+    const abortCtrl = new AbortController();
+    timelineAbortRef.current = abortCtrl;
+
     setTimelineLoading(true);
     try {
-      let queryParams = `?page=${timelinePagination.page}`;
-      if (timelineSearch) {
-        queryParams += `&q=${encodeURIComponent(timelineSearch)}`;
-      }
-
-      if (dateFilter === 'all') {
-        queryParams += `&all_time=true`;
-      } else if (dateFilter === '1year') {
-        const oneYearAgo = new Date();
-        oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
-        queryParams += `&from=${oneYearAgo.toISOString().split('T')[0]}`;
-      } else if (dateFilter === 'custom') {
-        if (customFrom) queryParams += `&from=${customFrom}`;
-        if (customTo) queryParams += `&to=${customTo}`;
-      }
-      // Note: '6months' defaults on backend (183 days)
-
-      const res = await apiFetch(`/patients/${activePatientId}/records/${activeTile}/${queryParams}`);
+      const res = await apiFetch(
+        `/patients/${activePatientId}/records/${activeTile}/${queryParams}`,
+        { signal: abortCtrl.signal }
+      );
       if (res.ok) {
         const data = await res.json();
+        timelineCacheRef.current.set(cacheKey, { timestamp: Date.now(), data });
         setTimelineRecords(data.results || []);
         setTimelinePagination({
           page: data.page || 1,
@@ -221,18 +270,24 @@ export default function PatientFile() {
         setTimelineRecords([]);
       }
     } catch (e) {
-      console.warn('[PatientFile] Failed to fetch timeline:', e);
-      setTimelineRecords([]);
+      if (e?.name !== 'AbortError') {
+        console.warn('[PatientFile] Failed to fetch timeline:', e);
+        setTimelineRecords([]);
+      }
     } finally {
       setTimelineLoading(false);
     }
-  }, [activePatientId, activeTile, dateFilter, customFrom, customTo, timelineSearch, timelinePagination.page]);
+  }, [activePatientId, activeTile, dateFilter, customFrom, customTo, debouncedSearch, timelinePagination.page]);
+
+  const invalidateTimelineCache = useCallback(() => {
+    timelineCacheRef.current.clear();
+  }, []);
 
   useEffect(() => {
     if (activePatientId) {
       loadTimeline();
     }
-  }, [activePatientId, activeTile, dateFilter, customFrom, customTo, timelineSearch, loadTimeline]);
+  }, [activePatientId, activeTile, dateFilter, customFrom, customTo, debouncedSearch, loadTimeline]);
 
   // Refetch on window focus (Reactive without admin polling)
   useEffect(() => {
@@ -394,6 +449,7 @@ export default function PatientFile() {
       if (res.ok) {
         setShowDoctorNoteModal(false);
         setDoctorNoteData({ assessment: '', plan: '', is_signed: true });
+        invalidateTimelineCache();
         loadTimeline();
         loadPatientFile(activePatientId);
       } else {
@@ -426,6 +482,7 @@ export default function PatientFile() {
       if (res.ok) {
         setShowTherapyNoteModal(false);
         setTherapyNoteData({ session_notes: '', rehabilitation_plan: '', goals: '', exercises_prescribed: '', is_signed: true });
+        invalidateTimelineCache();
         loadTimeline();
         loadPatientFile(activePatientId);
       } else {
@@ -456,6 +513,7 @@ export default function PatientFile() {
       if (res.ok) {
         setShowConsentModal(false);
         setConsentData({ title: '', consent_type: 'treatment', description: '', patient_signature_obtained: true });
+        invalidateTimelineCache();
         loadTimeline();
         loadPatientFile(activePatientId);
       } else {
@@ -488,6 +546,7 @@ export default function PatientFile() {
       if (res.ok) {
         setShowLabOrderModal(false);
         setLabOrderData({ test_name: '', notes: '', priority: 'routine' });
+        invalidateTimelineCache();
         loadTimeline();
         loadPatientFile(activePatientId);
       } else {
@@ -584,6 +643,7 @@ export default function PatientFile() {
         if (selectedRecord && selectedRecord.id === targetAddendumRecord.id) {
           setSelectedRecord(updated);
         }
+        invalidateTimelineCache();
         loadTimeline();
       } else {
         const err = await res.json().catch(() => ({}));
@@ -610,8 +670,7 @@ export default function PatientFile() {
     return patientsList.filter(p => {
       const name = `${p.first_name || ''} ${p.last_name || ''}`.toLowerCase();
       const mr = (p.mr_number || '').toLowerCase();
-      const phone = (p.phone || '').toLowerCase();
-      return name.includes(q) || mr.includes(q) || phone.includes(q);
+      return name.includes(q) || mr.includes(q);
     });
   }, [patientsList, listSearch]);
 
@@ -730,7 +789,7 @@ export default function PatientFile() {
               type="text"
               value={listSearch}
               onChange={(e) => { setListSearch(e.target.value); setListPage(1); }}
-              placeholder="Search by patient name, MR number, or phone..."
+              placeholder="Search by name or MR number"
               style={{
                 width: '100%',
                 padding: '10px 14px 10px 42px',
@@ -786,7 +845,6 @@ export default function PatientFile() {
                           </div>
                           <div>
                             <div>{pName}</div>
-                            <div style={{ fontSize: '11px', color: '#64748B' }}>{p.patient_code || `PT-${p.id}`}</div>
                           </div>
                         </div>
                       </td>
@@ -972,7 +1030,7 @@ export default function PatientFile() {
             </button>
           )}
 
-          {(isDoctor || isTherapist || normRole === 'dietician' || isAdminOrCM) && (
+          {canRoleWriteClinical(currentRole, 'referrals') && (
             <button
               onClick={() => setShowReferralModal(true)}
               style={{
@@ -1060,7 +1118,6 @@ export default function PatientFile() {
                 <span style={{ background: '#EDE9FE', color: '#6D28D9', padding: '3px 10px', borderRadius: '12px', fontSize: '12px', fontWeight: 700 }}>
                   MR: {formatVal(p.mr_number)}
                 </span>
-                <span style={{ fontSize: '12px', color: '#64748B' }}>Code: {formatVal(p.patient_code)}</span>
               </div>
               <div style={{ display: 'flex', gap: '16px', marginTop: '6px', fontSize: '13px', color: '#475569', flexWrap: 'wrap' }}>
                 <span><strong>Age:</strong> {formatVal(p.age)} yrs</span>
@@ -1109,6 +1166,61 @@ export default function PatientFile() {
               Dr. {treatingDoc.name} ({treatingDoc.specialization})
             </span>
           )}
+        </div>
+
+        {/* Compact Care Team Strip with tap-to-call links */}
+        <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #F1F5F9', display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center', fontSize: '12px' }}>
+          <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#64748B', display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <Users size={13} color="#6D28D9" /> Care Team:
+          </span>
+
+          {/* Treating Consultant */}
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: '#F8FAFC', border: '1px solid #E2E8F0', padding: '4px 10px', borderRadius: '8px' }}>
+            <span style={{ color: '#64748B', fontSize: '11px' }}>Consultant:</span>
+            <strong style={{ color: '#1E1B4B' }}>{treatingDoc ? `Dr. ${treatingDoc.name}` : '-'}</strong>
+            {treatingDoc?.phone && treatingDoc.phone !== '-' ? (
+              <a href={`tel:${treatingDoc.phone}`} style={{ color: '#6D28D9', textDecoration: 'none', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                <Phone size={11} /> {treatingDoc.phone}
+              </a>
+            ) : (
+              <span style={{ color: '#94A3B8' }}>-</span>
+            )}
+          </div>
+
+          {/* Care Manager */}
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: '#F8FAFC', border: '1px solid #E2E8F0', padding: '4px 10px', borderRadius: '8px' }}>
+            <span style={{ color: '#64748B', fontSize: '11px' }}>Care Manager:</span>
+            <strong style={{ color: '#1E1B4B' }}>{careMgr ? careMgr.name : '-'}</strong>
+            {careMgr?.phone && careMgr.phone !== '-' ? (
+              <a href={`tel:${careMgr.phone}`} style={{ color: '#15803D', textDecoration: 'none', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                <Phone size={11} /> {careMgr.phone}
+              </a>
+            ) : (
+              <span style={{ color: '#94A3B8' }}>-</span>
+            )}
+          </div>
+
+          {/* Staff on Duty Today */}
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: '#F8FAFC', border: '1px solid #E2E8F0', padding: '4px 10px', borderRadius: '8px' }}>
+            <span style={{ color: '#64748B', fontSize: '11px' }}>On Duty Today:</span>
+            {staffOnDuty && staffOnDuty.length > 0 ? (
+              staffOnDuty.map((s, idx) => (
+                <span key={s.id || idx} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', marginRight: idx < staffOnDuty.length - 1 ? '8px' : 0 }}>
+                  <strong style={{ color: '#1E1B4B' }}>{s.name}</strong>
+                  <span style={{ color: '#64748B', fontSize: '11px' }}>({s.role_display || s.role})</span>
+                  {s.phone && s.phone !== '-' ? (
+                    <a href={`tel:${s.phone}`} style={{ color: '#6D28D9', textDecoration: 'none', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
+                      <Phone size={11} /> {s.phone}
+                    </a>
+                  ) : (
+                    <span style={{ color: '#94A3B8' }}>-</span>
+                  )}
+                </span>
+              ))
+            ) : (
+              <span style={{ color: '#94A3B8' }}>None rostered today</span>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1381,7 +1493,7 @@ export default function PatientFile() {
           <div style={{ fontSize: '12px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.5px', color: '#64748B', paddingLeft: '4px', marginBottom: '4px' }}>
             Clinical Records Categories
           </div>
-          {CLINICAL_TILES.map((t) => {
+          {clinicalTiles.map((t) => {
             const Icon = t.icon;
             const isSelected = activeTile === t.id;
             return (
@@ -1433,7 +1545,7 @@ export default function PatientFile() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
             <div>
               <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 800, color: '#1E1B4B' }}>
-                {CLINICAL_TILES.find(t => t.id === activeTile)?.label}
+                {clinicalTiles.find(t => t.id === activeTile)?.label}
               </h3>
               <span style={{ fontSize: '12px', color: '#6B7280' }}>
                 {timelinePagination.count} record(s) found
@@ -1442,7 +1554,7 @@ export default function PatientFile() {
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
               {/* Contextual Clinical Write Action Buttons */}
-              {(activeTile === 'vitals' || activeTile === 'intake_output') && (isNurse || isDoctor || isAdminOrCM) && (
+              {(activeTile === 'monitoring' || activeTile === 'vitals' || activeTile === 'intake_output') && canRoleWriteClinical(currentRole, 'vitals') && (
                 <button
                   onClick={() => setShowVitalsModal(true)}
                   style={{
@@ -1463,7 +1575,7 @@ export default function PatientFile() {
                 </button>
               )}
 
-              {activeTile === 'nursing_notes' && (isNurse || isAdminOrCM) && (
+              {activeTile === 'nursing_notes' && canRoleWriteClinical(currentRole, 'nurse_notes') && (
                 <button
                   onClick={() => setShowNurseNotesModal(true)}
                   style={{
@@ -1484,7 +1596,7 @@ export default function PatientFile() {
                 </button>
               )}
 
-              {activeTile === 'medications' && (isDoctor || isAdminOrCM) && (
+              {activeTile === 'medications' && canRoleWriteClinical(currentRole, 'prescriptions') && (
                 <button
                   onClick={() => setShowPrescriptionModal(true)}
                   style={{
@@ -1501,11 +1613,11 @@ export default function PatientFile() {
                     gap: '4px',
                   }}
                 >
-                  <Plus size={14} /> Prescribe Medication
+                  <Plus size={14} /> {currentRole === 'doctor' ? '+ New Prescription' : "+ Enter doctor's order"}
                 </button>
               )}
 
-              {activeTile === 'medications' && (isNurse || isAdminOrCM) && (
+              {activeTile === 'medications' && canRoleWriteClinical(currentRole, 'mar_administer') && (
                 <button
                   onClick={() => setShowMarModal(true)}
                   style={{
@@ -1526,7 +1638,7 @@ export default function PatientFile() {
                 </button>
               )}
 
-              {activeTile === 'doctor_notes' && (isDoctor || isAdminOrCM) && (
+              {activeTile === 'doctor_notes' && canRoleWriteClinical(currentRole, 'doctor_notes') && (
                 <button
                   onClick={() => setShowDoctorNoteModal(true)}
                   style={{
@@ -1547,7 +1659,7 @@ export default function PatientFile() {
                 </button>
               )}
 
-              {activeTile === 'rehabilitation_notes' && (isTherapist || isDoctor || isAdminOrCM) && (
+              {activeTile === 'rehabilitation_notes' && canRoleWriteClinical(currentRole, 'therapy_notes') && (
                 <button
                   onClick={() => setShowTherapyNoteModal(true)}
                   style={{
@@ -1568,7 +1680,7 @@ export default function PatientFile() {
                 </button>
               )}
 
-              {activeTile === 'consents' && (isDoctor || isAdminOrCM) && (
+              {activeTile === 'consents' && canRoleWriteClinical(currentRole, 'consents') && (
                 <button
                   onClick={() => setShowConsentModal(true)}
                   style={{
@@ -1589,7 +1701,7 @@ export default function PatientFile() {
                 </button>
               )}
 
-              {activeTile === 'lab_reports' && (isDoctor || isAdminOrCM) && (
+              {activeTile === 'lab_reports' && canRoleWriteClinical(currentRole, 'lab_orders') && (
                 <button
                   onClick={() => setShowLabOrderModal(true)}
                   style={{
@@ -1728,7 +1840,7 @@ export default function PatientFile() {
               <HelpCircle size={32} style={{ margin: '0 auto 8px', color: '#CBD5E1' }} />
               <div style={{ fontSize: '14px', fontWeight: 600, color: '#64748B' }}>No records yet</div>
               <p style={{ fontSize: '12px', margin: '4px 0 0' }}>
-                There are no {CLINICAL_TILES.find(t => t.id === activeTile)?.label.toLowerCase()} entries in this window.
+                There are no {clinicalTiles.find(t => t.id === activeTile)?.label.toLowerCase()} entries in this window.
               </p>
             </div>
           )}
@@ -1759,6 +1871,7 @@ export default function PatientFile() {
         guardianData={guardian}
         treatingConsultant={treatingDoc}
         careManager={careMgr}
+        staffOnDuty={staffOnDuty}
         briefHistory={patientFileData?.brief_history}
         carePlan={patientFileData?.care_plan}
         activeComplaint={activeComplaint}
@@ -2229,6 +2342,7 @@ export default function PatientFile() {
               <button
                 onClick={() => {
                   setShowVitalsModal(false);
+                  invalidateTimelineCache();
                   loadPatientFile(activePatientId);
                   loadTimeline();
                 }}
@@ -2281,6 +2395,7 @@ export default function PatientFile() {
               <button
                 onClick={() => {
                   setShowNurseNotesModal(false);
+                  invalidateTimelineCache();
                   loadPatientFile(activePatientId);
                   loadTimeline();
                 }}
@@ -2333,6 +2448,7 @@ export default function PatientFile() {
               <button
                 onClick={() => {
                   setShowMarModal(false);
+                  invalidateTimelineCache();
                   loadPatientFile(activePatientId);
                   loadTimeline();
                 }}
@@ -2385,6 +2501,7 @@ export default function PatientFile() {
               <button
                 onClick={() => {
                   setShowPrescriptionModal(false);
+                  invalidateTimelineCache();
                   loadPatientFile(activePatientId);
                   loadTimeline();
                 }}

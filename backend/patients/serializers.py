@@ -21,6 +21,61 @@ class PatientSummarySerializer(serializers.ModelSerializer):
             'source', 'source_display',
         ]
 
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        request = self.context.get('request')
+        user = getattr(request, 'user', None) if request else None
+        if not user or not user.is_authenticated:
+            return ret
+
+        from homecareOS.permissions import get_user_role
+        role = get_user_role(user)
+
+        clinical_fields = [
+            'primary_diagnosis',
+            'secondary_diagnoses',
+            'allergies',
+            'blood_type',
+            'brief_history',
+            'care_plan',
+            'history_care_plan_edits',
+            'active_prescriptions',
+            'recent_vitals',
+        ]
+
+        # 1. Non-clinical roles: accountant, crm_executive (demographic, billing, CRM fields ONLY)
+        if role in ('accountant', 'crm_executive'):
+            for f in clinical_fields:
+                ret.pop(f, None)
+            ret.pop('emergency_contact_phone', None)
+            return ret
+
+        # 2. Patient / Family owner
+        if role in ('patient_family', 'family') or (hasattr(user, 'patient_profile') and not hasattr(user, 'staffmember')):
+            return ret
+
+        # 3. Super admin, admin, branch manager
+        if user.is_superuser or role in ('super_admin', 'admin', 'branch_manager'):
+            return ret
+
+        # 4. Clinicians and care managers
+        from homecareOS.clinician_permissions import get_guardian_contact_visibility
+        from patients.scoping import get_assigned_patient_ids_for_clinician
+
+        assigned_ids = get_assigned_patient_ids_for_clinician(user)
+        is_assigned = (assigned_ids is None) or (instance.id in assigned_ids)
+
+        if not is_assigned and role != 'care_manager':
+            for f in clinical_fields:
+                ret.pop(f, None)
+
+        # Guardian phone visibility
+        vis = get_guardian_contact_visibility(user, instance)
+        if vis != 'direct':
+            ret.pop('emergency_contact_phone', None)
+
+        return ret
+
 
 class PatientListSerializer(serializers.ModelSerializer):
     full_name = serializers.ReadOnlyField()
@@ -53,6 +108,61 @@ class PatientListSerializer(serializers.ModelSerializer):
 
     def get_portal_username(self, obj):
         return obj.portal_user.username if obj.portal_user_id else None
+
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        request = self.context.get('request')
+        user = getattr(request, 'user', None) if request else None
+        if not user or not user.is_authenticated:
+            return ret
+
+        from homecareOS.permissions import get_user_role
+        role = get_user_role(user)
+
+        clinical_fields = [
+            'primary_diagnosis',
+            'secondary_diagnoses',
+            'allergies',
+            'blood_type',
+            'brief_history',
+            'care_plan',
+            'history_care_plan_edits',
+            'active_prescriptions',
+            'recent_vitals',
+        ]
+
+        # 1. Non-clinical roles: accountant, crm_executive (demographic, billing, CRM fields ONLY)
+        if role in ('accountant', 'crm_executive'):
+            for f in clinical_fields:
+                ret.pop(f, None)
+            ret.pop('emergency_contact_phone', None)
+            return ret
+
+        # 2. Patient / Family owner
+        if role in ('patient_family', 'family') or (hasattr(user, 'patient_profile') and not hasattr(user, 'staffmember')):
+            return ret
+
+        # 3. Super admin, admin, branch manager
+        if user.is_superuser or role in ('super_admin', 'admin', 'branch_manager'):
+            return ret
+
+        # 4. Clinicians and care managers
+        from homecareOS.clinician_permissions import get_guardian_contact_visibility
+        from patients.scoping import get_assigned_patient_ids_for_clinician
+
+        assigned_ids = get_assigned_patient_ids_for_clinician(user)
+        is_assigned = (assigned_ids is None) or (instance.id in assigned_ids)
+
+        if not is_assigned and role != 'care_manager':
+            for f in clinical_fields:
+                ret.pop(f, None)
+
+        # Guardian phone visibility
+        vis = get_guardian_contact_visibility(user, instance)
+        if vis != 'direct':
+            ret.pop('emergency_contact_phone', None)
+
+        return ret
 
 
 class PatientDetailSerializer(serializers.ModelSerializer):
@@ -118,6 +228,61 @@ class PatientDetailSerializer(serializers.ModelSerializer):
     def get_portal_username(self, obj):
         return obj.portal_user.username if obj.portal_user_id else None
 
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        request = self.context.get('request')
+        user = getattr(request, 'user', None) if request else None
+        if not user or not user.is_authenticated:
+            return ret
+
+        from homecareOS.permissions import get_user_role
+        role = get_user_role(user)
+
+        clinical_fields = [
+            'primary_diagnosis',
+            'secondary_diagnoses',
+            'allergies',
+            'blood_type',
+            'brief_history',
+            'care_plan',
+            'history_care_plan_edits',
+            'active_prescriptions',
+            'recent_vitals',
+        ]
+
+        # 1. Non-clinical roles: accountant, crm_executive (demographic, billing, CRM fields ONLY)
+        if role in ('accountant', 'crm_executive'):
+            for f in clinical_fields:
+                ret.pop(f, None)
+            ret.pop('emergency_contact_phone', None)
+            return ret
+
+        # 2. Patient / Family owner
+        if role in ('patient_family', 'family') or (hasattr(user, 'patient_profile') and not hasattr(user, 'staffmember')):
+            return ret
+
+        # 3. Super admin, admin, branch manager
+        if user.is_superuser or role in ('super_admin', 'admin', 'branch_manager'):
+            return ret
+
+        # 4. Clinicians and care managers
+        from homecareOS.clinician_permissions import get_guardian_contact_visibility
+        from patients.scoping import get_assigned_patient_ids_for_clinician
+
+        assigned_ids = get_assigned_patient_ids_for_clinician(user)
+        is_assigned = (assigned_ids is None) or (instance.id in assigned_ids)
+
+        if not is_assigned and role != 'care_manager':
+            for f in clinical_fields:
+                ret.pop(f, None)
+
+        # Guardian phone visibility
+        vis = get_guardian_contact_visibility(user, instance)
+        if vis != 'direct':
+            ret.pop('emergency_contact_phone', None)
+
+        return ret
+
 
 class PrescriptionSerializer(serializers.ModelSerializer):
     # Aliased read/write fields
@@ -133,6 +298,12 @@ class PrescriptionSerializer(serializers.ModelSerializer):
     file_url = serializers.SerializerMethodField()
     is_active = serializers.SerializerMethodField()
 
+    # Authorship, verification and audit fields
+    entered_by_name = serializers.SerializerMethodField()
+    verified_by_name = serializers.SerializerMethodField()
+    status_changed_by_name = serializers.SerializerMethodField()
+    can_administer = serializers.SerializerMethodField()
+
     class Meta:
         model = Prescription
         fields = [
@@ -141,8 +312,16 @@ class PrescriptionSerializer(serializers.ModelSerializer):
             'duration_days', 'days_prescribed', 'duration', 'date', 'start_date',
             'notes', 'document', 'prescription_file', 'file_url',
             'uploaded_by', 'uploaded_by_name', 'created_at', 'is_active',
+            'entry_mode', 'entered_by', 'entered_by_name',
+            'ordering_doctor', 'ordering_doctor_name', 'order_source',
+            'verification_status', 'verified_by', 'verified_by_name', 'verified_at',
+            'verification_note', 'status_reason', 'status_changed_by',
+            'status_changed_by_name', 'status_changed_at', 'can_administer',
         ]
-        read_only_fields = ['id', 'created_at', 'uploaded_by_name', 'patient_name', 'file_url', 'is_active']
+        read_only_fields = [
+            'id', 'created_at', 'uploaded_by_name', 'patient_name', 'file_url', 'is_active',
+            'entered_by_name', 'verified_by_name', 'status_changed_by_name', 'can_administer',
+        ]
         extra_kwargs = {
             'patient': {'required': False},
             'medication': {'required': False},
@@ -150,6 +329,8 @@ class PrescriptionSerializer(serializers.ModelSerializer):
             'prescribed_by': {'required': False},
             'dosage': {'required': False},
             'frequency': {'required': False},
+            'ordering_doctor_name': {'required': False},
+            'order_source': {'required': False},
         }
 
     def to_internal_value(self, data):
@@ -174,14 +355,18 @@ class PrescriptionSerializer(serializers.ModelSerializer):
         # Ensure date and clinician fallbacks
         if not parsed.get('date'):
             parsed['date'] = timezone.now().date().isoformat()
+        if not parsed.get('ordering_doctor_name') and parsed.get('prescribed_by'):
+            parsed['ordering_doctor_name'] = parsed['prescribed_by']
         if not parsed.get('prescribed_by'):
-            parsed['prescribed_by'] = 'Attending Physician'
+            parsed['prescribed_by'] = parsed.get('ordering_doctor_name') or 'Attending Physician'
         if not parsed.get('medication'):
             parsed['medication'] = 'Prescription Document' if (parsed.get('document') or parsed.get('prescription_file')) else 'Unspecified Medication'
         if not parsed.get('dosage'):
             parsed['dosage'] = 'As Prescribed'
         if not parsed.get('frequency'):
             parsed['frequency'] = 'As Directed'
+        if not parsed.get('order_source'):
+            parsed['order_source'] = 'written'
 
         return super().to_internal_value(parsed)
 
@@ -194,6 +379,8 @@ class PrescriptionSerializer(serializers.ModelSerializer):
         return None
 
     def get_is_active(self, obj):
+        if obj.verification_status in ('discontinued', 'rejected', 'cancelled'):
+            return False
         if not obj.date:
             return True
         if not obj.duration_days:
@@ -202,13 +389,43 @@ class PrescriptionSerializer(serializers.ModelSerializer):
         expiry = obj.date + timedelta(days=obj.duration_days)
         return timezone.now().date() <= expiry
 
+    def get_entered_by_name(self, obj):
+        if not obj.entered_by:
+            return None
+        return obj.entered_by.get_full_name() or obj.entered_by.username
+
+    def get_verified_by_name(self, obj):
+        if not obj.verified_by:
+            return None
+        return obj.verified_by.get_full_name() or obj.verified_by.username
+
+    def get_status_changed_by_name(self, obj):
+        if not obj.status_changed_by:
+            return None
+        return obj.status_changed_by.get_full_name() or obj.status_changed_by.username
+
+    def get_can_administer(self, obj):
+        from django.conf import settings
+        admin_before_verification = getattr(settings, 'PRESCRIPTION_ADMIN_BEFORE_VERIFICATION', False)
+        if obj.verification_status in ('rejected', 'cancelled', 'discontinued'):
+            return False
+        if obj.verification_status == 'pending_verification' and not admin_before_verification:
+            return False
+        return True
+
 
 class VitalSignSerializer(serializers.ModelSerializer):
     recorded_by_name = serializers.CharField(source='recorded_by.full_name', read_only=True)
+    recorded_at = serializers.DateTimeField(required=False)
 
     class Meta:
         model = VitalSign
         fields = '__all__'
+
+    def validate_recorded_at(self, value):
+        if value and value > timezone.now():
+            raise serializers.ValidationError("Future-dated observations cannot be recorded.")
+        return value
 
 
 class NurseNoteSerializer(serializers.ModelSerializer):
@@ -252,6 +469,7 @@ class MARAdministrationSerializer(serializers.ModelSerializer):
     administered_by_name = serializers.CharField(source='administered_by.full_name', read_only=True)
     medication_name = serializers.CharField(source='prescription.medication', read_only=True)
     day_name = serializers.SerializerMethodField()
+    is_provisional = serializers.SerializerMethodField()
 
     class Meta:
         model = MARAdministration
@@ -259,8 +477,14 @@ class MARAdministrationSerializer(serializers.ModelSerializer):
             'id', 'prescription', 'medication_name',
             'day_number', 'day_name',
             'administered_by', 'administered_by_name', 'administered_at',
+            'is_provisional',
         ]
-        read_only_fields = ['id', 'administered_by', 'administered_by_name', 'administered_at']
+        read_only_fields = ['id', 'administered_by', 'administered_by_name', 'administered_at', 'is_provisional']
+
+    def get_is_provisional(self, obj):
+        if obj.prescription and getattr(obj.prescription, 'verification_status', None) == 'pending_verification':
+            return True
+        return False
 
     def get_day_name(self, obj):
         try:

@@ -1,7 +1,7 @@
 import React from 'react';
 import { X, Printer } from 'lucide-react';
 
-export default function PrintPatientFileModal({ isOpen, onClose, patientData, guardianData, treatingConsultant, careManager, briefHistory, carePlan, activeComplaint, upcomingItems, recentRecords }) {
+export default function PrintPatientFileModal({ isOpen, onClose, patientData, guardianData, treatingConsultant, careManager, staffOnDuty, briefHistory, carePlan, activeComplaint, upcomingItems, recentRecords }) {
   if (!isOpen) return null;
 
   const handlePrint = () => {
@@ -143,8 +143,8 @@ export default function PrintPatientFileModal({ isOpen, onClose, patientData, gu
                 <strong>{pName}</strong>
               </div>
               <div>
-                <span style={{ color: '#6B7280', display: 'block' }}>MR / Patient Code</span>
-                <strong>{formatVal(patientData?.mr_number)} / {formatVal(patientData?.patient_code)}</strong>
+                <span style={{ color: '#6B7280', display: 'block' }}>MR Number</span>
+                <strong>{formatVal(patientData?.mr_number)}</strong>
               </div>
               <div>
                 <span style={{ color: '#6B7280', display: 'block' }}>Age / Gender</span>
@@ -158,16 +158,43 @@ export default function PrintPatientFileModal({ isOpen, onClose, patientData, gu
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', fontSize: '11px', marginTop: '8px' }}>
               <div>
                 <span style={{ color: '#6B7280', display: 'block' }}>Treating Consultant</span>
-                <strong>{treatingConsultant ? `${treatingConsultant.name} (${treatingConsultant.specialization})` : '-'}</strong>
+                <strong>
+                  {treatingConsultant ? `${treatingConsultant.name} (${treatingConsultant.specialization})` : '-'}
+                  {treatingConsultant?.phone && treatingConsultant.phone !== '-' ? (
+                    <> · <a href={`tel:${treatingConsultant.phone}`} style={{ color: '#6D28D9', textDecoration: 'none' }}>{treatingConsultant.phone}</a></>
+                  ) : null}
+                </strong>
               </div>
               <div>
                 <span style={{ color: '#6B7280', display: 'block' }}>Care Manager</span>
-                <strong>{careManager ? careManager.name : '-'}</strong>
+                <strong>
+                  {careManager ? careManager.name : '-'}
+                  {careManager?.phone && careManager.phone !== '-' ? (
+                    <> · <a href={`tel:${careManager.phone}`} style={{ color: '#15803D', textDecoration: 'none' }}>{careManager.phone}</a></>
+                  ) : null}
+                </strong>
               </div>
               <div>
                 <span style={{ color: '#6B7280', display: 'block' }}>Legal Guardian</span>
-                <strong>{formatVal(guardianData?.name)} ({formatVal(guardianData?.relation)}) {guardianData?.phone ? `· ${guardianData.phone}` : ''}</strong>
+                <strong>{formatVal(guardianData?.name)} ({formatVal(guardianData?.relation)}) {guardianData?.phone ? `· ${guardianData.phone}` : (guardianData?.phone_hidden ? '· [Phone Restricted - Emergency Reveal Required]' : '')}</strong>
               </div>
+            </div>
+            <div style={{ fontSize: '11px', marginTop: '8px', borderTop: '1px dashed #E5E7EB', paddingTop: '6px' }}>
+              <span style={{ color: '#6B7280', display: 'inline', marginRight: '6px' }}>Staff On Duty Today:</span>
+              <strong>
+                {staffOnDuty && staffOnDuty.length > 0 ? (
+                  staffOnDuty.map((s, idx) => (
+                    <span key={s.id || idx} style={{ marginRight: '10px' }}>
+                      {s.name} ({s.role_display || s.role})
+                      {s.phone && s.phone !== '-' ? (
+                        <> · <a href={`tel:${s.phone}`} style={{ color: '#6D28D9', textDecoration: 'none' }}>{s.phone}</a></>
+                      ) : null}
+                    </span>
+                  ))
+                ) : (
+                  '-'
+                )}
+              </strong>
             </div>
           </div>
 
