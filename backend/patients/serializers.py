@@ -416,6 +416,7 @@ class PrescriptionSerializer(serializers.ModelSerializer):
 
 class VitalSignSerializer(serializers.ModelSerializer):
     recorded_by_name = serializers.CharField(source='recorded_by.full_name', read_only=True)
+    entered_in_error_by_name = serializers.CharField(source='entered_in_error_by.get_full_name', read_only=True, default='')
     recorded_at = serializers.DateTimeField(required=False)
 
     class Meta:
@@ -430,6 +431,7 @@ class VitalSignSerializer(serializers.ModelSerializer):
 
 class NurseNoteSerializer(serializers.ModelSerializer):
     recorded_by_name = serializers.CharField(source='recorded_by.full_name', read_only=True)
+    entered_in_error_by_name = serializers.CharField(source='entered_in_error_by.get_full_name', read_only=True, default='')
 
     class Meta:
         model = NurseNote
@@ -437,9 +439,12 @@ class NurseNoteSerializer(serializers.ModelSerializer):
 
 
 class LabResultSerializer(serializers.ModelSerializer):
+    entered_in_error_by_name = serializers.CharField(source='entered_in_error_by.get_full_name', read_only=True, default='')
+
     class Meta:
         model = LabResult
         fields = '__all__'
+
 
 
 # ── Mobile serializers ────────────────────────────────────────────────────────
@@ -468,6 +473,7 @@ class DailyReportSerializer(serializers.ModelSerializer):
 class MARAdministrationSerializer(serializers.ModelSerializer):
     administered_by_name = serializers.CharField(source='administered_by.full_name', read_only=True)
     medication_name = serializers.CharField(source='prescription.medication', read_only=True)
+    entered_in_error_by_name = serializers.CharField(source='entered_in_error_by.get_full_name', read_only=True, default='')
     day_name = serializers.SerializerMethodField()
     is_provisional = serializers.SerializerMethodField()
 
@@ -478,8 +484,15 @@ class MARAdministrationSerializer(serializers.ModelSerializer):
             'day_number', 'day_name',
             'administered_by', 'administered_by_name', 'administered_at',
             'is_provisional',
+            'is_entered_in_error', 'entered_in_error_by', 'entered_in_error_by_name',
+            'entered_in_error_at', 'entered_in_error_reason',
         ]
-        read_only_fields = ['id', 'administered_by', 'administered_by_name', 'administered_at', 'is_provisional']
+        read_only_fields = [
+            'id', 'administered_by', 'administered_by_name', 'administered_at', 'is_provisional',
+            'is_entered_in_error', 'entered_in_error_by', 'entered_in_error_by_name',
+            'entered_in_error_at', 'entered_in_error_reason',
+        ]
+
 
     def get_is_provisional(self, obj):
         if obj.prescription and getattr(obj.prescription, 'verification_status', None) == 'pending_verification':
@@ -519,6 +532,7 @@ class PatientActiveComplaintSerializer(serializers.ModelSerializer):
 class ScheduledItemSerializer(serializers.ModelSerializer):
     created_by_name = serializers.CharField(source='created_by.get_full_name', read_only=True, default='')
     done_by_name = serializers.CharField(source='done_by.get_full_name', read_only=True, default='')
+    entered_in_error_by_name = serializers.CharField(source='entered_in_error_by.get_full_name', read_only=True, default='')
     due_relative = serializers.SerializerMethodField()
     is_overdue = serializers.SerializerMethodField()
 
@@ -528,9 +542,16 @@ class ScheduledItemSerializer(serializers.ModelSerializer):
             'id', 'patient', 'kind', 'title', 'due_at', 'due_relative', 'is_overdue',
             'notes', 'status', 'created_by', 'created_by_name', 'created_at',
             'done_at', 'done_by', 'done_by_name',
-            'staff_request', 'booking', 'lab_order'
+            'staff_request', 'booking', 'lab_order',
+            'is_entered_in_error', 'entered_in_error_by', 'entered_in_error_by_name',
+            'entered_in_error_at', 'entered_in_error_reason',
         ]
-        read_only_fields = ['created_by', 'created_at', 'done_at', 'done_by']
+        read_only_fields = [
+            'created_by', 'created_at', 'done_at', 'done_by',
+            'is_entered_in_error', 'entered_in_error_by', 'entered_in_error_by_name',
+            'entered_in_error_at', 'entered_in_error_reason',
+        ]
+
 
     def get_due_relative(self, obj):
         from zoneinfo import ZoneInfo

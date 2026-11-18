@@ -150,6 +150,12 @@ export default function PatientFile() {
   const [addendumReason, setAddendumReason] = useState('');
   const [submittingAddendum, setSubmittingAddendum] = useState(false);
 
+  // Mark Entered in Error State
+  const [showMarkErrorModal, setShowMarkErrorModal] = useState(false);
+  const [markErrorRecord, setMarkErrorRecord] = useState(null);
+  const [markErrorReason, setMarkErrorReason] = useState('');
+  const [submittingMarkError, setSubmittingMarkError] = useState(false);
+
   // ── Fetch Patients List ───────────────────────────────────────────────────
   const fetchList = useCallback(async () => {
     setListLoading(true);
@@ -653,6 +659,56 @@ export default function PatientFile() {
       alert('Error appending addendum.');
     } finally {
       setSubmittingAddendum(false);
+    }
+  };
+
+  const handleMarkEnteredInError = async (e) => {
+    e.preventDefault();
+    if (!markErrorRecord || !markErrorReason.trim() || !activePatientId) return;
+    setSubmittingMarkError(true);
+    try {
+      const rType = markErrorRecord.type || activeTile;
+      let endpoint = `/patients/${activePatientId}/${rType}/${markErrorRecord.id}/mark-entered-in-error/`;
+      if (rType === 'scheduled_items' || rType === 'scheduled-items') {
+        endpoint = `/patients/${activePatientId}/scheduled-items/${markErrorRecord.id}/mark-entered-in-error/`;
+      } else if (rType === 'nurse_notes' || rType === 'nurse-notes') {
+        endpoint = `/patients/${activePatientId}/nurse-notes/${markErrorRecord.id}/mark-entered-in-error/`;
+      } else if (rType === 'vitals') {
+        endpoint = `/patients/${activePatientId}/vitals/${markErrorRecord.id}/mark-entered-in-error/`;
+      } else if (rType === 'labs') {
+        endpoint = `/patients/${activePatientId}/labs/${markErrorRecord.id}/mark-entered-in-error/`;
+      } else if (rType === 'mar') {
+        endpoint = `/patients/${activePatientId}/mar/${markErrorRecord.id}/mark-entered-in-error/`;
+      }
+      const res = await apiFetch(endpoint, {
+        method: 'POST',
+        body: JSON.stringify({ reason: markErrorReason.trim() }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setShowMarkErrorModal(false);
+        setMarkErrorRecord(null);
+        setMarkErrorReason('');
+        if (selectedRecord && selectedRecord.id === markErrorRecord.id) {
+          setSelectedRecord(prev => ({
+            ...prev,
+            is_entered_in_error: true,
+            entered_in_error_reason: markErrorReason.trim(),
+            entered_in_error_by_name: data.entered_in_error_by_name || 'Staff',
+            entered_in_error_at: data.entered_in_error_at || new Date().toISOString(),
+          }));
+        }
+        invalidateTimelineCache();
+        loadTimeline();
+        alert('Record marked as entered in error.');
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(err.detail || 'Failed to mark record entered in error.');
+      }
+    } catch (err) {
+      alert('Error submitting entered in error request.');
+    } finally {
+      setSubmittingMarkError(false);
     }
   };
 
@@ -1788,52 +1844,67 @@ export default function PatientFile() {
             </div>
           ) : timelineRecords.length > 0 ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', position: 'relative', paddingLeft: '8px' }}>
-              {timelineRecords.map((rec) => (
-                <div
-                  key={rec.id}
-                  onClick={() => setSelectedRecord(rec)}
-                  style={{
-                    background: '#F8FAFC',
-                    border: '1px solid #E2E8F0',
-                    borderRadius: '12px',
-                    padding: '14px',
-                    cursor: 'pointer',
-                    transition: 'all 0.15s ease',
-                  }}
-                  onMouseEnter={(e) => e.currentTarget.style.borderColor = '#6D28D9'}
-                  onMouseLeave={(e) => e.currentTarget.style.borderColor = '#E2E8F0'}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '6px' }}>
-                    <div>
-                      <span style={{ fontSize: '11px', color: '#6D28D9', fontWeight: 700 }}>
-                        {new Date(rec.occurred_at).toLocaleString('en-GB', { timeZone: 'Asia/Karachi' })} (PKT)
-                      </span>
-                      <h4 style={{ margin: '2px 0 0', fontSize: '14px', fontWeight: 700, color: '#1E1B4B' }}>
-                        {rec.title}
-                      </h4>
-                    </div>
-                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                      {rec.is_signed && (
-                        <span style={{ background: '#DCFCE7', color: '#166534', padding: '2px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 700 }}>
-                          ✓ Signed
+              {timelineRecords.map((rec) => {
+                const isErr = !!rec.is_entered_in_error;
+                return (
+                  <div
+                    key={rec.id}
+                    onClick={() => setSelectedRecord(rec)}
+                    style={{
+                      background: isErr ? '#FEF2F2' : '#F8FAFC',
+                      border: isErr ? '1px solid #FCA5A5' : '1px solid #E2E8F0',
+                      borderRadius: '12px',
+                      padding: '14px',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                      opacity: isErr ? 0.75 : 1,
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.borderColor = isErr ? '#EF4444' : '#6D28D9'}
+                    onMouseLeave={(e) => e.currentTarget.style.borderColor = isErr ? '#FCA5A5' : '#E2E8F0'}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '6px' }}>
+                      <div>
+                        <span style={{ fontSize: '11px', color: isErr ? '#DC2626' : '#6D28D9', fontWeight: 700 }}>
+                          {new Date(rec.occurred_at).toLocaleString('en-GB', { timeZone: 'Asia/Karachi' })} (PKT)
                         </span>
+                        <h4 style={{ margin: '2px 0 0', fontSize: '14px', fontWeight: 700, color: isErr ? '#991B1B' : '#1E1B4B', textDecoration: isErr ? 'line-through' : 'none' }}>
+                          {rec.title}
+                        </h4>
+                      </div>
+                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                        {isErr ? (
+                          <span style={{ background: '#FEE2E2', color: '#991B1B', padding: '2px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 700 }}>
+                            ⚠ Entered in Error
+                          </span>
+                        ) : rec.is_signed ? (
+                          <span style={{ background: '#DCFCE7', color: '#166534', padding: '2px 8px', borderRadius: '6px', fontSize: '11px', fontWeight: 700 }}>
+                            ✓ Signed
+                          </span>
+                        ) : null}
+                        <Eye size={16} color={isErr ? '#DC2626' : '#6D28D9'} />
+                      </div>
+                    </div>
+
+                    <p style={{ margin: '0 0 8px', fontSize: '12px', color: '#4B5563', lineHeight: 1.4, textDecoration: isErr ? 'line-through' : 'none' }}>
+                      {rec.summary}
+                    </p>
+
+                    {isErr && (
+                      <div style={{ background: '#FFF1F2', border: '1px solid #FECDD3', borderRadius: '6px', padding: '6px 10px', marginBottom: '8px', fontSize: '11px', color: '#9F1239' }}>
+                        <strong>Void Reason:</strong> {rec.entered_in_error_reason || 'Marked in error'}
+                        {rec.entered_in_error_by_name ? ` (by ${rec.entered_in_error_by_name})` : ''}
+                      </div>
+                    )}
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: '#64748B', borderTop: '1px solid #EEF2F6', paddingTop: '6px' }}>
+                      <span>Author: <strong>{rec.author_name}</strong> ({rec.author_role})</span>
+                      {rec.has_addenda && (
+                        <span style={{ color: '#D97706', fontWeight: 700 }}>Has Addenda</span>
                       )}
-                      <Eye size={16} color="#6D28D9" />
                     </div>
                   </div>
-
-                  <p style={{ margin: '0 0 8px', fontSize: '12px', color: '#4B5563', lineHeight: 1.4 }}>
-                    {rec.summary}
-                  </p>
-
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: '#64748B', borderTop: '1px solid #EEF2F6', paddingTop: '6px' }}>
-                    <span>Author: <strong>{rec.author_name}</strong> ({rec.author_role})</span>
-                    {rec.has_addenda && (
-                      <span style={{ color: '#D97706', fontWeight: 700 }}>Has Addenda</span>
-                    )}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ) : (
             <div style={{ textAlign: 'center', padding: '48px 20px', color: '#94A3B8' }}>
@@ -1921,13 +1992,27 @@ export default function PatientFile() {
               </button>
             </div>
             <div style={{ padding: '20px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '14px', fontSize: '13px' }}>
+              {selectedRecord.is_entered_in_error && (
+                <div style={{ background: '#FEF2F2', border: '1px solid #FCA5A5', borderRadius: '8px', padding: '12px', color: '#991B1B', fontSize: '12px' }}>
+                  <div style={{ fontWeight: 800, marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <AlertTriangle size={15} color="#DC2626" />
+                    RECORD ENTERED IN ERROR — STRUCK THROUGH
+                  </div>
+                  <div>Reason: <strong>{selectedRecord.entered_in_error_reason || 'Marked in error'}</strong></div>
+                  <div style={{ fontSize: '11px', marginTop: '4px', color: '#B91C1C' }}>
+                    Marked by {selectedRecord.entered_in_error_by_name || 'Authorized Staff'} on {selectedRecord.entered_in_error_at ? new Date(selectedRecord.entered_in_error_at).toLocaleString('en-GB', { timeZone: 'Asia/Karachi' }) : ''} (PKT)
+                  </div>
+                </div>
+              )}
               <div>
                 <span style={{ color: '#6B7280', fontSize: '11px', display: 'block' }}>Author</span>
                 <strong>{selectedRecord.author_name} ({selectedRecord.author_role})</strong>
               </div>
               <div>
                 <span style={{ color: '#6B7280', fontSize: '11px', display: 'block' }}>Clinical Summary</span>
-                <p style={{ margin: '4px 0 0', color: '#1E293B', lineHeight: 1.5 }}>{selectedRecord.summary}</p>
+                <p style={{ margin: '4px 0 0', color: '#1E293B', lineHeight: 1.5, textDecoration: selectedRecord.is_entered_in_error ? 'line-through' : 'none', opacity: selectedRecord.is_entered_in_error ? 0.7 : 1 }}>
+                  {selectedRecord.summary}
+                </p>
               </div>
               {selectedRecord.details && (
                 <div style={{ background: '#F8FAFC', padding: '12px', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
@@ -1950,6 +2035,32 @@ export default function PatientFile() {
               )}
             </div>
             <div style={{ background: '#F8FAFC', padding: '12px 20px', borderTop: '1px solid #E2E8F0', display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              {!selectedRecord.is_entered_in_error && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMarkErrorRecord(selectedRecord);
+                    setMarkErrorReason('');
+                    setShowMarkErrorModal(true);
+                  }}
+                  style={{
+                    background: '#FEF2F2',
+                    color: '#DC2626',
+                    border: '1px solid #FCA5A5',
+                    borderRadius: '6px',
+                    padding: '6px 14px',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                  }}
+                >
+                  <AlertTriangle size={13} />
+                  Mark Entered in Error
+                </button>
+              )}
               {(isDoctor || isTherapist || isNurse || isAdminOrCM) && (
                 <button
                   onClick={() => {
@@ -3177,6 +3288,74 @@ export default function PatientFile() {
                 </button>
                 <button type="submit" disabled={submittingAddendum} style={{ background: '#6D28D9', color: '#FFFFFF', border: 'none', padding: '6px 16px', borderRadius: '6px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}>
                   {submittingAddendum ? 'Appending...' : 'Save & Append Addendum'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Mark Entered in Error Modal */}
+      {showMarkErrorModal && markErrorRecord && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(15, 23, 42, 0.5)',
+            backdropFilter: 'blur(2px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 10001,
+            padding: '20px',
+          }}
+          onClick={() => setShowMarkErrorModal(false)}
+        >
+          <div
+            style={{
+              background: '#FFFFFF',
+              borderRadius: '16px',
+              maxWidth: '540px',
+              width: '100%',
+              padding: '24px',
+              boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)',
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <AlertTriangle size={20} color="#DC2626" />
+                <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 800, color: '#991B1B' }}>
+                  Mark Record Entered in Error
+                </h3>
+              </div>
+              <button onClick={() => setShowMarkErrorModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748B' }}>
+                <X size={18} />
+              </button>
+            </div>
+            <p style={{ fontSize: '12px', color: '#6B7280', margin: '0 0 16px', lineHeight: 1.5 }}>
+              Clinical records are never physically deleted. Marking this record as &ldquo;entered in error&rdquo; will permanently strike it through, exclude it from analytical charts and alert calculations, and log an immutable audit trail.
+            </p>
+            <form onSubmit={handleMarkEnteredInError} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div>
+                <label style={{ fontSize: '12px', fontWeight: 700, color: '#374151', display: 'block', marginBottom: '4px' }}>
+                  Reason for Error *
+                </label>
+                <textarea
+                  rows={4}
+                  value={markErrorReason}
+                  onChange={e => setMarkErrorReason(e.target.value)}
+                  placeholder="Explain why this entry is erroneous (e.g., recorded on wrong patient chart, calibration error, transposed digits)..."
+                  style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #CBD5E1', fontSize: '13px', outline: 'none' }}
+                  required
+                />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '8px' }}>
+                <button type="button" onClick={() => setShowMarkErrorModal(false)} style={{ background: '#F1F5F9', border: '1px solid #CBD5E1', padding: '6px 14px', borderRadius: '6px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
+                  Cancel
+                </button>
+                <button type="submit" disabled={submittingMarkError || !markErrorReason.trim()} style={{ background: '#DC2626', color: '#FFFFFF', border: 'none', padding: '6px 16px', borderRadius: '6px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}>
+                  {submittingMarkError ? 'Submitting...' : 'Confirm: Mark in Error'}
                 </button>
               </div>
             </form>

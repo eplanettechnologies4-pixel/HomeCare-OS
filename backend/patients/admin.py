@@ -2,7 +2,8 @@ from django.contrib import admin
 from django.core.exceptions import ValidationError
 from .models import (
     Patient, Prescription, VitalSign, NurseNote, LabResult, DailyReport,
-    MARAdministration, DoctorNote, PhysioNote, TherapyNote, ClinicalConsent
+    MARAdministration, DoctorNote, PhysioNote, TherapyNote, ClinicalConsent,
+    ScheduledItem
 )
 
 @admin.register(Patient)
@@ -14,13 +15,11 @@ class PatientAdmin(admin.ModelAdmin):
 class SignedClinicalEntryAdmin(admin.ModelAdmin):
     """
     Django Admin configuration enforcing Phase 1 clinical entry immutability:
-    - Signed entries cannot be deleted (delete permission revoked).
+    - Clinical entries cannot be deleted (delete permission revoked).
     - Signed entries have all fields locked as read-only except addenda.
     """
     def has_delete_permission(self, request, obj=None):
-        if obj and getattr(obj, 'is_signed', False):
-            return False
-        return super().has_delete_permission(request, obj)
+        return False
 
     def get_readonly_fields(self, request, obj=None):
         ro = list(super().get_readonly_fields(request, obj))
@@ -32,9 +31,7 @@ class SignedClinicalEntryAdmin(admin.ModelAdmin):
         return ro
 
     def delete_model(self, request, obj):
-        if getattr(obj, 'is_signed', False):
-            raise ValidationError("Signed clinical entries are permanently locked and cannot be deleted.")
-        super().delete_model(request, obj)
+        raise ValidationError("Physical deletion of clinical entries is prohibited.")
 
 
 @admin.register(DoctorNote)
@@ -65,8 +62,58 @@ class ClinicalConsentAdmin(SignedClinicalEntryAdmin):
     search_fields = ('patient__first_name', 'patient__last_name', 'title')
 
 
-admin.site.register(VitalSign)
-admin.site.register(NurseNote)
-admin.site.register(Prescription)
-admin.site.register(DailyReport)
-admin.site.register(MARAdministration)
+class ClinicalRecordAdmin(admin.ModelAdmin):
+    """Revokes physical delete permission across all clinical records in Django admin."""
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def delete_model(self, request, obj):
+        raise ValidationError("Physical deletion of clinical records is prohibited. Use mark-entered-in-error.")
+
+
+@admin.register(VitalSign)
+class VitalSignAdmin(ClinicalRecordAdmin):
+    list_display = ('id', 'patient', 'recorded_by', 'recorded_at', 'blood_pressure_systolic', 'blood_pressure_diastolic', 'is_entered_in_error')
+    list_filter = ('is_entered_in_error', 'recorded_at')
+    search_fields = ('patient__first_name', 'patient__last_name')
+
+
+@admin.register(NurseNote)
+class NurseNoteAdmin(ClinicalRecordAdmin):
+    list_display = ('id', 'patient', 'recorded_by', 'recorded_at', 'is_entered_in_error')
+    list_filter = ('is_entered_in_error', 'recorded_at')
+    search_fields = ('patient__first_name', 'patient__last_name')
+
+
+@admin.register(Prescription)
+class PrescriptionAdmin(ClinicalRecordAdmin):
+    list_display = ('id', 'patient', 'medication', 'dosage', 'verification_status', 'prescribed_by', 'date')
+    list_filter = ('verification_status', 'date')
+    search_fields = ('patient__first_name', 'patient__last_name', 'medication')
+
+
+@admin.register(DailyReport)
+class DailyReportAdmin(ClinicalRecordAdmin):
+    list_display = ('id', 'patient', 'submitted_by', 'created_at')
+    list_filter = ('created_at',)
+    search_fields = ('patient__first_name', 'patient__last_name')
+
+
+@admin.register(MARAdministration)
+class MARAdministrationAdmin(ClinicalRecordAdmin):
+    list_display = ('id', 'prescription', 'day_number', 'administered_by', 'administered_at', 'is_entered_in_error')
+    list_filter = ('is_entered_in_error', 'administered_at')
+
+
+@admin.register(LabResult)
+class LabResultAdmin(ClinicalRecordAdmin):
+    list_display = ('id', 'patient', 'test_name', 'result_value', 'collected_at', 'is_entered_in_error')
+    list_filter = ('is_entered_in_error', 'collected_at')
+    search_fields = ('patient__first_name', 'patient__last_name', 'test_name')
+
+
+@admin.register(ScheduledItem)
+class ScheduledItemAdmin(ClinicalRecordAdmin):
+    list_display = ('id', 'patient', 'kind', 'title', 'due_at', 'status', 'is_entered_in_error')
+    list_filter = ('kind', 'status', 'is_entered_in_error')
+    search_fields = ('patient__first_name', 'patient__last_name', 'title')

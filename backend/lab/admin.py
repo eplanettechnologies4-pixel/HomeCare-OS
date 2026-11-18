@@ -6,6 +6,9 @@ class LabReportInline(admin.StackedInline):
     model = LabReport
     extra = 0
 
+    def has_delete_permission(self, request, obj=None):
+        return False
+
 
 @admin.register(LabTest)
 class LabTestAdmin(admin.ModelAdmin):
@@ -21,8 +24,14 @@ class LabOrderAdmin(admin.ModelAdmin):
     search_fields = ['patient__first_name', 'patient__last_name']
     inlines = [LabReportInline]
 
+    def has_delete_permission(self, request, obj=None):
+        return False
+
 
 @admin.register(LabReport)
 class LabReportAdmin(admin.ModelAdmin):
     list_display = ['id', 'lab_order', 'uploaded_by', 'flagged_abnormal', 'uploaded_at']
     list_filter = ['flagged_abnormal']
+
+    def has_delete_permission(self, request, obj=None):
+        return False

@@ -296,8 +296,9 @@ class StaffPortalHomeView(APIView):
 
             # Query recent vitals for patient details card and sparkline
             recent_patient_vitals = list(
-                VitalSign.objects.filter(patient=p).order_by('-recorded_at')[:6]
+                VitalSign.objects.filter(patient=p, is_entered_in_error=False).order_by('-recorded_at')[:6]
             )
+
             latest_v = recent_patient_vitals[0] if recent_patient_vitals else None
             latest_vitals_dict = None
             if latest_v:
@@ -337,7 +338,7 @@ class StaffPortalHomeView(APIView):
             chart_counts = {
                 'medication': p.prescriptions.count() if hasattr(p, 'prescriptions') else 0,
                 'nursing_notes': p.nurse_notes.count() if hasattr(p, 'nurse_notes') else 0,
-                'vitals': VitalSign.objects.filter(patient=p).count(),
+                'vitals': VitalSign.objects.filter(patient=p, is_entered_in_error=False).count(),
                 'doctor_notes': p.doctor_notes.count() if hasattr(p, 'doctor_notes') else 0,
                 'physiotherapy': p.physio_notes.count() if hasattr(p, 'physio_notes') else 0,
                 'procedure_requests': StaffRequest.objects.filter(patient=p, request_type=StaffRequest.RequestType.PROCEDURE_CHANGE).count(),
@@ -430,10 +431,12 @@ class StaffPortalHomeView(APIView):
             VitalSign.objects.filter(
                 patient_id__in=assigned_patient_ids,
                 recorded_at__gte=now - datetime.timedelta(hours=48),
+                is_entered_in_error=False,
             )
             .select_related('patient')
             .order_by('-recorded_at')[:10]
         )
+
 
         for v in recent_vitals:
             is_abnormal = False
@@ -828,7 +831,8 @@ class ClinicianPortalHomeView(APIView):
         }
 
         for pt in pt_qs[:30]:
-            latest_v = VitalSign.objects.filter(patient=pt).order_by('-recorded_at').first()
+            latest_v = VitalSign.objects.filter(patient=pt, is_entered_in_error=False).order_by('-recorded_at').first()
+
             if not latest_v or latest_v.recorded_at < vitals_cutoff:
                 high_alert_groups['no_recent_vitals'].append({
                     'patient_id': pt.id,

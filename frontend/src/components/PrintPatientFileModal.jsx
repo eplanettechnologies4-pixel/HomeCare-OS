@@ -242,19 +242,36 @@ export default function PrintPatientFileModal({ isOpen, onClose, patientData, gu
               </thead>
               <tbody>
                 {recentRecords && recentRecords.length > 0 ? (
-                  recentRecords.slice(0, 10).map((r, i) => (
-                    <tr key={i}>
-                      <td style={{ border: '1px solid #E5E7EB', padding: '5px' }}>
-                        {r.occurred_at ? new Date(r.occurred_at).toLocaleDateString('en-GB') : '-'}
-                      </td>
-                      <td style={{ border: '1px solid #E5E7EB', padding: '5px', fontWeight: 600 }}>{r.title}</td>
-                      <td style={{ border: '1px solid #E5E7EB', padding: '5px' }}>{r.author_name} ({r.author_role})</td>
-                      <td style={{ border: '1px solid #E5E7EB', padding: '5px' }}>{r.summary}</td>
-                      <td style={{ border: '1px solid #E5E7EB', padding: '5px', textAlign: 'center' }}>
-                        {r.is_signed ? '✓ Signed' : 'Draft'}
-                      </td>
-                    </tr>
-                  ))
+                  recentRecords.slice(0, 10).map((r, i) => {
+                    const isErr = !!r.is_entered_in_error;
+                    return (
+                      <tr
+                        key={i}
+                        style={isErr ? { textDecoration: 'line-through', opacity: 0.65, background: '#FEF2F2' } : {}}
+                      >
+                        <td style={{ border: '1px solid #E5E7EB', padding: '5px' }}>
+                          {r.occurred_at ? new Date(r.occurred_at).toLocaleDateString('en-GB') : '-'}
+                        </td>
+                        <td style={{ border: '1px solid #E5E7EB', padding: '5px', fontWeight: 600 }}>
+                          {r.title}
+                          {isErr && (
+                            <span style={{ display: 'block', fontSize: '9px', color: '#DC2626', fontWeight: 700, textDecoration: 'none' }}>
+                              [ENTERED IN ERROR: {r.entered_in_error_reason || 'Marked in error'} - {r.entered_in_error_by_name || 'Staff'}, {r.entered_in_error_at ? new Date(r.entered_in_error_at).toLocaleDateString('en-GB') : ''}]
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ border: '1px solid #E5E7EB', padding: '5px' }}>{r.author_name} ({r.author_role})</td>
+                        <td style={{ border: '1px solid #E5E7EB', padding: '5px' }}>{r.summary}</td>
+                        <td style={{ border: '1px solid #E5E7EB', padding: '5px', textAlign: 'center' }}>
+                          {isErr ? (
+                            <span style={{ color: '#DC2626', fontWeight: 700 }}>VOID (Error)</span>
+                          ) : (
+                            r.is_signed ? '✓ Signed' : 'Draft'
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
                 ) : (
                   <tr>
                     <td colSpan="5" style={{ border: '1px solid #E5E7EB', padding: '8px', textAlign: 'center', color: '#9CA3AF' }}>

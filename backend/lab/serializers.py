@@ -16,14 +16,22 @@ class LabTestSerializer(serializers.ModelSerializer):
 
 class LabReportSerializer(serializers.ModelSerializer):
     uploaded_by_name = serializers.CharField(source='uploaded_by.get_full_name', read_only=True)
+    entered_in_error_by_name = serializers.CharField(source='entered_in_error_by.get_full_name', read_only=True, default='')
 
     class Meta:
         model = LabReport
         fields = [
             'id', 'lab_order', 'result_file', 'result_data',
             'uploaded_by', 'uploaded_by_name', 'flagged_abnormal',
-            'clinical_remarks', 'uploaded_at'
+            'clinical_remarks', 'uploaded_at',
+            'is_entered_in_error', 'entered_in_error_by', 'entered_in_error_by_name',
+            'entered_in_error_at', 'entered_in_error_reason',
         ]
+        read_only_fields = [
+            'is_entered_in_error', 'entered_in_error_by', 'entered_in_error_by_name',
+            'entered_in_error_at', 'entered_in_error_reason',
+        ]
+
 
 
 class LabOrderListSerializer(serializers.ModelSerializer):

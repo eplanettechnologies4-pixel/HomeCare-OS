@@ -5,6 +5,8 @@ from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
 from patients.encryption import encrypt
+from .mixins import EnteredInErrorMixin, ClinicalManager
+
 
 
 def patient_photo_upload_path(instance, filename):
@@ -145,7 +147,7 @@ class Prescription(models.Model):
 
     LOCKED_CLINICAL_FIELDS = ('medication', 'dosage', 'frequency', 'route', 'date', 'duration_days')
 
-    patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name='prescriptions')
+    patient = models.ForeignKey(Patient, on_delete=models.PROTECT, related_name='prescriptions')
     booking = models.ForeignKey(
         'bookings.Booking', on_delete=models.SET_NULL, null=True, blank=True, related_name='prescriptions'
     )
@@ -223,6 +225,8 @@ class Prescription(models.Model):
         related_name='status_changed_prescriptions'
     )
     status_changed_at = models.DateTimeField(null=True, blank=True)
+
+    objects = ClinicalManager()
 
     class Meta:
         ordering = ['-date', '-created_at']
@@ -325,11 +329,12 @@ class Prescription(models.Model):
         self.document = value
 
 
-class VitalSign(models.Model):
-    patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name='vitals')
+class VitalSign(EnteredInErrorMixin, models.Model):
+    patient = models.ForeignKey(Patient, on_delete=models.PROTECT, related_name='vitals')
     recorded_by = models.ForeignKey('staff.StaffMember', on_delete=models.SET_NULL, null=True, blank=True)
     booking = models.ForeignKey('bookings.Booking', on_delete=models.SET_NULL, null=True, blank=True)
     recorded_at = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True, null=True, blank=True)
 
     blood_pressure_systolic = models.IntegerField(null=True, blank=True)
     blood_pressure_diastolic = models.IntegerField(null=True, blank=True)
@@ -347,8 +352,8 @@ class VitalSign(models.Model):
         ordering = ['-recorded_at']
 
 
-class NurseNote(models.Model):
-    patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name='nurse_notes')
+class NurseNote(EnteredInErrorMixin, models.Model):
+    patient = models.ForeignKey(Patient, on_delete=models.PROTECT, related_name='nurse_notes')
     recorded_by = models.ForeignKey('staff.StaffMember', on_delete=models.SET_NULL, null=True, blank=True)
     booking = models.ForeignKey('bookings.Booking', on_delete=models.SET_NULL, null=True, blank=True)
     recorded_at = models.DateTimeField(auto_now_add=True)
@@ -359,8 +364,8 @@ class NurseNote(models.Model):
         ordering = ['-recorded_at']
 
 
-class LabResult(models.Model):
-    patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name='lab_results')
+class LabResult(EnteredInErrorMixin, models.Model):
+    patient = models.ForeignKey(Patient, on_delete=models.PROTECT, related_name='lab_results')
     test_name = models.CharField(max_length=200)
     result_value = models.CharField(max_length=100)
     unit = models.CharField(max_length=50, blank=True)
@@ -425,7 +430,7 @@ class DailyReport(models.Model):
 
 # ── Mobile: MAR Administration (Form C dose-tick) ────────────────────────────
 
-class MARAdministration(models.Model):
+class MARAdministration(EnteredInErrorMixin, models.Model):
     """
     Records a single dose administration event on the MAR (Medication Administration Record) Sheet.
     Enforced unique per prescription per day to prevent double-administration.
@@ -433,7 +438,7 @@ class MARAdministration(models.Model):
     day_number follows Python's weekday() convention: 0=Mon, 1=Tue, … 6=Sun.
     """
     prescription = models.ForeignKey(
-        Prescription, on_delete=models.CASCADE, related_name='administrations'
+        Prescription, on_delete=models.PROTECT, related_name='administrations'
     )
     day_number = models.IntegerField(
         help_text='Day of week: 0=Monday … 6=Sunday (matches Python datetime.weekday())'
@@ -504,13 +509,11 @@ class SignedClinicalEntryMixin:
         super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
-        if self.is_signed:
-            raise ValidationError("Signed clinical entries are permanently locked and cannot be deleted.")
-        super().delete(*args, **kwargs)
+        raise ValidationError("Physical deletion of clinical entries is prohibited.")
 
 
 class DoctorNote(SignedClinicalEntryMixin, models.Model):
-    patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name='doctor_notes')
+    patient = models.ForeignKey(Patient, on_delete=models.PROTECT, related_name='doctor_notes')
     doctor = models.ForeignKey('staff.StaffMember', on_delete=models.SET_NULL, null=True, blank=True, related_name='authored_doctor_notes')
     booking = models.ForeignKey('bookings.Booking', on_delete=models.SET_NULL, null=True, blank=True, related_name='doctor_notes')
     notes = models.TextField(help_text='Clinical assessment, impression, and management notes')
@@ -522,6 +525,8 @@ class DoctorNote(SignedClinicalEntryMixin, models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    objects = ClinicalManager()
+
     class Meta:
         ordering = ['-created_at']
 
@@ -530,7 +535,7 @@ class DoctorNote(SignedClinicalEntryMixin, models.Model):
 
 
 class PhysioNote(SignedClinicalEntryMixin, models.Model):
-    patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name='physio_notes')
+    patient = models.ForeignKey(Patient, on_delete=models.PROTECT, related_name='physio_notes')
     physio = models.ForeignKey('staff.StaffMember', on_delete=models.SET_NULL, null=True, blank=True, related_name='authored_physio_notes')
     booking = models.ForeignKey('bookings.Booking', on_delete=models.SET_NULL, null=True, blank=True, related_name='physio_notes')
     session_notes = models.TextField()
@@ -543,6 +548,8 @@ class PhysioNote(SignedClinicalEntryMixin, models.Model):
     addenda = models.JSONField(default=list, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    objects = ClinicalManager()
 
     class Meta:
         ordering = ['-created_at']
@@ -559,7 +566,7 @@ class TherapyNote(SignedClinicalEntryMixin, models.Model):
         OCCUPATIONAL = 'occupational', 'Occupational Therapy'
         DIETETICS = 'dietetics', 'Dietetics'
 
-    patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name='therapy_notes')
+    patient = models.ForeignKey(Patient, on_delete=models.PROTECT, related_name='therapy_notes')
     author = models.ForeignKey('staff.StaffMember', on_delete=models.SET_NULL, null=True, blank=True, related_name='authored_therapy_notes')
     booking = models.ForeignKey('bookings.Booking', on_delete=models.SET_NULL, null=True, blank=True, related_name='therapy_notes')
     discipline = models.CharField(max_length=30, choices=Discipline.choices, default=Discipline.PHYSIOTHERAPY)
@@ -574,6 +581,8 @@ class TherapyNote(SignedClinicalEntryMixin, models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    objects = ClinicalManager()
+
     class Meta:
         ordering = ['-created_at']
 
@@ -582,7 +591,7 @@ class TherapyNote(SignedClinicalEntryMixin, models.Model):
 
 
 class ClinicalConsent(SignedClinicalEntryMixin, models.Model):
-    patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name='consents')
+    patient = models.ForeignKey(Patient, on_delete=models.PROTECT, related_name='consents')
     consent_type = models.CharField(max_length=100, default='General Care & Treatment')
     title = models.CharField(max_length=200)
     description = models.TextField(blank=True)
@@ -594,6 +603,8 @@ class ClinicalConsent(SignedClinicalEntryMixin, models.Model):
     signed_by = models.ForeignKey('staff.StaffMember', on_delete=models.SET_NULL, null=True, blank=True, related_name='signed_consents')
     addenda = models.JSONField(default=list, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = ClinicalManager()
 
     class Meta:
         ordering = ['-created_at']
@@ -629,7 +640,7 @@ class PatientActiveComplaint(models.Model):
         return f"Complaint #{self.pk} for {self.patient} ({status})"
 
 
-class ScheduledItem(models.Model):
+class ScheduledItem(EnteredInErrorMixin, models.Model):
     """
     Upcoming procedures, appointments, and blood tests for a patient.
     """
@@ -643,7 +654,7 @@ class ScheduledItem(models.Model):
         DONE = 'done', 'Done'
         CANCELLED = 'cancelled', 'Cancelled'
 
-    patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name='scheduled_items')
+    patient = models.ForeignKey(Patient, on_delete=models.PROTECT, related_name='scheduled_items')
     kind = models.CharField(max_length=30, choices=Kind.choices)
     title = models.CharField(max_length=255)
     due_at = models.DateTimeField()

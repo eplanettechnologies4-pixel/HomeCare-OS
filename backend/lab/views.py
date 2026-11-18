@@ -337,3 +337,17 @@ class LabOrderViewSet(viewsets.ModelViewSet):
             return Response({'error': 'Report not yet available for this order.'}, status=status.HTTP_404_NOT_FOUND)
 
         return Response(LabReportSerializer(report).data)
+
+    def destroy(self, request, *args, **kwargs):
+        order = self.get_object()
+        from patients.record_integrity import handle_clinical_record_destroy_blocked
+        return handle_clinical_record_destroy_blocked(request, order.patient, order, 'LabOrder')
+
+    @action(detail=True, methods=['post'], url_path=r'reports/(?P<report_id>\d+)/mark-entered-in-error')
+    def mark_report_entered_in_error(self, request, pk=None, report_id=None):
+        order = self.get_object()
+        from django.shortcuts import get_object_or_404
+        report = get_object_or_404(LabReport, pk=report_id, lab_order=order)
+        from patients.record_integrity import handle_mark_entered_in_error
+        return handle_mark_entered_in_error(request, order.patient, report, 'LabReport')
+

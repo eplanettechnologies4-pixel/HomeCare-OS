@@ -1,5 +1,8 @@
 from django.db import models
 from django.utils import timezone
+from django.core.exceptions import ValidationError
+from patients.mixins import EnteredInErrorMixin, ClinicalManager
+
 
 
 class LabTest(models.Model):
@@ -32,7 +35,7 @@ class LabOrderStatus(models.TextChoices):
 
 class LabOrder(models.Model):
     patient = models.ForeignKey(
-        'patients.Patient', on_delete=models.CASCADE, related_name='lab_orders'
+        'patients.Patient', on_delete=models.PROTECT, related_name='lab_orders'
     )
     tests = models.ManyToManyField(LabTest, related_name='orders')
     status = models.CharField(
@@ -60,8 +63,13 @@ class LabOrder(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    objects = ClinicalManager()
+
     class Meta:
         ordering = ['-created_at']
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Physical deletion of lab orders is prohibited.")
 
     def __str__(self):
         return f"Lab Order #{self.pk} - {self.patient.full_name} ({self.status})"
@@ -77,9 +85,9 @@ class LabOrder(models.Model):
         return total
 
 
-class LabReport(models.Model):
+class LabReport(EnteredInErrorMixin, models.Model):
     lab_order = models.ForeignKey(
-        LabOrder, on_delete=models.CASCADE, related_name='reports'
+        LabOrder, on_delete=models.PROTECT, related_name='reports'
     )
     result_file = models.FileField(upload_to='lab_reports/%Y/%m/', null=True, blank=True)
     result_data = models.JSONField(default=dict, blank=True)  # Structured parameters e.g. {"Hemoglobin": "13.2 g/dL"}

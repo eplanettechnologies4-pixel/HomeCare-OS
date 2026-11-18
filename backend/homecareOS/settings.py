@@ -442,3 +442,8 @@ ROSTER_CARE_MANAGER_CAN_EDIT = False
 # display window only, not a retention or deletion policy; needs organisation records-policy sign-off
 PATIENT_FILE_DEFAULT_RECORD_WINDOW_DAYS = 183
 
+# ── Clinical Record Edit Grace Window ───────────────────────────────────────
+# Clinical record edit grace window in minutes (Provisional)
+CLINICAL_RECORD_EDIT_WINDOW_MINUTES = 15  # PROVISIONAL - needs clinical policy sign-off
+
+

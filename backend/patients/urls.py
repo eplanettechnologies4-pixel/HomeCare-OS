@@ -16,6 +16,7 @@ from .patient_file_views import (
     PatientSingleRecordDetailView,
     PatientPhotoView,
     PatientRecordAddendumView,
+    PatientScheduledItemMarkErrorView,
 )
 
 router = DefaultRouter()
@@ -34,6 +35,8 @@ urlpatterns = [
     path('<int:pk>/active-complaint/', PatientActiveComplaintView.as_view(), name='patient-active-complaint'),
     path('<int:pk>/scheduled-items/', PatientScheduledItemView.as_view(), name='patient-scheduled-items'),
     path('<int:pk>/scheduled-items/<int:item_id>/', PatientScheduledItemView.as_view(), name='patient-scheduled-items-detail'),
+    path('<int:pk>/scheduled-items/<int:item_id>/mark-entered-in-error/', PatientScheduledItemMarkErrorView.as_view(), name='patient-scheduled-item-mark-error'),
+
     path('<int:pk>/records/<str:record_type>/', PatientRecordsTimelineView.as_view(), name='patient-records-timeline'),
     path('<int:pk>/records/<str:record_type>/<str:record_id>/', PatientSingleRecordDetailView.as_view(), name='patient-record-detail'),
     path('<int:pk>/records/<str:record_type>/<str:record_id>/addendum/', PatientRecordAddendumView.as_view(), name='patient-record-addendum'),

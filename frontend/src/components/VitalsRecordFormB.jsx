@@ -114,16 +114,19 @@ export default function VitalsRecordFormB({ patient, isReadOnly = false }) {
     setShowAddModal(false);
   };
 
-  // Recharts trend data (chronological order)
-  const chartData = [...vitals].reverse().map(v => ({
-    time: format(new Date(v.recorded_at), 'dd MMM HH:mm'),
-    sys: v.blood_pressure_systolic,
-    dia: v.blood_pressure_diastolic,
-    pulse: v.heart_rate,
-    temp: v.temperature,
-    spo2: v.spo2,
-    bsr: v.bsr
-  }));
+  // Recharts trend data (chronological order) - exclude entered in error
+  const chartData = [...vitals]
+    .filter(v => !v.is_entered_in_error)
+    .reverse()
+    .map(v => ({
+      time: format(new Date(v.recorded_at), 'dd MMM HH:mm'),
+      sys: v.blood_pressure_systolic,
+      dia: v.blood_pressure_diastolic,
+      pulse: v.heart_rate,
+      temp: v.temperature,
+      spo2: v.spo2,
+      bsr: v.bsr
+    }));
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -217,12 +220,25 @@ export default function VitalsRecordFormB({ patient, isReadOnly = false }) {
               {vitals.length > 0 ? (
                 vitals.map((v) => {
                   const hasAnomaly = v.anomalies && v.anomalies.length > 0;
+                  const isErr = !!v.is_entered_in_error;
                   return (
-                    <tr key={v.id} style={{ background: hasAnomaly ? '#fff5f5' : 'transparent' }}>
+                    <tr
+                      key={v.id}
+                      style={{
+                        background: isErr ? '#fef2f2' : (hasAnomaly ? '#fff5f5' : 'transparent'),
+                        opacity: isErr ? 0.6 : 1,
+                        textDecoration: isErr ? 'line-through' : 'none',
+                      }}
+                    >
                       {/* Date & Time */}
-                      <td className="ts font-semibold" style={{ color: 'var(--teal-800)' }}>
+                      <td className="ts font-semibold" style={{ color: isErr ? 'var(--status-red)' : 'var(--teal-800)' }}>
                         {format(new Date(v.recorded_at), 'dd MMM yyyy HH:mm')}
-                        {hasAnomaly && (
+                        {isErr && (
+                          <div style={{ color: 'var(--status-red)', fontSize: '0.68rem', fontWeight: 700, marginTop: 2, display: 'flex', alignItems: 'center', gap: 3, textDecoration: 'none' }}>
+                            <AlertTriangle size={11} /> Entered in error: {v.entered_in_error_reason || 'Marked in error'}
+                          </div>
+                        )}
+                        {!isErr && hasAnomaly && (
                           <div style={{ color: 'var(--status-red)', fontSize: '0.68rem', fontWeight: 700, marginTop: 2, display: 'flex', alignItems: 'center', gap: 3 }}>
                             <AlertTriangle size={11} /> {v.anomalies[0]}
                           </div>

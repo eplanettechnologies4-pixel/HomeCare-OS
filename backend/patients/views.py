@@ -3,7 +3,7 @@ import string
 
 from django.contrib.auth.models import User
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Q, ProtectedError
 from django.utils import timezone
 from django.shortcuts import get_object_or_404
 from rest_framework import viewsets, status
@@ -39,6 +39,12 @@ from homecareOS.clinician_permissions import (
     enforce_addendum_permission, CLINICAL_WRITE_ROLES,
     check_clinical_write_permission, enforce_clinical_write_permission,
 )
+from .record_integrity import (
+    handle_mark_entered_in_error,
+    validate_clinical_record_edit,
+    handle_clinical_record_destroy_blocked,
+)
+
 
 
 
@@ -308,6 +314,33 @@ class PatientViewSet(viewsets.ModelViewSet):
             return PatientListSerializer
         return PatientDetailSerializer
 
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        has_clinical_records = (
+            instance.vitals.exists() or
+            instance.nurse_notes.exists() or
+            instance.lab_results.exists() or
+            instance.prescriptions.exists() or
+            instance.doctor_notes.exists() or
+            instance.physio_notes.exists() or
+            instance.therapy_notes.exists() or
+            instance.consents.exists() or
+            instance.scheduled_items.exists() or
+            (hasattr(instance, 'lab_orders') and instance.lab_orders.exists())
+        )
+        if has_clinical_records:
+            return Response(
+                {'detail': 'Patient cannot be deleted because clinical records exist. Patient records are permanent and protected.'},
+                status=status.HTTP_409_CONFLICT
+            )
+        try:
+            return super().destroy(request, *args, **kwargs)
+        except ProtectedError:
+            return Response(
+                {'detail': 'Patient cannot be deleted because protected clinical records exist.'},
+                status=status.HTTP_409_CONFLICT
+            )
+
     @action(detail=True, methods=['get'])
     def timeline(self, request, pk=None):
         """All visits (bookings) for this patient in reverse chronological order."""
@@ -474,9 +507,19 @@ class PatientViewSet(viewsets.ModelViewSet):
                     {'error': 'Signed clinical entries are permanently locked and cannot be deleted.'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
-            note.delete()
-            log_chart_audit(request, patient, 'Delete Clinical Entry', 'Doctor Notes', record_id=note_id)
-            return Response(status=status.HTTP_204_NO_CONTENT)
+            AuditLog.objects.create(
+                actor=request.user,
+                actor_name=request.user.get_full_name() or request.user.username,
+                action='Clinical Delete Blocked',
+                target_user=f"Patient {patient.patient_code or patient.id}",
+                details=f"Blocked physical deletion on DoctorNote #{note_id}",
+                timestamp=timezone.now()
+            )
+            return Response(
+                {'detail': 'Physical deletion of clinical records is prohibited.'},
+                status=status.HTTP_405_METHOD_NOT_ALLOWED
+            )
+
 
         # PUT/PATCH: immutable if signed
         enforce_tab_permission(request.user, 'doctor_notes', action='write')
@@ -652,9 +695,19 @@ class PatientViewSet(viewsets.ModelViewSet):
                     {'error': 'Signed clinical entries are permanently locked and cannot be deleted.'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
-            note.delete()
-            log_chart_audit(request, patient, 'Delete Clinical Entry', 'Therapy Notes', record_id=note_id)
-            return Response(status=status.HTTP_204_NO_CONTENT)
+            AuditLog.objects.create(
+                actor=request.user,
+                actor_name=request.user.get_full_name() or request.user.username,
+                action='Clinical Delete Blocked',
+                target_user=f"Patient {patient.patient_code or patient.id}",
+                details=f"Blocked physical deletion on TherapyNote #{note_id}",
+                timestamp=timezone.now()
+            )
+            return Response(
+                {'detail': 'Physical deletion of clinical records is prohibited.'},
+                status=status.HTTP_405_METHOD_NOT_ALLOWED
+            )
+
 
         enforce_tab_permission(request.user, 'physiotherapy', action='write')
         if note.is_signed:
@@ -1103,6 +1156,35 @@ class PatientViewSet(viewsets.ModelViewSet):
 
         return Response(result)
 
+    @action(detail=True, methods=['post'], url_path=r'vitals/(?P<item_id>\d+)/mark-entered-in-error')
+    def mark_patient_vital_entered_in_error(self, request, pk=None, item_id=None):
+        patient = self.get_object()
+        check_clinician_patient_access(request.user, patient)
+        vital = get_object_or_404(VitalSign, pk=item_id, patient=patient)
+        return handle_mark_entered_in_error(request, patient, vital, 'VitalSign')
+
+    @action(detail=True, methods=['post'], url_path=r'nurse-notes/(?P<item_id>\d+)/mark-entered-in-error')
+    def mark_patient_nurse_note_entered_in_error(self, request, pk=None, item_id=None):
+        patient = self.get_object()
+        check_clinician_patient_access(request.user, patient)
+        note = get_object_or_404(NurseNote, pk=item_id, patient=patient)
+        return handle_mark_entered_in_error(request, patient, note, 'NurseNote')
+
+    @action(detail=True, methods=['post'], url_path=r'labs/(?P<item_id>\d+)/mark-entered-in-error')
+    def mark_patient_lab_result_entered_in_error(self, request, pk=None, item_id=None):
+        patient = self.get_object()
+        check_clinician_patient_access(request.user, patient)
+        lab_res = get_object_or_404(LabResult, pk=item_id, patient=patient)
+        return handle_mark_entered_in_error(request, patient, lab_res, 'LabResult')
+
+    @action(detail=True, methods=['post'], url_path=r'mar/(?P<item_id>\d+)/mark-entered-in-error')
+    def mark_patient_mar_entered_in_error(self, request, pk=None, item_id=None):
+        patient = self.get_object()
+        check_clinician_patient_access(request.user, patient)
+        mar = get_object_or_404(MARAdministration, pk=item_id, prescription__patient=patient)
+        return handle_mark_entered_in_error(request, patient, mar, 'MARAdministration')
+
+
     @action(detail=True, methods=['get', 'post'])
     def notes(self, request, pk=None):
         return self._handle_notes(request)
@@ -1524,6 +1606,20 @@ class VitalSignViewSet(viewsets.ModelViewSet):
             save_kwargs['recorded_by'] = staff_member
         serializer.save(**save_kwargs)
 
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        err_resp = validate_clinical_record_edit(request, instance.patient, instance, 'VitalSign')
+        if err_resp:
+            return err_resp
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        err_resp = validate_clinical_record_edit(request, instance.patient, instance, 'VitalSign')
+        if err_resp:
+            return err_resp
+        return super().partial_update(request, *args, **kwargs)
+
     def perform_update(self, serializer):
         patient = serializer.instance.patient
         if patient:
@@ -1531,12 +1627,15 @@ class VitalSignViewSet(viewsets.ModelViewSet):
         enforce_clinical_write_permission(self.request.user, 'vitals', patient=patient)
         serializer.save()
 
-    def perform_destroy(self, instance):
-        patient = instance.patient
-        if patient:
-            check_nurse_patient_access(self.request.user, patient)
-        enforce_clinical_write_permission(self.request.user, 'vitals', patient=patient)
-        instance.delete()
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        return handle_clinical_record_destroy_blocked(request, instance.patient, instance, 'VitalSign')
+
+    @action(detail=True, methods=['post'], url_path='mark-entered-in-error')
+    def mark_entered_in_error(self, request, pk=None):
+        instance = self.get_object()
+        return handle_mark_entered_in_error(request, instance.patient, instance, 'VitalSign')
+
 
     def get_object(self):
         user = self.request.user
@@ -1578,6 +1677,20 @@ class NurseNoteViewSet(viewsets.ModelViewSet):
         staff_member = getattr(self.request.user, 'staffmember', None) or getattr(self.request.user, 'staff_profile', None)
         serializer.save(recorded_by=staff_member)
 
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        err_resp = validate_clinical_record_edit(request, instance.patient, instance, 'NurseNote')
+        if err_resp:
+            return err_resp
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        err_resp = validate_clinical_record_edit(request, instance.patient, instance, 'NurseNote')
+        if err_resp:
+            return err_resp
+        return super().partial_update(request, *args, **kwargs)
+
     def perform_update(self, serializer):
         patient = serializer.instance.patient
         if patient:
@@ -1585,12 +1698,15 @@ class NurseNoteViewSet(viewsets.ModelViewSet):
         enforce_clinical_write_permission(self.request.user, 'nurse_notes', patient=patient)
         serializer.save()
 
-    def perform_destroy(self, instance):
-        patient = instance.patient
-        if patient:
-            check_nurse_patient_access(self.request.user, patient)
-        enforce_clinical_write_permission(self.request.user, 'nurse_notes', patient=patient)
-        instance.delete()
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        return handle_clinical_record_destroy_blocked(request, instance.patient, instance, 'NurseNote')
+
+    @action(detail=True, methods=['post'], url_path='mark-entered-in-error')
+    def mark_entered_in_error(self, request, pk=None):
+        instance = self.get_object()
+        return handle_mark_entered_in_error(request, instance.patient, instance, 'NurseNote')
+
 
     def get_object(self):
         user = self.request.user
@@ -1631,19 +1747,33 @@ class LabResultViewSet(viewsets.ModelViewSet):
         enforce_clinical_write_permission(self.request.user, 'lab_orders', patient=patient)
         serializer.save()
 
-    def perform_update(self, serializer):
-        patient = serializer.instance.patient
-        if patient:
-            check_nurse_patient_access(self.request.user, patient)
-        enforce_clinical_write_permission(self.request.user, 'lab_orders', patient=patient)
-        serializer.save()
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        AuditLog.objects.create(
+            actor=request.user,
+            actor_name=request.user.get_full_name() or request.user.username,
+            action='Clinical Edit Blocked',
+            target_user=f"Patient {instance.patient.patient_code or instance.patient.id}",
+            details=f"Blocked direct edit on LabResult #{instance.id}",
+            timestamp=timezone.now()
+        )
+        return Response(
+            {'detail': 'Direct edit of lab results is disabled. Mark as entered in error and enter a new result.'},
+            status=status.HTTP_405_METHOD_NOT_ALLOWED
+        )
 
-    def perform_destroy(self, instance):
-        patient = instance.patient
-        if patient:
-            check_nurse_patient_access(self.request.user, patient)
-        enforce_clinical_write_permission(self.request.user, 'lab_orders', patient=patient)
-        instance.delete()
+    def partial_update(self, request, *args, **kwargs):
+        return self.update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        return handle_clinical_record_destroy_blocked(request, instance.patient, instance, 'LabResult')
+
+    @action(detail=True, methods=['post'], url_path='mark-entered-in-error')
+    def mark_entered_in_error(self, request, pk=None):
+        instance = self.get_object()
+        return handle_mark_entered_in_error(request, instance.patient, instance, 'LabResult')
+
 
     def get_object(self):
         user = self.request.user

@@ -2600,21 +2600,24 @@ class PatientFileTests(APITestCase):
         res_get = self.client.get(f"/api/patients/notes/{note_id}/")
         self.assertEqual(res_get.status_code, status.HTTP_200_OK)
 
-        # Doctor gets 403 on PUT/PATCH and DELETE
+        # Doctor gets 403 on edit and 405 on delete (physical deletion prohibited)
         self.client.force_authenticate(user=self.users['doctor'])
         res_doc_put = self.client.patch(f"/api/patients/notes/{note_id}/", {'note': 'Doctor edit attempt'}, format='json')
         self.assertEqual(res_doc_put.status_code, status.HTTP_403_FORBIDDEN)
         res_doc_del = self.client.delete(f"/api/patients/notes/{note_id}/")
-        self.assertEqual(res_doc_del.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertIn(res_doc_del.status_code, (status.HTTP_403_FORBIDDEN, status.HTTP_405_METHOD_NOT_ALLOWED))
+
 
         # Nurse updates note -> 200
         self.client.force_authenticate(user=self.users['nurse'])
         res_nurse_put = self.client.patch(f"/api/patients/notes/{note_id}/", {'note': 'Updated bedside check'}, format='json')
         self.assertEqual(res_nurse_put.status_code, status.HTTP_200_OK)
 
-        # Nurse deletes note -> 204
+        # Nurse deletes note -> physical deletion prohibited (405 Method Not Allowed)
         res_nurse_del = self.client.delete(f"/api/patients/notes/{note_id}/")
-        self.assertEqual(res_nurse_del.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertEqual(res_nurse_del.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
+        self.assertTrue(NurseNote.objects.filter(pk=note_id).exists())
+
 
     def test_45_therapy_notes_and_physio_notes_rbac(self):
         """Therapy & Physio notes: matching therapist create/update, signed note immutability & addendum."""
@@ -2735,20 +2738,23 @@ class PatientFileTests(APITestCase):
         res_doc_get = self.client.get(f"/api/patients/vitals/{vital_id}/")
         self.assertEqual(res_doc_get.status_code, status.HTTP_200_OK)
 
-        # Doctor gets 403 on PUT/PATCH and DELETE
+        # Doctor gets 403 on PUT/PATCH and 405 on DELETE (physical deletion prohibited)
         res_doc_put = self.client.patch(f"/api/patients/vitals/{vital_id}/", {'heart_rate': 85}, format='json')
         self.assertEqual(res_doc_put.status_code, status.HTTP_403_FORBIDDEN)
         res_doc_del = self.client.delete(f"/api/patients/vitals/{vital_id}/")
-        self.assertEqual(res_doc_del.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertIn(res_doc_del.status_code, (status.HTTP_403_FORBIDDEN, status.HTTP_405_METHOD_NOT_ALLOWED))
+
 
         # Nurse updates vital/intake-output record -> 200
         self.client.force_authenticate(user=self.users['nurse'])
         res_nurse_patch = self.client.patch(f"/api/patients/vitals/{vital_id}/", {'heart_rate': 80, 'intake_ml': 650}, format='json')
         self.assertEqual(res_nurse_patch.status_code, status.HTTP_200_OK)
 
-        # Nurse deletes vital record -> 204
+        # Nurse deletes vital record -> physical deletion prohibited (405 Method Not Allowed)
         res_nurse_del = self.client.delete(f"/api/patients/vitals/{vital_id}/")
-        self.assertEqual(res_nurse_del.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertEqual(res_nurse_del.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
+        self.assertTrue(VitalSign.objects.filter(pk=vital_id).exists())
+
 
     def test_47_labs_ordering_collection_and_upload_rbac(self):
         """Lab orders, specimen collection (nurse, lab_tech) and report upload (lab_tech, doctor). Admin 403 on upload."""
@@ -2782,19 +2788,22 @@ class PatientFileTests(APITestCase):
         self.assertEqual(res_doc_lab.status_code, status.HTTP_201_CREATED)
         lab_res_id = res_doc_lab.data['id']
 
-        # Nurse gets 403 on PUT/PATCH and DELETE
+        # Nurse gets 403/405 on PUT/PATCH and DELETE
         self.client.force_authenticate(user=self.users['nurse'])
         res_nurse_put = self.client.patch(f"/api/patients/labs/{lab_res_id}/", {'result_value': '1.2'}, format='json')
-        self.assertEqual(res_nurse_put.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertIn(res_nurse_put.status_code, (status.HTTP_403_FORBIDDEN, status.HTTP_405_METHOD_NOT_ALLOWED))
         res_nurse_del = self.client.delete(f"/api/patients/labs/{lab_res_id}/")
-        self.assertEqual(res_nurse_del.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertIn(res_nurse_del.status_code, (status.HTTP_403_FORBIDDEN, status.HTTP_405_METHOD_NOT_ALLOWED))
 
-        # Doctor updates lab result -> 200, deletes -> 204
+
+        # Doctor edit and delete on LabResult disabled (405 Method Not Allowed; corrections use entered-in-error)
         self.client.force_authenticate(user=self.users['doctor'])
         res_doc_patch = self.client.patch(f"/api/patients/labs/{lab_res_id}/", {'result_value': '1.0'}, format='json')
-        self.assertEqual(res_doc_patch.status_code, status.HTTP_200_OK)
+        self.assertEqual(res_doc_patch.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
         res_doc_del = self.client.delete(f"/api/patients/labs/{lab_res_id}/")
-        self.assertEqual(res_doc_del.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertEqual(res_doc_del.status_code, status.HTTP_405_METHOD_NOT_ALLOWED)
+        self.assertTrue(LabResult.objects.filter(pk=lab_res_id).exists())
+
 
         # 2. Lab specimen collection: nurse and lab_tech allowed; others 403
         from lab.models import LabOrder, LabTest, LabOrderStatus

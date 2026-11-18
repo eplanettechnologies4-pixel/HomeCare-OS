@@ -69,6 +69,27 @@ def _format_author_role(staff):
     return getattr(staff, 'role', "-") or "-"
 
 
+def _error_fields(instance):
+    """Serializes entered-in-error audit fields if present on instance."""
+    if not instance:
+        return {
+            'is_entered_in_error': False,
+            'entered_in_error_by': None,
+            'entered_in_error_at': None,
+            'entered_in_error_reason': '',
+        }
+    by_user = getattr(instance, 'entered_in_error_by', None)
+    by_name = (by_user.get_full_name() or by_user.username) if by_user else None
+    err_at = getattr(instance, 'entered_in_error_at', None)
+    return {
+        'is_entered_in_error': getattr(instance, 'is_entered_in_error', False),
+        'entered_in_error_by': by_name,
+        'entered_in_error_at': err_at.isoformat() if err_at else None,
+        'entered_in_error_reason': getattr(instance, 'entered_in_error_reason', '') or '',
+    }
+
+
+
 def _resolve_patient_with_scoping(user, pk):
     """
     Resolves patient by pk and enforces strict scoping.
@@ -644,6 +665,36 @@ class PatientScheduledItemView(APIView):
 
         return Response(ScheduledItemSerializer(item).data)
 
+    def delete(self, request, pk, item_id=None):
+        patient = _resolve_patient_with_scoping(request.user, pk)
+        target_id = item_id or request.data.get('id')
+        if not target_id:
+            return Response({'detail': 'Scheduled item id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            item = patient.scheduled_items.get(pk=target_id)
+        except ScheduledItem.DoesNotExist:
+            raise NotFound("Scheduled item not found.")
+        from .record_integrity import handle_clinical_record_destroy_blocked
+        return handle_clinical_record_destroy_blocked(request, patient, item, 'ScheduledItem')
+
+
+class PatientScheduledItemMarkErrorView(APIView):
+    """
+    POST /api/patients/{id}/scheduled-items/{item_id}/mark-entered-in-error/
+    Marks a scheduled item as entered in error.
+    """
+    permission_classes = [IsAuthenticated, DenyNonClinicalRoles]
+
+    def post(self, request, pk, item_id):
+        patient = _resolve_patient_with_scoping(request.user, pk)
+        try:
+            item = patient.scheduled_items.get(pk=item_id)
+        except ScheduledItem.DoesNotExist:
+            raise NotFound("Scheduled item not found.")
+        from .record_integrity import handle_mark_entered_in_error
+        return handle_mark_entered_in_error(request, patient, item, 'ScheduledItem')
+
+
 
 class PatientRecordsTimelineView(APIView):
     """
@@ -771,6 +822,7 @@ class PatientRecordsTimelineView(APIView):
                     'signed_at': m.administered_at.isoformat(),
                     'has_addenda': False,
                     'addenda': [],
+                    **_error_fields(m),
                     'details': {
                         'prescription_id': m.prescription_id,
                         'medication': m.prescription.medication,
@@ -819,8 +871,10 @@ class PatientRecordsTimelineView(APIView):
                     'signed_at': v.recorded_at.isoformat(),
                     'has_addenda': False,
                     'addenda': [],
+                    **_error_fields(v),
                     'details': {
                         'bp_systolic': v.blood_pressure_systolic,
+
                         'bp_diastolic': v.blood_pressure_diastolic,
                         'heart_rate': v.heart_rate,
                         'temperature': str(v.temperature) if v.temperature else None,
@@ -861,8 +915,10 @@ class PatientRecordsTimelineView(APIView):
                     'signed_at': v.recorded_at.isoformat(),
                     'has_addenda': False,
                     'addenda': [],
+                    **_error_fields(v),
                     'details': {
                         'bp_systolic': v.blood_pressure_systolic,
+
                         'bp_diastolic': v.blood_pressure_diastolic,
                         'heart_rate': v.heart_rate,
                         'temperature': str(v.temperature) if v.temperature else None,
@@ -894,8 +950,10 @@ class PatientRecordsTimelineView(APIView):
                     'signed_at': v.recorded_at.isoformat(),
                     'has_addenda': False,
                     'addenda': [],
+                    **_error_fields(v),
                     'details': {
                         'intake_ml': v.intake_ml or 0,
+
                         'output_ml': v.output_ml or 0,
                         'net_balance_ml': (v.intake_ml or 0) - (v.output_ml or 0),
                         'notes': v.notes,
@@ -1000,6 +1058,7 @@ class PatientRecordsTimelineView(APIView):
                     'signed_at': lr.reported_at.isoformat() if lr.reported_at else None,
                     'has_addenda': False,
                     'addenda': [],
+                    **_error_fields(lr),
                     'details': {
                         'test_name': lr.test_name,
                         'result_value': lr.result_value,
@@ -1028,6 +1087,7 @@ class PatientRecordsTimelineView(APIView):
                     'signed_at': rep.uploaded_at.isoformat(),
                     'has_addenda': False,
                     'addenda': [],
+                    **_error_fields(rep),
                     'details': {
                         'result_data': rep.result_data,
                         'clinical_remarks': rep.clinical_remarks,
@@ -1081,6 +1141,7 @@ class PatientRecordsTimelineView(APIView):
                     'signed_at': nn.recorded_at.isoformat(),
                     'has_addenda': False,
                     'addenda': [],
+                    **_error_fields(nn),
                     'details': {
                         'note': nn.note,
                         'is_flagged': nn.is_flagged,
@@ -1152,7 +1213,14 @@ class PatientRecordsTimelineView(APIView):
                     }
                 })
 
+        for item in items:
+            item.setdefault('is_entered_in_error', False)
+            item.setdefault('entered_in_error_by', None)
+            item.setdefault('entered_in_error_at', None)
+            item.setdefault('entered_in_error_reason', '')
+
         # Search filter
+
         if q_search:
             filtered = []
             for item in items:
@@ -1349,6 +1417,7 @@ class PatientSingleRecordDetailView(APIView):
                 'is_signed': True,
                 'signed_at': v.recorded_at.isoformat(),
                 'addenda': [],
+                **_error_fields(v),
                 'details': {
                     'bp_systolic': v.blood_pressure_systolic,
                     'bp_diastolic': v.blood_pressure_diastolic,
@@ -1379,6 +1448,7 @@ class PatientSingleRecordDetailView(APIView):
                 'is_signed': True,
                 'signed_at': nn.recorded_at.isoformat(),
                 'addenda': [],
+                **_error_fields(nn),
                 'details': {
                     'note': nn.note,
                     'is_flagged': nn.is_flagged,
