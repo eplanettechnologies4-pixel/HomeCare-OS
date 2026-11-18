@@ -21,3 +21,5 @@ django-celery-beat==2.6.0         # periodic task scheduler using DatabaseSchedu
 
 requests>=2.31
 whitenoise==6.7.0
+
+kombu==5.4.2
