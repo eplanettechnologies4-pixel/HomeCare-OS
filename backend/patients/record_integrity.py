@@ -20,7 +20,7 @@ def get_record_author_user_id(instance):
             return staff.user_id
 
     # 2. User FK fields
-    for field in ('created_by', 'entered_by', 'uploaded_by', 'done_by'):
+    for field in ('created_by', 'entered_by', 'uploaded_by', 'done_by', 'author'):
         usr = getattr(instance, field, None)
         if usr and hasattr(usr, 'id'):
             return usr.id

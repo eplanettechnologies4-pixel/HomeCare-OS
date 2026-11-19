@@ -3,7 +3,7 @@ from rest_framework import serializers
 from .models import (
     Patient, Prescription, VitalSign, NurseNote, LabResult,
     DailyReport, ReportPhoto, MARAdministration,
-    PatientActiveComplaint, ScheduledItem,
+    PatientActiveComplaint, ScheduledItem, ShiftHandoverNote,
 )
 
 
@@ -35,6 +35,7 @@ class PatientSummarySerializer(serializers.ModelSerializer):
             'primary_diagnosis',
             'secondary_diagnoses',
             'allergies',
+            'allergy_status',
             'blood_type',
             'brief_history',
             'care_plan',
@@ -123,6 +124,7 @@ class PatientListSerializer(serializers.ModelSerializer):
             'primary_diagnosis',
             'secondary_diagnoses',
             'allergies',
+            'allergy_status',
             'blood_type',
             'brief_history',
             'care_plan',
@@ -186,12 +188,13 @@ class PatientDetailSerializer(serializers.ModelSerializer):
         fields = '__all__'
         read_only_fields = [
             'id', 'created_at', 'updated_at',
-            'brief_history', 'care_plan', 'history_care_plan_edits', 'photo'
+            'brief_history', 'care_plan', 'history_care_plan_edits', 'photo',
+            'allergy_status',
         ]
 
     def create(self, validated_data):
         from django.utils import timezone
-        for field in ('brief_history', 'care_plan', 'history_care_plan_edits', 'photo'):
+        for field in ('brief_history', 'care_plan', 'history_care_plan_edits', 'photo', 'allergy_status'):
             validated_data.pop(field, None)
 
         mr = validated_data.get('mr_number')
@@ -207,7 +210,7 @@ class PatientDetailSerializer(serializers.ModelSerializer):
         return super().create(validated_data)
 
     def update(self, instance, validated_data):
-        for field in ('brief_history', 'care_plan', 'history_care_plan_edits', 'photo'):
+        for field in ('brief_history', 'care_plan', 'history_care_plan_edits', 'photo', 'allergy_status'):
             validated_data.pop(field, None)
         return super().update(instance, validated_data)
 
@@ -242,6 +245,7 @@ class PatientDetailSerializer(serializers.ModelSerializer):
             'primary_diagnosis',
             'secondary_diagnoses',
             'allergies',
+            'allergy_status',
             'blood_type',
             'brief_history',
             'care_plan',
@@ -592,5 +596,41 @@ class ScheduledItemSerializer(serializers.ModelSerializer):
         if obj.status in [ScheduledItem.Status.DONE, ScheduledItem.Status.CANCELLED]:
             return False
         return obj.due_at < timezone.now()
+
+
+class ShiftHandoverNoteSerializer(serializers.ModelSerializer):
+    author_name = serializers.SerializerMethodField()
+    patient_name = serializers.CharField(source='patient.full_name', read_only=True)
+    patient_mr = serializers.CharField(source='patient.mr_number', read_only=True)
+    can_edit = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ShiftHandoverNote
+        fields = [
+            'id', 'patient', 'patient_name', 'patient_mr', 'author', 'author_name',
+            'shift_label', 'shift_date', 'text', 'created_at', 'updated_at',
+            'is_entered_in_error', 'entered_in_error_by', 'entered_in_error_at', 'entered_in_error_reason',
+            'can_edit',
+        ]
+        read_only_fields = [
+            'id', 'author', 'author_name', 'created_at', 'updated_at',
+            'is_entered_in_error', 'entered_in_error_by', 'entered_in_error_at', 'entered_in_error_reason',
+            'can_edit',
+        ]
+
+    def get_author_name(self, obj):
+        if obj.author:
+            return obj.author.get_full_name() or obj.author.username
+        return 'Staff Nurse'
+
+    def get_can_edit(self, obj):
+        request = self.context.get('request')
+        if not request or not request.user or not request.user.is_authenticated:
+            return False
+        if obj.is_entered_in_error:
+            return False
+        if obj.author_id != request.user.id:
+            return False
+        return obj.is_within_edit_window()
 
 

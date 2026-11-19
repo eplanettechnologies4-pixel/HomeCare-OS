@@ -7,6 +7,7 @@ import PatientSourceBadge from '../components/PatientSourceBadge';
 import PermanentPatientModal from '../components/PermanentPatientModal';
 import UniversalPrintButton from '../components/UniversalPrintButton';
 import { format, formatDistanceToNow } from 'date-fns';
+import { getAllergyInfo } from '../utils/allergyHelpers';
 
 export default function Patients() {
   const patients           = useStore((s) => s.patients);
@@ -355,7 +356,7 @@ function PatientDetail({ patient, bookings, onClose }) {
                 <div>
                   <div style={{ fontWeight: 700, fontSize: '0.875rem', color: 'var(--teal-700)', marginBottom: 8 }}>Clinical</div>
                   <div className="info-row"><span className="info-label">Diagnosis</span><span className="info-value" style={{ fontSize: '0.82rem' }}>{patient.primary_diagnosis}</span></div>
-                  <div className="info-row"><span className="info-label">Allergies</span><span className="info-value">{patient.allergies || 'NKDA'}</span></div>
+                  <div className="info-row"><span className="info-label">Allergies</span><span className="info-value">{getAllergyInfo(patient.allergy_status, patient.allergies).fullLabel}</span></div>
                   <div className="info-row"><span className="info-label">Care Manager</span><span className="info-value">{patient.care_manager_name}</span></div>
                 </div>
               </div>

@@ -4,16 +4,20 @@ import {
   Calendar, FileText, ChevronRight, Activity, Bell, CheckCircle2,
   PlusCircle, AlertCircle, RefreshCw, WifiOff,
   Stethoscope, Pill, ClipboardCheck, UserCheck, MessageSquare,
-  ArrowUpRight, HeartHandshake, Syringe, Car
+  ArrowUpRight, HeartHandshake, Syringe, Car, Search, Edit3, Trash2
 } from 'lucide-react';
 import useStore from '../store/useStore';
 import apiFetch from '../services/api';
-import StaffIdCard from '../components/StaffIdCard';
 import StaffOverviewHeader from '../components/StaffOverviewHeader';
+import SmartRosterSection from '../components/SmartRosterSection';
+import NurseDrawer from '../components/NurseDrawer';
 import { Modal, Input, Textarea, Button, Badge } from '../components/ui';
+import { getTierChipConfig } from '../utils/rosterHelpers';
+import { getAllergyInfo } from '../utils/allergyHelpers';
 
 export default function NurseHome() {
   const setActivePage = useStore((s) => s.setActivePage);
+  const setSelectedPatient = useStore((s) => s.setSelectedPatient);
   const currentUser = useStore((s) => s.currentUser);
 
   const [loading, setLoading] = useState(true);
@@ -31,19 +35,15 @@ export default function NurseHome() {
   const backoffDelayRef = useRef(30000);
   const prevVersionRef = useRef(null);
 
-  // Live timer state
-  const [currentTimeStr, setCurrentTimeStr] = useState('');
-  const [remainingSeconds, setRemainingSeconds] = useState(0);
+  // Search filter for patients when count > 6
+  const [patientSearch, setPatientSearch] = useState('');
 
-  // Inline Roster Tab state
-  const [rosterTab, setRosterTab] = useState('daily'); // 'daily' | 'weekly' | 'monthly'
+  // Drawer state for Today's Work bar
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerType, setDrawerType] = useState('patients_today');
+  const [drawerTitle, setDrawerTitle] = useState("Today's Work");
 
-  // Modals
-  const [showRosterModal, setShowRosterModal] = useState(false);
-  const [rosterView, setRosterView] = useState('weekly');
-  const [rosterShifts, setRosterShifts] = useState([]);
-  const [loadingRoster, setLoadingRoster] = useState(false);
-
+  // Overtime claim modals
   const [showClaimModal, setShowClaimModal] = useState(false);
   const [claimDate, setClaimDate] = useState(() => {
     const y = new Date();
@@ -59,8 +59,9 @@ export default function NurseHome() {
   const [claimHistory, setClaimHistory] = useState([]);
   const [loadingClaims, setLoadingClaims] = useState(false);
 
-  // Quick Action Request Modal
-  const [activeRequestModal, setActiveRequestModal] = useState(null); // 'supervisor_visit' | 'pharmacy_order' | 'consultation_booking'
+  // Quick Action Request Modal (Supervisor Visit / Pharmacy / Consultation)
+  const [activeRequestModal, setActiveRequestModal] = useState(null);
+  const [selectedRequestPatientId, setSelectedRequestPatientId] = useState('');
   const [reqUrgency, setReqUrgency] = useState('routine');
   const [reqNotes, setReqNotes] = useState('');
   const [reqDetails, setReqDetails] = useState('');
@@ -70,18 +71,34 @@ export default function NurseHome() {
   // View All Alerts Modal
   const [showAlertsModal, setShowAlertsModal] = useState(false);
 
-  // Fetch home dashboard payload with version hash comparison
+  // Shift Handover Modal State
+  const [showHandoverModal, setShowHandoverModal] = useState(false);
+  const [editingHandoverId, setEditingHandoverId] = useState(null);
+  const [handoverPatientId, setHandoverPatientId] = useState('');
+  const [handoverShiftLabel, setHandoverShiftLabel] = useState('Day Shift');
+  const [handoverShiftDate, setHandoverShiftDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [handoverText, setHandoverText] = useState('');
+  const [submittingHandover, setSubmittingHandover] = useState(false);
+  const [handoverFeedback, setHandoverFeedback] = useState(null);
+
+  // Mark Handover Entered-in-Error Modal
+  const [showHandoverErrorModal, setShowHandoverErrorModal] = useState(false);
+  const [errorTargetHandover, setErrorTargetHandover] = useState(null);
+  const [errorReason, setErrorReason] = useState('');
+  const [submittingError, setSubmittingError] = useState(false);
+  const [errorModalFeedback, setErrorModalFeedback] = useState(null);
+
+  // Patient Picker Modal for Quick Actions
+  const [patientPickerAction, setPatientPickerAction] = useState(null); // 'vitals' | 'mar' | 'notes' | 'io'
+
+  // Fetch home dashboard payload
   const fetchDashboardData = useCallback(async (isBackground = false) => {
-    // Prevent overlapping requests
     if (inFlightRef.current) return;
     inFlightRef.current = true;
 
     try {
-      if (!isBackground) {
-        setLoading(true);
-      } else {
-        setRefreshing(true);
-      }
+      if (!isBackground) setLoading(true);
+      else setRefreshing(true);
       setError(null);
 
       if (abortControllerRef.current) {
@@ -98,28 +115,13 @@ export default function NurseHome() {
       setIsOffline(false);
       setLastUpdatedTime(new Date());
 
-      // Reset exponential backoff on success
       backoffDelayRef.current = 30000;
-
-      // Version compare to avoid unnecessary re-renders
-      const newVersion = json.version || json.updated_at || (json.server_time ? `${json.duty?.state}-${json.patient?.id}-${(json.alerts || []).length}-${json.claims_summary?.pending}` : null);
-
-      if (dataRef.current && newVersion && newVersion === prevVersionRef.current) {
-        return;
-      }
-
-      prevVersionRef.current = newVersion;
+      prevVersionRef.current = json.version || json.updated_at || null;
       dataRef.current = json;
       setData(json);
-      if (json.duty?.time_left_seconds !== undefined) {
-        setRemainingSeconds(json.duty.time_left_seconds);
-      }
     } catch (err) {
       if (err.name === 'AbortError') return;
-
-      // Exponential backoff on errors: increase interval up to 60s
       backoffDelayRef.current = Math.min(60000, Math.max(5000, Math.floor(backoffDelayRef.current * 1.5)));
-
       if (isBackground) {
         setIsOffline(true);
       } else {
@@ -157,10 +159,7 @@ export default function NurseHome() {
         timerRef.current = setTimeout(async () => {
           if (!isMounted) return;
           if (document.visibilityState === 'visible') {
-            await Promise.all([
-              fetchDashboardData(true),
-              fetchEmployeeCard(),
-            ]);
+            await Promise.all([fetchDashboardData(true), fetchEmployeeCard()]);
           }
           scheduleNext();
         }, backoffDelayRef.current);
@@ -213,53 +212,6 @@ export default function NurseHome() {
     };
   }, [fetchDashboardData, fetchEmployeeCard]);
 
-  // Server-time synchronized live ticking
-  useEffect(() => {
-    if (!data?.server_time) return;
-
-    const serverMs = new Date(data.server_time).getTime();
-    const localStart = Date.now();
-    const offset = serverMs - localStart;
-
-    const interval = setInterval(() => {
-      const now = new Date(Date.now() + offset);
-      setCurrentTimeStr(
-        new Intl.DateTimeFormat('en-US', {
-          timeZone: 'Asia/Karachi',
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit',
-          hour12: true,
-        }).format(now)
-      );
-      setRemainingSeconds((prev) => Math.max(0, prev - 1));
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [data?.server_time]);
-
-  // Format seconds into HH:MM:SS
-  const formatCountdown = (secs) => {
-    const h = Math.floor(secs / 3600);
-    const m = Math.floor((secs % 3600) / 60);
-    const s = secs % 60;
-    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-  };
-
-  // Safe pickup time format parser (prevents "Invalid Date")
-  const formatPickupTime = (timeStr) => {
-    if (!timeStr || !String(timeStr).trim()) return 'Pickup not set';
-    const s = String(timeStr).trim();
-    if (/^\d{1,2}:\d{2}\s*(AM|PM|am|pm)$/i.test(s)) {
-      return s;
-    }
-    const d = new Date(s);
-    if (!isNaN(d.getTime())) {
-      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    }
-    return s;
-  };
-
   // Safe time-ago formatter
   const formatTimeAgo = (isoStr) => {
     if (!isoStr) return '';
@@ -275,21 +227,158 @@ export default function NurseHome() {
     }
   };
 
-  // Fetch Roster modal data
-  const openRoster = async (view) => {
-    setRosterView(view);
-    setShowRosterModal(true);
-    setLoadingRoster(true);
+  // Safe pickup time format parser
+  const formatPickupTime = (timeStr) => {
+    if (!timeStr || !String(timeStr).trim()) return 'Pickup not set';
+    const s = String(timeStr).trim();
+    if (/^\d{1,2}:\d{2}\s*(AM|PM|am|pm)$/i.test(s)) return s;
+    const d = new Date(s);
+    if (!isNaN(d.getTime())) {
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+    return s;
+  };
+
+  // Open Drawer helper
+  const openDrawer = (type, title) => {
+    setDrawerType(type);
+    setDrawerTitle(title);
+    setDrawerOpen(true);
+  };
+
+  // Patient navigation helper
+  const handleOpenPatient = (p, subview = null) => {
+    if (!p) return;
+    const ptObj = {
+      id: p.id || p.patient_id,
+      name: p.name || p.full_name,
+      patient_code: p.patient_code,
+      mr_number: p.mr_number,
+      age: p.age,
+      gender: p.gender,
+      gender_display: p.gender_display,
+      primary_diagnosis: p.primary_diagnosis,
+      allergy_status: p.allergy_status,
+      allergies: p.allergies,
+    };
+    setSelectedPatient(ptObj);
+    if (subview) {
+      try {
+        localStorage.setItem('preferred_patient_file_tile', subview);
+      } catch (e) { }
+    }
+    setActivePage('patient-file');
+  };
+
+  // Open Handover Create Modal
+  const openCreateHandover = (patientId = null) => {
+    setEditingHandoverId(null);
+    setHandoverPatientId(patientId || (data?.nurse_patients?.[0]?.id ? String(data.nurse_patients[0].id) : ''));
+    setHandoverShiftLabel('Day Shift');
+    setHandoverShiftDate(new Date().toISOString().split('T')[0]);
+    setHandoverText('');
+    setHandoverFeedback(null);
+    setShowHandoverModal(true);
+  };
+
+  // Open Handover Edit Modal
+  const openEditHandover = (h) => {
+    setEditingHandoverId(h.id);
+    setHandoverPatientId(String(h.patient || h.patient_id));
+    setHandoverShiftLabel(h.shift_label || 'Day Shift');
+    setHandoverShiftDate(h.shift_date || new Date().toISOString().split('T')[0]);
+    setHandoverText(h.text || '');
+    setHandoverFeedback(null);
+    setShowHandoverModal(true);
+  };
+
+  // Submit Handover (Create or Edit)
+  const handleSubmitHandover = async (e) => {
+    if (e) e.preventDefault();
+    if (!handoverText.trim()) {
+      setHandoverFeedback({ type: 'error', text: 'Handover text cannot be empty.' });
+      return;
+    }
+    setSubmittingHandover(true);
+    setHandoverFeedback(null);
+
     try {
-      const res = await apiFetch(`/staff-portal/roster/?view=${view}`);
-      if (res.ok) {
-        const json = await res.json();
-        setRosterShifts(json.shifts || []);
+      const isEdit = Boolean(editingHandoverId);
+      const url = isEdit ? `/staff-portal/handovers/${editingHandoverId}/` : '/staff-portal/handovers/';
+      const method = isEdit ? 'PATCH' : 'POST';
+      const body = isEdit
+        ? { text: handoverText.trim(), shift_label: handoverShiftLabel }
+        : {
+            patient_id: handoverPatientId,
+            text: handoverText.trim(),
+            shift_label: handoverShiftLabel,
+            shift_date: handoverShiftDate,
+          };
+
+      const res = await apiFetch(url, {
+        method,
+        body: JSON.stringify(body),
+      });
+      const resData = await res.json();
+      if (!res.ok) {
+        setHandoverFeedback({ type: 'error', text: resData.detail || 'Failed to save handover note.' });
+      } else {
+        setHandoverFeedback({ type: 'success', text: isEdit ? 'Handover note updated.' : 'Handover note created successfully.' });
+        fetchDashboardData(true);
+        setTimeout(() => {
+          setShowHandoverModal(false);
+          setHandoverFeedback(null);
+          setHandoverText('');
+          setEditingHandoverId(null);
+        }, 1200);
       }
-    } catch (e) {
-      console.error(e);
+    } catch (err) {
+      setHandoverFeedback({ type: 'error', text: 'Network error saving handover note.' });
     } finally {
-      setLoadingRoster(false);
+      setSubmittingHandover(false);
+    }
+  };
+
+  // Open Mark Handover Error Modal
+  const openMarkHandoverError = (h) => {
+    setErrorTargetHandover(h);
+    setErrorReason('');
+    setErrorModalFeedback(null);
+    setShowHandoverErrorModal(true);
+  };
+
+  // Submit Mark Handover Error
+  const handleSubmitHandoverError = async (e) => {
+    if (e) e.preventDefault();
+    if (!errorReason.trim()) {
+      setErrorModalFeedback({ type: 'error', text: 'A reason is required to mark a clinical record entered in error.' });
+      return;
+    }
+    setSubmittingError(true);
+    setErrorModalFeedback(null);
+
+    try {
+      const res = await apiFetch(`/staff-portal/handovers/${errorTargetHandover.id}/mark-entered-in-error/`, {
+        method: 'POST',
+        body: JSON.stringify({ reason: errorReason.trim() }),
+      });
+      const resData = await res.json();
+      if (!res.ok) {
+        setErrorModalFeedback({ type: 'error', text: resData.detail || 'Failed to mark record in error.' });
+      } else {
+        setErrorModalFeedback({ type: 'success', text: 'Record marked as entered in error.' });
+        fetchDashboardData(true);
+        setTimeout(() => {
+          setShowHandoverErrorModal(false);
+          setErrorModalFeedback(null);
+          setErrorTargetHandover(null);
+          setErrorReason('');
+        }, 1200);
+      }
+    } catch (err) {
+      setErrorModalFeedback({ type: 'error', text: 'Network error updating record.' });
+    } finally {
+      setSubmittingError(false);
     }
   };
 
@@ -343,17 +432,31 @@ export default function NurseHome() {
     }
   };
 
-  // Submit Coordinator Request (Supervisor Visit, Pharmacy Order, Consultation)
+  // Open Quick Request Modal
+  const openQuickRequest = (reqType) => {
+    setActiveRequestModal(reqType);
+    setSelectedRequestPatientId(data?.nurse_patients?.[0]?.id ? String(data.nurse_patients[0].id) : (data?.patient?.id ? String(data.patient.id) : ''));
+    setReqUrgency('routine');
+    setReqNotes('');
+    setReqDetails('');
+    setModalFeedback(null);
+  };
+
+  // Submit Quick Request (Supervisor Visit / Pharmacy / Consultation)
   const handleSubmitRequest = async (e) => {
     if (e) e.preventDefault();
-    if (!activeRequestModal || !data?.patient?.id) return;
+    const pid = selectedRequestPatientId || data?.patient?.id;
+    if (!activeRequestModal || !pid) {
+      setModalFeedback({ type: 'error', text: 'Please select a patient.' });
+      return;
+    }
     setSubmittingReq(true);
     setModalFeedback(null);
     try {
       const res = await apiFetch('/staff-portal/requests/', {
         method: 'POST',
         body: JSON.stringify({
-          patient: data.patient.id,
+          patient: pid,
           request_type: activeRequestModal,
           urgency: reqUrgency,
           notes: reqNotes,
@@ -380,17 +483,22 @@ export default function NurseHome() {
     }
   };
 
-  // Dynamic greeting based on server or local hour
-  const greeting = useMemo(() => {
-    const hr = new Date().getHours();
-    if (hr < 12) return 'Good morning';
-    if (hr < 17) return 'Good afternoon';
-    return 'Good evening';
-  }, []);
+  // Quick Action triggered with patient picker
+  const handleQuickActionClick = (actionKey) => {
+    const pts = data?.nurse_patients || [];
+    if (pts.length === 0) {
+      setActivePage('patient-file');
+      return;
+    }
+    if (pts.length === 1) {
+      handleOpenPatient(pts[0], actionKey === 'vitals' ? 'monitoring' : actionKey === 'mar' ? 'medications' : actionKey === 'notes' ? 'nursing_notes' : 'monitoring');
+      return;
+    }
+    setPatientPickerAction(actionKey);
+  };
 
+  // Data mappings
   const staff = data?.staff || {};
-  const duty = data?.duty || {};
-  const patient = data?.patient;
   const supervisor = data?.supervisor;
   const transport = data?.transport;
   const buddy = data?.buddy;
@@ -398,552 +506,46 @@ export default function NurseHome() {
   const alerts = data?.alerts || [];
   const allAlerts = data?.all_alerts || alerts;
   const claimsSummary = data?.claims_summary || { pending: 0, approved_this_month: 0 };
-  const quickStats = data?.quick_stats || {
-    patients_today: patient ? 1 : 0,
+  const nursePatients = data?.nurse_patients || (data?.patient ? [data.patient] : []);
+  const handovers = data?.handovers || [];
+  const todayWork = data?.today_work || {
+    patients_today: nursePatients.length,
+    vitals_overdue: 0,
+    active_medications: 0,
+    pending_verification: 0,
     pending_notes: 0,
-    active_alerts: alerts.length,
-    claims_pending: claimsSummary.pending,
+    alerts_count: alerts.length,
   };
 
-  const dutyState = duty.state || 'off_duty';
-  const isShiftEnded = duty.is_ended || (dutyState === 'on_duty' && remainingSeconds <= 0);
+  // Filtered patients for search
+  const filteredPatients = useMemo(() => {
+    if (!patientSearch.trim()) return nursePatients;
+    const q = patientSearch.toLowerCase().trim();
+    return nursePatients.filter(
+      (p) =>
+        (p.name || '').toLowerCase().includes(q) ||
+        (p.mr_number || '').toLowerCase().includes(q) ||
+        (p.patient_code || '').toLowerCase().includes(q)
+    );
+  }, [nursePatients, patientSearch]);
 
-  const shiftStart = duty?.shift?.start;
-  const shiftEnd = duty?.shift?.end;
-
-  // Circular progress ring computation
-  const totalShiftSeconds = useMemo(() => {
-    if (!shiftStart || !shiftEnd) return 43200; // default 12h
-    const diff = (new Date(shiftEnd) - new Date(shiftStart)) / 1000;
-    return diff > 0 ? diff : 43200;
-  }, [shiftStart, shiftEnd]);
-
-  const progressPercent = useMemo(() => {
-    if (dutyState === 'upcoming') return 0;
-    if (isShiftEnded) return 100;
-    const elapsed = Math.max(0, totalShiftSeconds - remainingSeconds);
-    return Math.min(100, Math.max(0, Math.round((elapsed / totalShiftSeconds) * 100)));
-  }, [dutyState, isShiftEnded, totalShiftSeconds, remainingSeconds]);
-
-  // SVG Ring values (radius 42, circumference ~263.89)
-  const ringRadius = 42;
-  const ringCircumference = 2 * Math.PI * ringRadius;
-  const ringOffset = ringCircumference - (progressPercent / 100) * ringCircumference;
-
-  // Duty status styling
-  const dutyPill = {
-    on_duty: { label: isShiftEnded ? 'Shift ended' : 'On duty', color: isShiftEnded ? '#4B5563' : '#059669', bg: isShiftEnded ? '#F3F4F6' : '#ECFDF5', dot: isShiftEnded ? '#9CA3AF' : '#10B981' },
-    upcoming: { label: 'Upcoming shift', color: '#D97706', bg: '#FFFBEB', dot: '#F59E0B' },
-    off_duty: { label: 'Off duty', color: '#4B5563', bg: '#F3F4F6', dot: '#9CA3AF' },
-  }[dutyState] || { label: 'Off duty', color: '#4B5563', bg: '#F3F4F6', dot: '#9CA3AF' };
-
-  // Today's formatted date
-  const todayDateStr = useMemo(() => {
-    return new Date().toLocaleDateString('en-US', {
-      weekday: 'long',
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    });
-  }, []);
-
-  // Format shift end time string
-  const shiftEndCaption = useMemo(() => {
-    if (isShiftEnded) return 'Shift ended';
-    if (dutyState === 'off_duty') return 'No active shift';
-    if (dutyState === 'upcoming') return `Starts ${shiftStart ? new Date(shiftStart).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'soon'}`;
-    if (shiftEnd) {
-      return `Shift ends ${new Date(shiftEnd).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-    }
-    return 'Shift in progress';
-  }, [isShiftEnded, dutyState, shiftEnd, shiftStart]);
-
-  // Loading skeleton state
   if (loading && !data) {
     return (
       <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 20 }}>
-        {/* Hero Band Skeleton */}
         <div style={{ height: 110, background: '#F3F4F6', borderRadius: 20, animation: 'pulse 1.5s infinite' }} />
-        {/* Full-width My Roster Skeleton */}
         <div style={{ height: 260, background: '#F3F4F6', borderRadius: 20, animation: 'pulse 1.5s infinite' }} />
-        {/* 2-Column Row Skeleton */}
-        <div className="nurse-overview-columns">
-          <div style={{ height: 480, background: '#F3F4F6', borderRadius: 20, animation: 'pulse 1.5s infinite' }} />
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <div style={{ height: 180, background: '#F3F4F6', borderRadius: 20, animation: 'pulse 1.5s infinite' }} />
-            <div style={{ height: 140, background: '#F3F4F6', borderRadius: 20, animation: 'pulse 1.5s infinite' }} />
-            <div style={{ height: 140, background: '#F3F4F6', borderRadius: 20, animation: 'pulse 1.5s infinite' }} />
-          </div>
-        </div>
+        <div style={{ height: 480, background: '#F3F4F6', borderRadius: 20, animation: 'pulse 1.5s infinite' }} />
       </div>
     );
   }
-
-  // Error state
-  if (error && !data) {
-    return (
-      <div style={{ padding: '32px 24px' }}>
-        <div className="card" style={{ padding: 28, borderLeft: '4px solid #EF4444', maxWidth: 600, margin: '20px auto', borderRadius: 20 }}>
-          <h3 style={{ color: '#EF4444', margin: '0 0 8px 0', fontSize: '18px', fontWeight: 600 }}>Dashboard Connection Error</h3>
-          <p style={{ color: '#4B5563', fontSize: '14px', lineHeight: 1.5 }}>{error}</p>
-          <Button variant="primary" isPill onClick={() => fetchDashboardData(false)} style={{ marginTop: 16 }}>
-            Retry Loading Dashboard
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  const nurseRosterCard = (
-    <section
-      className="card nurse-roster-fullwidth"
-      style={{
-        background: '#FFFFFF',
-        borderRadius: 20,
-        border: '1px solid #EEF0F4',
-        borderTop: '4px solid #8B5CF6',
-        boxShadow: '0 4px 20px rgba(139,92,246,0.06), 0 1px 3px rgba(0,0,0,0.03)',
-        padding: 22,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 16,
-      }}
-    >
-      {/* Header with Segmented Control */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ width: 36, height: 36, borderRadius: 10, background: 'linear-gradient(135deg, #8B5CF6, #6D28D9)', color: '#FFFFFF', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 8px rgba(109,40,217,0.25)' }}>
-            <Calendar size={18} />
-          </div>
-          <div>
-            <h2 style={{ fontSize: '16px', fontWeight: 700, color: '#1E1B4B', margin: 0 }}>
-              My Roster
-            </h2>
-            <div style={{ fontSize: '12px', color: '#6B7280' }}>
-              Assigned clinical shifts & support contacts
-            </div>
-          </div>
-        </div>
-
-        {/* Working Segmented Control: Daily / Weekly / Monthly */}
-        <div
-          style={{
-            display: 'inline-flex',
-            background: '#F3F4F6',
-            borderRadius: 10,
-            padding: 3,
-            border: '1px solid #E5E7EB',
-          }}
-        >
-          {['daily', 'weekly', 'monthly'].map((v) => (
-            <button
-              key={v}
-              type="button"
-              onClick={() => {
-                setRosterTab(v);
-                openRoster(v);
-              }}
-              style={{
-                fontSize: '13px',
-                fontWeight: 600,
-                padding: '5px 14px',
-                borderRadius: 8,
-                border: 'none',
-                background: rosterTab === v ? 'linear-gradient(135deg, #7C3AED, #6D28D9)' : 'transparent',
-                color: rosterTab === v ? '#FFFFFF' : '#4B5563',
-                boxShadow: rosterTab === v ? '0 2px 6px rgba(109,40,217,0.25)' : 'none',
-                cursor: 'pointer',
-                textTransform: 'capitalize',
-                transition: 'all 150ms ease',
-              }}
-            >
-              {v}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Roster View Content */}
-      {duty.shift ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {/* Active Shift Timing Banner */}
-          <div
-            style={{
-              background: 'linear-gradient(135deg, #FAF5FF 0%, #F5F3FF 100%)',
-              border: '1.5px solid #DDD6FE',
-              borderRadius: 14,
-              padding: '14px 18px',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              flexWrap: 'wrap',
-              gap: 8,
-            }}
-          >
-            <div>
-              <div style={{ fontSize: '12px', color: '#7C3AED', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                {duty.shift.type || 'Clinical Shift'}
-              </div>
-              <div style={{ fontSize: '16px', fontWeight: 700, color: '#1E1B4B', marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>
-                {new Date(duty.shift.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} –{' '}
-                {new Date(duty.shift.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-              </div>
-              <div style={{ fontSize: '13px', color: '#6B7280', marginTop: 2 }}>
-                Break marker: <strong>{duty.shift.break_minutes || 30} mins</strong>
-              </div>
-            </div>
-
-            <span
-              style={{
-                fontSize: '12px',
-                fontWeight: 700,
-                padding: '5px 12px',
-                borderRadius: 9999,
-                background: isShiftEnded ? '#F3F4F6' : '#ECFDF5',
-                color: isShiftEnded ? '#4B5563' : '#047857',
-                border: `1.5px solid ${isShiftEnded ? '#E5E7EB' : '#A7F3D0'}`,
-              }}
-            >
-              {isShiftEnded ? 'Shift ended' : '• Active Duty'}
-            </span>
-          </div>
-
-          {/* Daily Horizontal Timeline */}
-          {rosterTab === 'daily' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#9CA3AF' }}>
-                <span>08:00 AM</span>
-                <span>12:00 PM</span>
-                <span>04:00 PM</span>
-                <span>08:00 PM</span>
-              </div>
-              <div style={{ height: 10, background: '#F3F4F6', borderRadius: 9999, overflow: 'hidden', position: 'relative' }}>
-                <div
-                  style={{
-                    position: 'absolute',
-                    left: '12%',
-                    width: '68%',
-                    height: '100%',
-                    background: 'linear-gradient(90deg, #8B5CF6, #6D28D9)',
-                    borderRadius: 9999,
-                  }}
-                />
-              </div>
-            </div>
-          )}
-
-          {/* Weekly / Monthly chips fallback */}
-          {rosterTab !== 'daily' && (
-            <div style={{ padding: '10px 14px', background: '#F9FAFB', borderRadius: 10, fontSize: '13px', color: '#4B5563', border: '1px solid #E5E7EB' }}>
-              Showing {rosterTab} schedule for registered staff nurse. Click &quot;Open Full Roster&quot; to view calendar.
-            </div>
-          )}
-        </div>
-      ) : (
-        <div style={{ textAlign: 'center', padding: '24px 16px', background: '#F9FAFB', borderRadius: 14, border: '1px dashed #E5E7EB' }}>
-          <Calendar size={28} style={{ color: '#9CA3AF', marginBottom: 8, margin: '0 auto' }} />
-          <div style={{ fontSize: '14px', fontWeight: 600, color: '#374151' }}>
-            No shift scheduled for today
-          </div>
-          <div style={{ fontSize: '13px', color: '#6B7280', marginTop: 4 }}>
-            Check weekly or monthly view for upcoming scheduled duties.
-          </div>
-        </div>
-      )}
-
-      {/* 3-Column Support Contacts Grid */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
-          gap: 12,
-        }}
-      >
-        {/* 1. Supervisor Contact */}
-        <div
-          className="card"
-          style={{
-            background: 'linear-gradient(145deg, #FFFFFF 0%, #FAF5FF 100%)',
-            borderRadius: 16,
-            border: '1.5px solid #E9D5FF',
-            borderTop: '3px solid #7C3AED',
-            boxShadow: '0 2px 10px rgba(124,58,237,0.06)',
-            padding: '14px 16px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 10,
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ width: 38, height: 38, borderRadius: 12, background: 'linear-gradient(135deg, #7C3AED, #6D28D9)', color: '#FFFFFF', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '13px', boxShadow: '0 2px 8px rgba(109,40,217,0.2)' }}>
-              {supervisor?.name?.slice(0, 2).toUpperCase() || 'SP'}
-            </div>
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <div style={{ fontSize: '14px', fontWeight: 700, color: '#1E1B4B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {supervisor?.name || 'Dr. Sara Ahmed'}
-              </div>
-              <div style={{ fontSize: '12px', color: '#6D28D9', fontWeight: 600 }}>Clinical Supervisor</div>
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', gap: 8 }}>
-            <a
-              href={`tel:${supervisor?.phone || '+92-300-1112233'}`}
-              className="btn btn-sm"
-              style={{ flex: 1, padding: '5px 8px', fontSize: '12px', fontWeight: 600, color: '#6D28D9', background: '#EDE9FE', border: '1px solid #DDD6FE', borderRadius: 8, textAlign: 'center', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}
-              title="Call Supervisor"
-              aria-label="Call Supervisor"
-            >
-              <Phone size={13} /> Call
-            </a>
-            <a
-              href={`https://wa.me/${(supervisor?.phone || '923001112233').replace(/[^0-9]/g, '')}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="btn btn-sm"
-              style={{ flex: 1, padding: '5px 8px', fontSize: '12px', fontWeight: 600, color: '#047857', background: '#D1FAE5', border: '1px solid #A7F3D0', borderRadius: 8, textAlign: 'center', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}
-              title="WhatsApp Supervisor"
-              aria-label="WhatsApp Supervisor"
-            >
-              <MessageSquare size={13} /> Chat
-            </a>
-          </div>
-        </div>
-
-        {/* 2. Transport Driver */}
-        <div
-          className="card"
-          style={{
-            background: 'linear-gradient(145deg, #FFFFFF 0%, #EFF6FF 100%)',
-            borderRadius: 16,
-            border: '1.5px solid #BFDBFE',
-            borderTop: '3px solid #2563EB',
-            boxShadow: '0 2px 10px rgba(37,99,235,0.06)',
-            padding: '14px 16px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 10,
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ width: 38, height: 38, borderRadius: 12, background: 'linear-gradient(135deg, #3B82F6, #1D4ED8)', color: '#FFFFFF', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '14px', boxShadow: '0 2px 8px rgba(37,99,235,0.2)' }}>
-              <Car size={18} />
-            </div>
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <div style={{ fontSize: '14px', fontWeight: 700, color: '#1E1B4B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {transport?.driver_name || 'Nadeem Khan'}
-              </div>
-              <div style={{ fontSize: '12px', color: '#1D4ED8', fontWeight: 600 }}>
-                {formatPickupTime(transport?.pickup_time)}
-              </div>
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', gap: 8 }}>
-            <a
-              href={`tel:${transport?.driver_phone || '+92-300-4445555'}`}
-              className="btn btn-sm"
-              style={{ flex: 1, padding: '5px 8px', fontSize: '12px', fontWeight: 600, color: '#1D4ED8', background: '#DBEAFE', border: '1px solid #BFDBFE', borderRadius: 8, textAlign: 'center', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}
-              title="Call Transport Driver"
-              aria-label="Call Driver"
-            >
-              <Phone size={13} /> Call
-            </a>
-            <a
-              href={`https://wa.me/${(transport?.driver_phone || '923004445555').replace(/[^0-9]/g, '')}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="btn btn-sm"
-              style={{ flex: 1, padding: '5px 8px', fontSize: '12px', fontWeight: 600, color: '#047857', background: '#D1FAE5', border: '1px solid #A7F3D0', borderRadius: 8, textAlign: 'center', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}
-              title="WhatsApp Transport Driver"
-              aria-label="WhatsApp Driver"
-            >
-              <MessageSquare size={13} /> Chat
-            </a>
-          </div>
-        </div>
-
-        {/* 3. Buddy Staff */}
-        <div
-          className="card"
-          style={{
-            background: 'linear-gradient(145deg, #FFFFFF 0%, #ECFDF5 100%)',
-            borderRadius: 16,
-            border: '1.5px solid #A7F3D0',
-            borderTop: '3px solid #059669',
-            boxShadow: '0 2px 10px rgba(5,150,105,0.06)',
-            padding: '14px 16px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 10,
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ width: 38, height: 38, borderRadius: 12, background: 'linear-gradient(135deg, #10B981, #047857)', color: '#FFFFFF', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '13px', boxShadow: '0 2px 8px rgba(5,150,105,0.2)' }}>
-              {buddy?.name?.slice(0, 2).toUpperCase() || 'BD'}
-            </div>
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <div style={{ fontSize: '14px', fontWeight: 700, color: '#1E1B4B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {buddy?.name || 'Bob Ahmed'}
-              </div>
-              <div style={{ fontSize: '12px', color: '#047857', fontWeight: 600 }}>Buddy Staff Nurse</div>
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', gap: 8 }}>
-            <a
-              href={`tel:${buddy?.phone || '+92-300-2222222'}`}
-              className="btn btn-sm"
-              style={{ flex: 1, padding: '5px 8px', fontSize: '12px', fontWeight: 600, color: '#0F766E', background: '#CCFBF1', border: '1px solid #99F6E4', borderRadius: 8, textAlign: 'center', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}
-              title="Call Buddy Nurse"
-              aria-label="Call Buddy"
-            >
-              <Phone size={13} /> Call
-            </a>
-            <a
-              href={`https://wa.me/${(buddy?.phone || '923002222222').replace(/[^0-9]/g, '')}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="btn btn-sm"
-              style={{ flex: 1, padding: '5px 8px', fontSize: '12px', fontWeight: 600, color: '#047857', background: '#D1FAE5', border: '1px solid #A7F3D0', borderRadius: 8, textAlign: 'center', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}
-              title="WhatsApp Buddy Nurse"
-              aria-label="WhatsApp Buddy"
-            >
-              <MessageSquare size={13} /> Chat
-            </a>
-          </div>
-        </div>
-      </div>
-
-      {/* ── Standalone "Time left for duty" card (moved DOWN below roster, above Shift handover notes) ── */}
-      <div
-        className="card nurse-time-left-card"
-        style={{
-          background: 'linear-gradient(135deg, #FFFFFF 0%, #FAF5FF 100%)',
-          border: '1.5px solid #DDD6FE',
-          borderRadius: 16,
-          padding: '14px 18px',
-          boxShadow: '0 4px 14px rgba(109,40,217,0.06)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          flexWrap: 'wrap',
-          gap: 16,
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          {dutyState !== 'off_duty' ? (
-            <div style={{ position: 'relative', width: 80, height: 80, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <svg width="80" height="80" viewBox="0 0 94 94" style={{ transform: 'rotate(-90deg)' }}>
-                <circle cx="47" cy="47" r={ringRadius} stroke="#EDE9FE" strokeWidth="7" fill="none" />
-                <circle
-                  cx="47"
-                  cy="47"
-                  r={ringRadius}
-                  stroke={isShiftEnded ? '#9CA3AF' : '#7C3AED'}
-                  strokeWidth="7"
-                  strokeDasharray={ringCircumference}
-                  strokeDashoffset={ringOffset}
-                  strokeLinecap="round"
-                  fill="none"
-                  style={{ transition: 'stroke-dashoffset 600ms ease' }}
-                />
-              </svg>
-              <div style={{ position: 'absolute', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                <span style={{ fontSize: '13px', fontWeight: 700, color: isShiftEnded ? '#6B7280' : '#7C3AED', fontVariantNumeric: 'tabular-nums' }}>
-                  {progressPercent}%
-                </span>
-                <span style={{ fontSize: '10px', color: '#9CA3AF', textTransform: 'uppercase' }}>Shift</span>
-              </div>
-            </div>
-          ) : (
-            <div style={{ width: 44, height: 44, borderRadius: 12, background: '#F3F4F6', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6B7280' }}>
-              <Clock size={22} />
-            </div>
-          )}
-
-          <div>
-            <div style={{ fontSize: '12px', color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 700 }}>
-              {dutyState === 'off_duty' ? 'Duty Status' : (isShiftEnded ? 'Duty Completed' : dutyState === 'upcoming' ? 'Shift Starts In' : 'Time Left for Duty')}
-            </div>
-            <div
-              aria-live="off"
-              style={{
-                fontSize: dutyState === 'off_duty' ? '22px' : '30px',
-                fontWeight: 800,
-                color: dutyState === 'off_duty' ? '#4B5563' : (isShiftEnded ? '#6B7280' : dutyState === 'upcoming' ? '#D97706' : '#6D28D9'),
-                fontVariantNumeric: 'tabular-nums',
-                lineHeight: 1.2,
-                letterSpacing: '-0.02em',
-              }}
-            >
-              {dutyState === 'off_duty' ? 'Off duty' : (isShiftEnded ? 'Shift ended' : formatCountdown(remainingSeconds))}
-            </div>
-            <div style={{ fontSize: '12px', color: '#6B7280', marginTop: 2, fontWeight: 500 }}>
-              {shiftEndCaption}
-            </div>
-          </div>
-        </div>
-
-        {dutyState !== 'off_duty' && !isShiftEnded && (
-          <span
-            style={{
-              fontSize: '11px',
-              fontWeight: 700,
-              padding: '4px 10px',
-              borderRadius: 999,
-              background: '#ECFDF5',
-              color: '#059669',
-              border: '1px solid #A7F3D0',
-            }}
-          >
-            ● Active Shift
-          </span>
-        )}
-      </div>
-
-      {/* Shift Handover Notes Card */}
-      <div
-        style={{
-          background: 'linear-gradient(135deg, #FFFBEB 0%, #FEF3C7 100%)',
-          borderRadius: 16,
-          border: '1.5px solid #FCD34D',
-          borderLeft: '5px solid #F59E0B',
-          padding: '14px 18px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 6,
-          boxShadow: '0 2px 8px rgba(245,158,11,0.06)',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7, color: '#B45309', fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-          <div style={{ width: 22, height: 22, borderRadius: 6, background: '#FDE68A', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <FileText size={13} />
-          </div>
-          <span>Shift Handover Notes</span>
-        </div>
-        <div
-          style={{
-            fontSize: '13px',
-            color: '#78350F',
-            lineHeight: 1.5,
-            maxHeight: 70,
-            overflowY: 'auto',
-          }}
-        >
-          {data?.handover_notes || 'Standard clinical bedside care. Maintain strict vital signs monitoring and timely medication administration according to MAR.'}
-        </div>
-      </div>
-    </section>
-  );
 
   return (
     <div
       style={{
         display: 'flex',
         flexDirection: 'column',
-        gap: 16,
-        padding: '16px 24px 24px',
+        gap: 20,
+        padding: '16px 24px 32px',
         backgroundColor: '#FAFAFA',
         minHeight: 'calc(100vh - 72px)',
         boxSizing: 'border-box',
@@ -972,14 +574,15 @@ export default function NurseHome() {
         </div>
       )}
 
-      {/* ── SECTION A: Shared Staff Overview Header (Slim Greeting Strip + ID Card & Roster Grid) ── */}
+      {/* ── 1. Shared Staff Overview Top Bar & Smart Roster (ID card & Roster Grid) ── */}
       <StaffOverviewHeader
         staff={staff}
         employeeCard={employeeCard}
         roleTitle="Nurses Portal"
         badgeColor="#7C3AED"
-        dutyStatus={dutyPill.label}
+        dutyStatus={data?.roster_summary?.duty_status?.status || (data?.duty?.state === 'on_duty' ? 'On duty' : 'Off duty')}
         workingHours={officeHours}
+        employmentStatus={data?.employment_status}
         lastUpdated={lastUpdatedTime ? lastUpdatedTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null}
         onRefresh={() => {
           fetchDashboardData(true);
@@ -987,445 +590,533 @@ export default function NurseHome() {
         }}
         onHelpClick={() => setActivePage('call-help')}
         helpButtonLabel="Call Help"
-        rosterCard={nurseRosterCard}
+        rosterCard={<SmartRosterSection rosterSummary={data?.roster_summary} />}
       />
 
-      {/* ── 2-COLUMN LAYOUT: Main Content Left, Narrow Sticky Right Column (StaffIdCard) ── */}
-      <div className="nurse-layout-grid">
-        <div className="nurse-main-column">
+      {/* ── 2. Slim "Today's Work" Bar (6 Clickable Stats Opening Slide-over Drawer) ── */}
+      <section
+        className="card nurse-today-work-bar"
+        style={{
+          background: '#FFFFFF',
+          borderRadius: 18,
+          border: '1px solid #EEF0F4',
+          boxShadow: '0 2px 12px rgba(0,0,0,0.03)',
+          padding: '18px 22px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 14,
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ width: 34, height: 34, borderRadius: 10, background: '#FAF5FF', color: '#7C3AED', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Activity size={18} />
+            </div>
+            <div>
+              <h2 style={{ fontSize: '15px', fontWeight: 700, color: '#1E1B4B', margin: 0 }}>
+                Today&apos;s Work
+              </h2>
+              <div style={{ fontSize: '12px', color: '#6B7280' }}>
+                Assigned patient queue and clinical action triggers
+              </div>
+            </div>
+          </div>
+          <span style={{ fontSize: '12px', color: '#6D28D9', fontWeight: 600 }}>
+            Click any metric to view patient list
+          </span>
+        </div>
 
-      {/* ── SECTION C: 2-Column Row (My Patient on left, Alerts/Actions/Claims/ID on right) ── */}
-      <div className="nurse-overview-columns">
-        {/* ══════════════════════════════════════════════════════════════════
-            COLUMN LEFT (C): My Patient Card & Chart Shortcut Grid
-            ══════════════════════════════════════════════════════════════════ */}
-        <div className="nurse-col-left" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {/* "My Patient" Card */}
-          <div
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+            gap: 12,
+          }}
+        >
+          {/* Stat 1: My Patients Today */}
+          <button
+            type="button"
+            onClick={() => openDrawer('patients_today', 'My Patients Today')}
+            className="today-stat-btn"
+            style={{
+              padding: '12px 14px',
+              borderRadius: 12,
+              border: '1.5px solid #DDD6FE',
+              background: 'linear-gradient(135deg, #FFFFFF, #FAF5FF)',
+              textAlign: 'left',
+              cursor: 'pointer',
+              transition: 'transform 120ms ease, box-shadow 120ms ease',
+            }}
+          >
+            <div style={{ fontSize: '12px', color: '#6D28D9', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              My Patients Today
+            </div>
+            <div style={{ fontSize: '24px', fontWeight: 800, color: '#1E1B4B', marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>
+              {todayWork.patients_today}
+            </div>
+            <div style={{ fontSize: '11px', color: '#6B7280', marginTop: 2 }}>Assigned visits today</div>
+          </button>
+
+          {/* Stat 2: Vitals Overdue */}
+          <button
+            type="button"
+            onClick={() => openDrawer('vitals_overdue', 'Vitals Overdue')}
+            className="today-stat-btn"
+            style={{
+              padding: '12px 14px',
+              borderRadius: 12,
+              border: `1.5px solid ${todayWork.vitals_overdue > 0 ? '#FECACA' : '#E5E7EB'}`,
+              background: todayWork.vitals_overdue > 0 ? 'linear-gradient(135deg, #FFFFFF, #FEF2F2)' : '#FFFFFF',
+              textAlign: 'left',
+              cursor: 'pointer',
+              transition: 'transform 120ms ease, box-shadow 120ms ease',
+            }}
+          >
+            <div style={{ fontSize: '12px', color: todayWork.vitals_overdue > 0 ? '#DC2626' : '#6B7280', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Vitals Overdue
+            </div>
+            <div style={{ fontSize: '24px', fontWeight: 800, color: todayWork.vitals_overdue > 0 ? '#DC2626' : '#1E1B4B', marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>
+              {todayWork.vitals_overdue}
+            </div>
+            <div style={{ fontSize: '11px', color: '#6B7280', marginTop: 2 }}>&gt; 4 hours without log</div>
+          </button>
+
+          {/* Stat 3: Active Medications */}
+          <button
+            type="button"
+            onClick={() => openDrawer('active_medications', 'Active Medications')}
+            className="today-stat-btn"
+            style={{
+              padding: '12px 14px',
+              borderRadius: 12,
+              border: '1.5px solid #BAE6FD',
+              background: 'linear-gradient(135deg, #FFFFFF, #F0F9FF)',
+              textAlign: 'left',
+              cursor: 'pointer',
+              transition: 'transform 120ms ease, box-shadow 120ms ease',
+            }}
+          >
+            <div style={{ fontSize: '12px', color: '#0369A1', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Active Medications
+            </div>
+            <div style={{ fontSize: '24px', fontWeight: 800, color: '#0369A1', marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>
+              {todayWork.active_medications}
+            </div>
+            <div style={{ fontSize: '11px', color: '#6B7280', marginTop: 2 }}>Verified MAR prescriptions</div>
+          </button>
+
+          {/* Stat 4: Awaiting Verification */}
+          <button
+            type="button"
+            onClick={() => openDrawer('pending_verification', 'Prescriptions Awaiting Verification')}
+            className="today-stat-btn"
+            style={{
+              padding: '12px 14px',
+              borderRadius: 12,
+              border: `1.5px solid ${todayWork.pending_verification > 0 ? '#FDE68A' : '#E5E7EB'}`,
+              background: todayWork.pending_verification > 0 ? 'linear-gradient(135deg, #FFFFFF, #FFFBEB)' : '#FFFFFF',
+              textAlign: 'left',
+              cursor: 'pointer',
+              transition: 'transform 120ms ease, box-shadow 120ms ease',
+            }}
+          >
+            <div style={{ fontSize: '12px', color: todayWork.pending_verification > 0 ? '#B45309' : '#6B7280', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Awaiting Verification
+            </div>
+            <div style={{ fontSize: '24px', fontWeight: 800, color: todayWork.pending_verification > 0 ? '#B45309' : '#1E1B4B', marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>
+              {todayWork.pending_verification}
+            </div>
+            <div style={{ fontSize: '11px', color: '#6B7280', marginTop: 2 }}>Transcribed Rx orders</div>
+          </button>
+
+          {/* Stat 5: Shift Notes Pending (> 2h) */}
+          <button
+            type="button"
+            onClick={() => openDrawer('pending_notes', 'Shift Notes Pending (> 2h)')}
+            className="today-stat-btn"
+            style={{
+              padding: '12px 14px',
+              borderRadius: 12,
+              border: `1.5px solid ${todayWork.pending_notes > 0 ? '#FED7AA' : '#E5E7EB'}`,
+              background: todayWork.pending_notes > 0 ? 'linear-gradient(135deg, #FFFFFF, #FFF7ED)' : '#FFFFFF',
+              textAlign: 'left',
+              cursor: 'pointer',
+              transition: 'transform 120ms ease, box-shadow 120ms ease',
+            }}
+          >
+            <div style={{ fontSize: '12px', color: todayWork.pending_notes > 0 ? '#C2410C' : '#6B7280', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Notes Pending (&gt; 2h)
+            </div>
+            <div style={{ fontSize: '24px', fontWeight: 800, color: todayWork.pending_notes > 0 ? '#C2410C' : '#1E1B4B', marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>
+              {todayWork.pending_notes}
+            </div>
+            <div style={{ fontSize: '11px', color: '#6B7280', marginTop: 2 }}>Active shift note overdue</div>
+          </button>
+
+          {/* Stat 6: Active Alerts */}
+          <button
+            type="button"
+            onClick={() => openDrawer('alerts', 'Active Clinical Alerts')}
+            className="today-stat-btn"
+            style={{
+              padding: '12px 14px',
+              borderRadius: 12,
+              border: `1.5px solid ${todayWork.alerts_count > 0 ? '#FECACA' : '#A7F3D0'}`,
+              background: todayWork.alerts_count > 0 ? 'linear-gradient(135deg, #FFFFFF, #FEF2F2)' : 'linear-gradient(135deg, #FFFFFF, #ECFDF5)',
+              textAlign: 'left',
+              cursor: 'pointer',
+              transition: 'transform 120ms ease, box-shadow 120ms ease',
+            }}
+          >
+            <div style={{ fontSize: '12px', color: todayWork.alerts_count > 0 ? '#DC2626' : '#047857', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Active Alerts
+            </div>
+            <div style={{ fontSize: '24px', fontWeight: 800, color: todayWork.alerts_count > 0 ? '#DC2626' : '#047857', marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>
+              {todayWork.alerts_count}
+            </div>
+            <div style={{ fontSize: '11px', color: '#6B7280', marginTop: 2 }}>Vital & intake triggers</div>
+          </button>
+        </div>
+      </section>
+
+      {/* ── 3. Lower Section: 2 Equal Columns on Desktop (>= 1024px), 1 Column on Mobile (< 1024px) ── */}
+      <div className="nurse-lower-layout">
+        {/* ══════════════════════════════════════════════════════════════════════
+            LEFT COLUMN: My Patients (Cards) + Shift Handover Section
+            ══════════════════════════════════════════════════════════════════════ */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {/* ── "My Patients" Section ── */}
+          <section
             className="card"
             style={{
               background: '#FFFFFF',
               borderRadius: 20,
               border: '1px solid #EEF0F4',
               borderTop: '4px solid #0284C7',
-              boxShadow: '0 4px 20px rgba(2,132,199,0.06), 0 1px 3px rgba(0,0,0,0.03)',
+              boxShadow: '0 4px 20px rgba(2,132,199,0.06)',
               padding: 20,
               display: 'flex',
               flexDirection: 'column',
-              gap: 14,
+              gap: 16,
             }}
           >
-            {/* Patient Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div style={{ width: 34, height: 34, borderRadius: 10, background: 'linear-gradient(135deg, #0284C7, #0369A1)', color: '#FFFFFF', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 8px rgba(2,132,199,0.25)' }}>
+                <div style={{ width: 36, height: 36, borderRadius: 10, background: 'linear-gradient(135deg, #0284C7, #0369A1)', color: '#FFFFFF', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <User size={18} />
                 </div>
                 <div>
                   <h2 style={{ fontSize: '16px', fontWeight: 700, color: '#1E1B4B', margin: 0 }}>
-                    My Patient
+                    My Patients ({filteredPatients.length})
                   </h2>
                   <div style={{ fontSize: '12px', color: '#6B7280' }}>
-                    Primary assigned patient & bedside indicators
+                    Assigned clinical cases • In-progress shifts prioritized
                   </div>
                 </div>
               </div>
-              {patient?.patient_code && (
-                <span
-                  style={{
-                    fontSize: '12px',
-                    fontWeight: 700,
-                    background: '#E0F2FE',
-                    color: '#0369A1',
-                    padding: '3px 10px',
-                    borderRadius: 9999,
-                    border: '1px solid #BAE6FD',
-                  }}
-                >
-                  {patient.patient_code}
-                </span>
+
+              {/* Search box when more than 6 assigned patients */}
+              {nursePatients.length > 6 && (
+                <div style={{ position: 'relative', width: 220 }}>
+                  <Search size={14} style={{ position: 'absolute', left: 10, top: 10, color: '#9CA3AF' }} />
+                  <input
+                    type="text"
+                    placeholder="Search patients..."
+                    value={patientSearch}
+                    onChange={(e) => setPatientSearch(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '6px 10px 6px 30px',
+                      borderRadius: 8,
+                      border: '1px solid #E5E7EB',
+                      fontSize: '12px',
+                    }}
+                  />
+                </div>
               )}
             </div>
 
-            {patient ? (
-              <>
-                {/* Profile Header: Avatar, Name, Age, MR */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                  <div
-                    style={{
-                      width: 52,
-                      height: 52,
-                      borderRadius: 16,
-                      background: 'linear-gradient(135deg, #0284C7, #6D28D9)',
-                      color: '#FFFFFF',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontWeight: 700,
-                      fontSize: '18px',
-                      flexShrink: 0,
-                      boxShadow: '0 4px 12px rgba(2,132,199,0.25)',
-                    }}
-                  >
-                    {patient.name?.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase() || 'PT'}
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: '17px', fontWeight: 700, color: '#1F2937', lineHeight: 1.25 }}>
-                      {patient.name}
-                    </div>
-                    <div style={{ fontSize: '13px', color: '#6B7280', marginTop: 2 }}>
-                      MR: <strong>{patient.mr_number || '-'}</strong> • Age: <strong>{patient.age || '-'} yrs</strong>
-                    </div>
-                  </div>
-                  {/* Allergies badge */}
-                  <div
-                    style={{
-                      fontSize: '12px',
-                      fontWeight: 700,
-                      padding: '4px 10px',
-                      borderRadius: 8,
-                      background: patient.allergies && patient.allergies !== 'NKDA' ? '#FEE2E2' : '#ECFDF5',
-                      color: patient.allergies && patient.allergies !== 'NKDA' ? '#B91C1C' : '#047857',
-                      border: `1px solid ${patient.allergies && patient.allergies !== 'NKDA' ? '#FECACA' : '#A7F3D0'}`,
-                    }}
-                    title={`Documented Allergies: ${patient.allergies || 'NKDA'}`}
-                  >
-                    {patient.allergies ? (patient.allergies === 'NKDA' ? '✓ NKDA' : `⚠ Allergy: ${patient.allergies.slice(0, 10)}`) : '✓ NKDA'}
-                  </div>
-                </div>
+            {/* Patients List */}
+            {filteredPatients.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                {filteredPatients.map((p) => {
+                  const allergy = getAllergyInfo(p.allergy_status, p.allergies);
+                  const tierConfig = getTierChipConfig(p.latest_tier);
+                  const isProgress = Boolean(p.is_in_progress);
 
-                {/* Diagnosis Chips */}
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                  <div
-                    style={{
-                      fontSize: '13px',
-                      background: '#F0F9FF',
-                      color: '#0369A1',
-                      padding: '4px 12px',
-                      borderRadius: 8,
-                      border: '1px solid #BAE6FD',
-                      fontWeight: 600,
-                    }}
-                  >
-                    🩺 {patient.diagnosis || 'Clinical Bedside Observation'}
-                  </div>
-                </div>
+                  return (
+                    <div
+                      key={p.id}
+                      style={{
+                        background: '#FFFFFF',
+                        borderRadius: 16,
+                        border: isProgress ? '2px solid #0284C7' : '1px solid #E5E7EB',
+                        padding: 16,
+                        boxShadow: isProgress ? '0 4px 16px rgba(2,132,199,0.08)' : '0 1px 3px rgba(0,0,0,0.02)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 12,
+                      }}
+                    >
+                      {/* Patient Top Row: Avatar, Name, MR, Age, In-Progress badge */}
+                      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                          <div
+                            style={{
+                              width: 44,
+                              height: 44,
+                              borderRadius: 12,
+                              background: isProgress ? 'linear-gradient(135deg, #0284C7, #0369A1)' : 'linear-gradient(135deg, #7C3AED, #6D28D9)',
+                              color: '#FFFFFF',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontWeight: 700,
+                              fontSize: '15px',
+                              flexShrink: 0,
+                            }}
+                          >
+                            {p.name?.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase() || 'PT'}
+                          </div>
+                          <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: '16px', fontWeight: 700, color: '#1F2937' }}>
+                                {p.name}
+                              </span>
+                              <span style={{ fontSize: '11px', fontWeight: 600, color: '#0369A1', background: '#E0F2FE', padding: '1px 6px', borderRadius: 4, border: '1px solid #BAE6FD' }}>
+                                MR: {p.mr_number || '-'}
+                              </span>
+                            </div>
+                            <div style={{ fontSize: '12px', color: '#6B7280', marginTop: 2 }}>
+                              Age: <strong>{p.age || '-'}y</strong> • Sex: <strong>{p.gender_display || p.gender || '-'}</strong>
+                            </div>
+                          </div>
+                        </div>
 
-                {/* Address & Open in Maps */}
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '8px 12px',
-                    background: '#F9FAFB',
-                    borderRadius: 10,
-                    border: '1px solid #EEF0F4',
-                    fontSize: '13px',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0, color: '#4B5563' }}>
-                    <MapPin size={15} style={{ color: '#0284C7', flexShrink: 0 }} />
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {patient.location || 'Home Address documented in chart'}
-                    </span>
-                  </div>
-                  <a
-                    href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(patient.location || '')}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="btn btn-sm"
-                    style={{
-                      padding: '3px 10px',
-                      fontSize: '12px',
-                      color: '#0284C7',
-                      background: '#E0F2FE',
-                      border: '1px solid #BAE6FD',
-                      borderRadius: 6,
-                      fontWeight: 600,
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 4,
-                      flexShrink: 0,
-                    }}
-                    title="Open Patient Address in Google Maps"
-                    aria-label="Open in Maps"
-                  >
-                    <span>Maps</span>
-                    <ArrowUpRight size={12} />
-                  </a>
-                </div>
-
-                {/* Latest Vitals Chips with abnormal color coding */}
-                {patient.latest_vitals ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontSize: '12px', color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600 }}>
-                        Latest Vitals
-                      </span>
-                      <span style={{ fontSize: '12px', color: '#9CA3AF' }}>
-                        {formatTimeAgo(patient.latest_vitals.recorded_at)}
-                      </span>
-                    </div>
-
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
-                      {/* BP */}
-                      <div
-                        style={{
-                          padding: '8px',
-                          borderRadius: 10,
-                          background: patient.latest_vitals.bp_abnormal ? '#FEF2F2' : '#F0F9FF',
-                          border: `1.5px solid ${patient.latest_vitals.bp_abnormal ? '#FECACA' : '#BAE6FD'}`,
-                          textAlign: 'center',
-                        }}
-                      >
-                        <div style={{ fontSize: '11px', color: patient.latest_vitals.bp_abnormal ? '#DC2626' : '#0369A1', fontWeight: 700 }}>BP</div>
-                        <div style={{ fontSize: '14px', fontWeight: 700, color: patient.latest_vitals.bp_abnormal ? '#DC2626' : '#1E1B4B', fontVariantNumeric: 'tabular-nums' }}>
-                          {patient.latest_vitals.bp}
+                        {/* Badges strip: In-progress + Tier */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          {isProgress && (
+                            <span
+                              style={{
+                                fontSize: '11px',
+                                fontWeight: 700,
+                                padding: '3px 9px',
+                                borderRadius: 999,
+                                background: '#ECFDF5',
+                                color: '#047857',
+                                border: '1px solid #A7F3D0',
+                              }}
+                            >
+                              ● Shift In-Progress
+                            </span>
+                          )}
+                          <span
+                            style={{
+                              fontSize: '11px',
+                              fontWeight: 700,
+                              padding: '3px 9px',
+                              borderRadius: 999,
+                              background: tierConfig.bg,
+                              color: tierConfig.color,
+                              border: `1px solid ${tierConfig.border}`,
+                            }}
+                          >
+                            {tierConfig.label}
+                          </span>
                         </div>
                       </div>
 
-                      {/* HR */}
-                      <div
-                        style={{
-                          padding: '8px',
-                          borderRadius: 10,
-                          background: patient.latest_vitals.hr_abnormal ? '#FEF2F2' : '#FFF1F2',
-                          border: `1.5px solid ${patient.latest_vitals.hr_abnormal ? '#FECACA' : '#FECDD3'}`,
-                          textAlign: 'center',
-                        }}
-                      >
-                        <div style={{ fontSize: '11px', color: patient.latest_vitals.hr_abnormal ? '#DC2626' : '#BE123C', fontWeight: 700 }}>HR</div>
-                        <div style={{ fontSize: '14px', fontWeight: 700, color: patient.latest_vitals.hr_abnormal ? '#DC2626' : '#1E1B4B', fontVariantNumeric: 'tabular-nums' }}>
-                          {patient.latest_vitals.hr}
-                        </div>
+                      {/* Clinical Row 1: Diagnosis & Allergy Badge */}
+                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                        <span style={{ fontSize: '12px', fontWeight: 600, color: '#0369A1', background: '#F0F9FF', padding: '3px 10px', borderRadius: 8, border: '1px solid #BAE6FD' }}>
+                          🩺 {p.primary_diagnosis || 'Bedside Observation'}
+                        </span>
+                        {/* Allergy Badge adhering strictly to Safety Fix 1 */}
+                        <span
+                          style={{
+                            fontSize: '12px',
+                            fontWeight: 700,
+                            padding: '3px 10px',
+                            borderRadius: 8,
+                            background: allergy.status === 'has_allergies' ? '#FEE2E2' : (allergy.status === 'nkda' ? '#ECFDF5' : '#FEF3C7'),
+                            color: allergy.status === 'has_allergies' ? '#991B1B' : (allergy.status === 'nkda' ? '#047857' : '#92400E'),
+                            border: `1px solid ${allergy.status === 'has_allergies' ? '#FECACA' : (allergy.status === 'nkda' ? '#A7F3D0' : '#FDE68A')}`,
+                          }}
+                          title={allergy.fullLabel}
+                        >
+                          {allergy.status === 'has_allergies' && allergy.allergens.length
+                            ? `⚠ Allergies: ${allergy.allergens.join(', ')}`
+                            : allergy.label}
+                        </span>
                       </div>
 
-                      {/* SpO2 */}
+                      {/* Active Complaint */}
+                      {p.active_complaint && (
+                        <div style={{ fontSize: '12px', color: '#4B5563', background: '#F9FAFB', padding: '6px 10px', borderRadius: 8, border: '1px solid #EEF0F4' }}>
+                          <strong>Active Complaint:</strong> {p.active_complaint}
+                        </div>
+                      )}
+
+                      {/* Address & Google Maps link */}
                       <div
                         style={{
-                          padding: '8px',
-                          borderRadius: 10,
-                          background: patient.latest_vitals.spo2_abnormal ? '#FEF2F2' : '#ECFDF5',
-                          border: `1.5px solid ${patient.latest_vitals.spo2_abnormal ? '#FECACA' : '#A7F3D0'}`,
-                          textAlign: 'center',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '6px 10px',
+                          background: '#F9FAFB',
+                          borderRadius: 8,
+                          border: '1px solid #EEF0F4',
+                          fontSize: '12px',
                         }}
                       >
-                        <div style={{ fontSize: '11px', color: patient.latest_vitals.spo2_abnormal ? '#DC2626' : '#047857', fontWeight: 700 }}>SpO2</div>
-                        <div style={{ fontSize: '14px', fontWeight: 700, color: patient.latest_vitals.spo2_abnormal ? '#DC2626' : '#1E1B4B', fontVariantNumeric: 'tabular-nums' }}>
-                          {patient.latest_vitals.spo2}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, color: '#4B5563' }}>
+                          <MapPin size={14} style={{ color: '#0284C7', flexShrink: 0 }} />
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {p.address || 'Address documented in patient chart'}
+                          </span>
                         </div>
+                        <a
+                          href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(p.address || '')}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{
+                            padding: '2px 8px',
+                            fontSize: '11px',
+                            color: '#0284C7',
+                            background: '#E0F2FE',
+                            border: '1px solid #BAE6FD',
+                            borderRadius: 6,
+                            fontWeight: 600,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 3,
+                            flexShrink: 0,
+                            textDecoration: 'none',
+                          }}
+                        >
+                          <span>Maps</span>
+                          <ArrowUpRight size={11} />
+                        </a>
                       </div>
 
-                      {/* Temp */}
-                      <div
-                        style={{
-                          padding: '8px',
-                          borderRadius: 10,
-                          background: patient.latest_vitals.temp_abnormal ? '#FEF2F2' : '#FFFBEB',
-                          border: `1.5px solid ${patient.latest_vitals.temp_abnormal ? '#FECACA' : '#FDE68A'}`,
-                          textAlign: 'center',
-                        }}
-                      >
-                        <div style={{ fontSize: '11px', color: patient.latest_vitals.temp_abnormal ? '#DC2626' : '#B45309', fontWeight: 700 }}>Temp</div>
-                        <div style={{ fontSize: '14px', fontWeight: 700, color: patient.latest_vitals.temp_abnormal ? '#DC2626' : '#1E1B4B', fontVariantNumeric: 'tabular-nums' }}>
-                          {patient.latest_vitals.temp}
+                      {/* Latest Vitals Snippet */}
+                      {p.latest_vitals ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#6B7280' }}>
+                            <span>LATEST VITALS</span>
+                            <span>{formatTimeAgo(p.last_vitals_at || p.latest_vitals.recorded_at)}</span>
+                          </div>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
+                            <div style={{ padding: '4px', textAlign: 'center', background: '#F0F9FF', borderRadius: 6, fontSize: '11px' }}>
+                              <div style={{ color: '#0369A1', fontWeight: 600 }}>BP</div>
+                              <div style={{ fontWeight: 700, color: '#1E1B4B' }}>{p.latest_vitals.bp || '-'}</div>
+                            </div>
+                            <div style={{ padding: '4px', textAlign: 'center', background: '#FFF1F2', borderRadius: 6, fontSize: '11px' }}>
+                              <div style={{ color: '#BE123C', fontWeight: 600 }}>HR</div>
+                              <div style={{ fontWeight: 700, color: '#1E1B4B' }}>{p.latest_vitals.hr || '-'}</div>
+                            </div>
+                            <div style={{ padding: '4px', textAlign: 'center', background: '#ECFDF5', borderRadius: 6, fontSize: '11px' }}>
+                              <div style={{ color: '#047857', fontWeight: 600 }}>SpO2</div>
+                              <div style={{ fontWeight: 700, color: '#1E1B4B' }}>{p.latest_vitals.spo2 || '-'}</div>
+                            </div>
+                            <div style={{ padding: '4px', textAlign: 'center', background: '#FFFBEB', borderRadius: 6, fontSize: '11px' }}>
+                              <div style={{ color: '#B45309', fontWeight: 600 }}>Temp</div>
+                              <div style={{ fontWeight: 700, color: '#1E1B4B' }}>{p.latest_vitals.temp || '-'}</div>
+                            </div>
+                          </div>
                         </div>
+                      ) : (
+                        <div style={{ fontSize: '12px', color: '#6B7280', background: '#F9FAFB', padding: '6px 10px', borderRadius: 8, textAlign: 'center' }}>
+                          No vitals recorded today
+                        </div>
+                      )}
+
+                      {/* Latest Handover Snippet (if any from last 24h) */}
+                      {p.latest_handover && (
+                        <div style={{ background: '#FFFBEB', border: '1px solid #FDE68A', borderRadius: 8, padding: '8px 10px', fontSize: '12px' }}>
+                          <div style={{ color: '#B45309', fontWeight: 700, fontSize: '11px', textTransform: 'uppercase' }}>
+                            Latest Handover ({p.latest_handover.shift_label || 'Shift'})
+                          </div>
+                          <div style={{ color: '#78350F', marginTop: 2, fontStyle: 'italic' }}>
+                            &ldquo;{p.latest_handover.text}&rdquo;
+                          </div>
+                          <div style={{ color: '#92400E', fontSize: '11px', marginTop: 2 }}>
+                            — {p.latest_handover.author_name} ({formatTimeAgo(p.latest_handover.created_at)})
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Patient Action Buttons */}
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', paddingTop: 4, borderTop: '1px solid #F1F5F9' }}>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenPatient(p, 'monitoring')}
+                          className="btn btn-outline btn-sm"
+                          style={{ fontSize: '12px', padding: '4px 8px', borderRadius: 6, color: '#DC2626', borderColor: '#FECACA' }}
+                        >
+                          <Activity size={12} style={{ marginRight: 4 }} /> Record Vitals
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenPatient(p, 'medications')}
+                          className="btn btn-outline btn-sm"
+                          style={{ fontSize: '12px', padding: '4px 8px', borderRadius: 6, color: '#0284C7', borderColor: '#BAE6FD' }}
+                        >
+                          <Pill size={12} style={{ marginRight: 4 }} /> Give Meds (MAR)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenPatient(p, 'nursing_notes')}
+                          className="btn btn-outline btn-sm"
+                          style={{ fontSize: '12px', padding: '4px 8px', borderRadius: 6, color: '#EA580C', borderColor: '#FED7AA' }}
+                        >
+                          <FileText size={12} style={{ marginRight: 4 }} /> Nurse Note
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenPatient(p, 'monitoring')}
+                          className="btn btn-outline btn-sm"
+                          style={{ fontSize: '12px', padding: '4px 8px', borderRadius: 6, color: '#059669', borderColor: '#A7F3D0' }}
+                        >
+                          Intake/Output
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenPatient(p)}
+                          className="btn btn-primary btn-sm"
+                          style={{ fontSize: '12px', padding: '4px 10px', borderRadius: 6, background: '#7C3AED', border: 'none', marginLeft: 'auto' }}
+                        >
+                          Open File →
+                        </button>
                       </div>
                     </div>
-                  </div>
-                ) : (
-                  <div style={{ padding: '8px 12px', background: '#F9FAFB', borderRadius: 8, fontSize: '13px', color: '#6B7280', textAlign: 'center' }}>
-                    No vitals logged yet today.
-                  </div>
-                )}
-
-                {/* Primary Button: Open Full Chart */}
-                <Button
-                  variant="primary"
-                  isPill
-                  onClick={() => setActivePage('nurse-patient-detail')}
-                  style={{
-                    width: '100%',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: 8,
-                    padding: '11px 16px',
-                    fontSize: '14px',
-                    fontWeight: 700,
-                    background: 'linear-gradient(135deg, #0284C7, #0369A1)',
-                    boxShadow: '0 4px 14px rgba(2,132,199,0.25)',
-                    border: 'none',
-                  }}
-                >
-                  <Activity size={16} />
-                  <span>Open Full Patient Chart</span>
-                  <ChevronRight size={16} />
-                </Button>
-              </>
+                  );
+                })}
+              </div>
             ) : (
-              <div
-                style={{
-                  textAlign: 'center',
-                  padding: '28px 18px',
-                  background: 'linear-gradient(135deg, #FFFFFF 0%, #F0FDF4 100%)',
-                  borderRadius: 16,
-                  border: '1.5px solid #BBF7D0',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  gap: 12,
-                }}
-              >
-                <div style={{ width: 48, height: 48, borderRadius: 14, background: '#DCFCE7', color: '#16A34A', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <CheckCircle2 size={26} />
-                </div>
-                <div>
-                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: '#DCFCE7', color: '#15803D', fontSize: '12px', fontWeight: 700, padding: '3px 10px', borderRadius: 9999, marginBottom: 6 }}>
-                    <span>•</span> Ward Care Scoping Active
-                  </div>
-                  <h3 style={{ fontSize: '16px', fontWeight: 700, color: '#14532D', margin: '0 0 4px 0' }}>
-                    No Individual Patient Assigned Today
-                  </h3>
-                  <p style={{ fontSize: '13px', color: '#166534', margin: 0, maxWidth: 360, lineHeight: 1.4 }}>
-                    You can record walk-in vitals, administer prescriptions, or access patient documentation below.
-                  </p>
-                </div>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center', marginTop: 4 }}>
-                  <button
-                    type="button"
-                    className="btn btn-sm"
-                    onClick={() => setActivePage('my-patients')}
-                    style={{
-                      background: '#0284C7',
-                      color: '#FFFFFF',
-                      borderRadius: 8,
-                      fontWeight: 600,
-                      padding: '6px 14px',
-                      border: 'none',
-                      boxShadow: '0 2px 8px rgba(2,132,199,0.25)',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    View Patient List →
-                  </button>
-                </div>
+              <div style={{ textAlign: 'center', padding: '36px 16px', color: '#6B7280' }}>
+                <CheckCircle2 size={32} style={{ color: '#10B981', margin: '0 auto 8px' }} />
+                <div style={{ fontWeight: 600, color: '#374151' }}>No Assigned Patients Found Today</div>
+                <div style={{ fontSize: '12px', marginTop: 4 }}>You will see clinical cards here as shifts are published.</div>
               </div>
             )}
-          </div>
-
-          {/* Chart Shortcut Grid */}
-          <div
-            className="card"
-            style={{
-              background: '#FFFFFF',
-              borderRadius: 20,
-              border: '1px solid #EEF0F4',
-              borderTop: '4px solid #6366F1',
-              boxShadow: '0 4px 20px rgba(99,102,241,0.06), 0 1px 3px rgba(0,0,0,0.03)',
-              padding: 18,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 12,
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ fontSize: '14px', fontWeight: 700, color: '#1E1B4B' }}>
-                Clinical Chart Shortcuts
-              </div>
-              {patient?.chart_counts?.family_concerns > 0 && (
-                <span
-                  style={{
-                    fontSize: '11px',
-                    fontWeight: 700,
-                    background: '#FEE2E2',
-                    color: '#DC2626',
-                    padding: '2px 8px',
-                    borderRadius: 9999,
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 4,
-                  }}
-                >
-                  <AlertCircle size={11} />
-                  {patient.chart_counts.family_concerns} Family Concern
-                </span>
-              )}
-            </div>
-
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
-                gap: 8,
-              }}
-            >
-              {[
-                { label: 'Medication (MAR)', icon: Pill, count: patient?.chart_counts?.medication || 0, tab: 'mar', bg: '#ECFDF5', border: '#A7F3D0', text: '#047857', iconColor: '#059669', badgeBg: '#D1FAE5' },
-                { label: 'Nursing Notes', icon: FileText, count: patient?.chart_counts?.nursing_notes || 0, tab: 'notes', bg: '#FFFBEB', border: '#FDE68A', text: '#B45309', iconColor: '#D97706', badgeBg: '#FEF3C7' },
-                { label: 'Vitals & Fluid', icon: Activity, count: patient?.chart_counts?.vitals || 0, tab: 'vitals', bg: '#FFF1F2', border: '#FECDD3', text: '#BE123C', iconColor: '#E11D48', badgeBg: '#FFE4E6' },
-                { label: "Doctor's Notes", icon: Stethoscope, count: patient?.chart_counts?.doctor_notes || 0, tab: 'doctor_notes', bg: '#EFF6FF', border: '#BFDBFE', text: '#1D4ED8', iconColor: '#2563EB', badgeBg: '#DBEAFE' },
-                { label: 'Physiotherapy', icon: HeartHandshake, count: patient?.chart_counts?.physiotherapy || 0, tab: 'physio_notes', bg: '#F0FDFA', border: '#99F6E4', text: '#0F766E', iconColor: '#0D9488', badgeBg: '#CCFBF1' },
-                { label: 'Procedure Change', icon: Syringe, count: patient?.chart_counts?.procedure_requests || 0, tab: 'requests', bg: '#FAF5FF', border: '#DDD6FE', text: '#6D28D9', iconColor: '#7C3AED', badgeBg: '#EDE9FE' },
-                { label: 'Manager Checklist', icon: ClipboardCheck, count: patient?.chart_counts?.manager_checklist || 1, tab: 'manager_checklist', bg: '#EEF2FF', border: '#C7D2FE', text: '#4338CA', iconColor: '#4F46E5', badgeBg: '#E0E7FF' },
-              ].map(({ label, icon: IconCmp, count, bg, border, text, iconColor, badgeBg }) => (
-                <button
-                  key={label}
-                  type="button"
-                  onClick={() => setActivePage('nurse-patient-detail')}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '9px 12px',
-                    background: bg,
-                    border: `1.5px solid ${border}`,
-                    borderRadius: 12,
-                    cursor: 'pointer',
-                    textAlign: 'left',
-                    transition: 'all 150ms ease',
-                  }}
-                  title={`Open ${label}`}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
-                    <IconCmp size={16} style={{ color: iconColor, flexShrink: 0 }} />
-                    <span style={{ fontSize: '13px', fontWeight: 600, color: text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {label}
-                    </span>
-                  </div>
-                  <span
-                    style={{
-                      fontSize: '11px',
-                      fontWeight: 700,
-                      background: badgeBg,
-                      color: text,
-                      padding: '2px 7px',
-                      borderRadius: 9999,
-                      flexShrink: 0,
-                    }}
-                  >
-                    {count}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
+          </section>
         </div>
 
-        {/* ══════════════════════════════════════════════════════════════════
-            COLUMN RIGHT (E): Alerts + Quick Actions + Claims + Digital ID Card
-            ══════════════════════════════════════════════════════════════════ */}
-        <div className="nurse-col-right" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {/* Alerts & Reminders Card */}
-          <div
+        {/* ══════════════════════════════════════════════════════════════════════
+            RIGHT COLUMN: Alerts & Reminders, Quick Actions, Compact My Team, Claims
+            ══════════════════════════════════════════════════════════════════════ */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {/* ── Alerts & Reminders Card (Real Sources Only) ── */}
+          <section
             className="card"
             style={{
               background: '#FFFFFF',
               borderRadius: 20,
               border: '1px solid #EEF0F4',
               borderTop: '4px solid #EF4444',
-              boxShadow: '0 4px 20px rgba(239,68,68,0.06), 0 1px 3px rgba(0,0,0,0.03)',
+              boxShadow: '0 4px 20px rgba(239,68,68,0.06)',
               padding: 18,
               display: 'flex',
               flexDirection: 'column',
@@ -1480,7 +1171,11 @@ export default function NurseHome() {
                   return (
                     <div
                       key={a.id}
-                      onClick={() => setActivePage('nurse-patient-detail')}
+                      onClick={() => {
+                        const targetPt = nursePatients.find((p) => p.id === a.patient_id) || nursePatients[0];
+                        if (targetPt) handleOpenPatient(targetPt);
+                        else setActivePage('patient-file');
+                      }}
                       style={{
                         padding: '10px 14px',
                         background: bgCol,
@@ -1492,7 +1187,7 @@ export default function NurseHome() {
                         gap: 10,
                         transition: 'transform 120ms ease',
                       }}
-                      title="Click to view in patient chart"
+                      title="Click to review in patient chart"
                     >
                       <IconCmp size={16} style={{ color: textCol, flexShrink: 0, marginTop: 2 }} />
                       <div style={{ flex: 1, minWidth: 0 }}>
@@ -1533,17 +1228,17 @@ export default function NurseHome() {
                 </div>
               )}
             </div>
-          </div>
+          </section>
 
-          {/* Quick Actions Card */}
-          <div
+          {/* ── Quick Clinical Actions Card (Nurse-Authorable Actions) ── */}
+          <section
             className="card"
             style={{
               background: '#FFFFFF',
               borderRadius: 20,
               border: '1px solid #EEF0F4',
               borderTop: '4px solid #10B981',
-              boxShadow: '0 4px 20px rgba(16,185,129,0.06), 0 1px 3px rgba(0,0,0,0.03)',
+              boxShadow: '0 4px 20px rgba(16,185,129,0.06)',
               padding: 18,
               display: 'flex',
               flexDirection: 'column',
@@ -1555,19 +1250,101 @@ export default function NurseHome() {
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {/* Action 1: Request Supervisor Visit */}
+              {/* Action 1: Record Vitals */}
               <button
                 type="button"
                 className="btn btn-outline"
-                onClick={() => {
-                  setActiveRequestModal('supervisor_visit');
-                  setReqUrgency('routine');
-                  setReqNotes('');
-                  setReqDetails('');
-                }}
+                onClick={() => handleQuickActionClick('vitals')}
                 style={{
                   width: '100%',
-                  padding: '10px 14px',
+                  padding: '9px 12px',
+                  borderRadius: 12,
+                  borderColor: '#FECACA',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  background: 'linear-gradient(135deg, #FFFFFF, #FEF2F2)',
+                  textAlign: 'left',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ width: 32, height: 32, borderRadius: 8, background: '#FEE2E2', color: '#DC2626', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Activity size={16} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '13px', fontWeight: 600, color: '#1E1B4B' }}>Record Vitals & Fluid Intake</div>
+                    <div style={{ fontSize: '11px', color: '#6B7280' }}>BP, Pulse, SpO2, Temp, Intake/Output</div>
+                  </div>
+                </div>
+                <ChevronRight size={15} style={{ color: '#DC2626' }} />
+              </button>
+
+              {/* Action 2: Administer Medication (MAR) */}
+              <button
+                type="button"
+                className="btn btn-outline"
+                onClick={() => handleQuickActionClick('mar')}
+                style={{
+                  width: '100%',
+                  padding: '9px 12px',
+                  borderRadius: 12,
+                  borderColor: '#BAE6FD',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  background: 'linear-gradient(135deg, #FFFFFF, #F0F9FF)',
+                  textAlign: 'left',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ width: 32, height: 32, borderRadius: 8, background: '#E0F2FE', color: '#0284C7', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Pill size={16} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '13px', fontWeight: 600, color: '#1E1B4B' }}>Give Medication (MAR)</div>
+                    <div style={{ fontSize: '11px', color: '#6B7280' }}>Administer verified active medication</div>
+                  </div>
+                </div>
+                <ChevronRight size={15} style={{ color: '#0284C7' }} />
+              </button>
+
+              {/* Action 3: Transcribe Prescription */}
+              <button
+                type="button"
+                className="btn btn-outline"
+                onClick={() => handleQuickActionClick('mar')}
+                style={{
+                  width: '100%',
+                  padding: '9px 12px',
+                  borderRadius: 12,
+                  borderColor: '#FDE68A',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  background: 'linear-gradient(135deg, #FFFFFF, #FFFBEB)',
+                  textAlign: 'left',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ width: 32, height: 32, borderRadius: 8, background: '#FEF3C7', color: '#D97706', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Stethoscope size={16} />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '13px', fontWeight: 600, color: '#1E1B4B' }}>Transcribe Prescription</div>
+                    <div style={{ fontSize: '11px', color: '#6B7280' }}>Enters order awaiting doctor verification</div>
+                  </div>
+                </div>
+                <ChevronRight size={15} style={{ color: '#D97706' }} />
+              </button>
+
+              {/* Action 4: Request Supervisor Visit */}
+              <button
+                type="button"
+                className="btn btn-outline"
+                onClick={() => openQuickRequest('supervisor_visit')}
+                style={{
+                  width: '100%',
+                  padding: '9px 12px',
                   borderRadius: 12,
                   borderColor: '#DDD6FE',
                   display: 'flex',
@@ -1579,95 +1356,25 @@ export default function NurseHome() {
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <div style={{ width: 32, height: 32, borderRadius: 8, background: '#EDE9FE', color: '#6D28D9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <UserCheck size={17} />
+                    <UserCheck size={16} />
                   </div>
                   <div>
                     <div style={{ fontSize: '13px', fontWeight: 600, color: '#1E1B4B' }}>Request Supervisor Visit</div>
-                    <div style={{ fontSize: '12px', color: '#6B7280' }}>Transmits formal coordinator visit request</div>
+                    <div style={{ fontSize: '11px', color: '#6B7280' }}>Clinical escalation or difficulty on duty</div>
                   </div>
                 </div>
                 <ChevronRight size={15} style={{ color: '#6D28D9' }} />
               </button>
-
-              {/* Action 2: Order Pharmacy / Equipment */}
-              <button
-                type="button"
-                className="btn btn-outline"
-                onClick={() => {
-                  setActiveRequestModal('pharmacy_order');
-                  setReqUrgency('urgent');
-                  setReqNotes('');
-                  setReqDetails('');
-                }}
-                style={{
-                  width: '100%',
-                  padding: '10px 14px',
-                  borderRadius: 12,
-                  borderColor: '#BFDBFE',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  background: 'linear-gradient(135deg, #FFFFFF, #EFF6FF)',
-                  textAlign: 'left',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div style={{ width: 32, height: 32, borderRadius: 8, background: '#DBEAFE', color: '#2563EB', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <Pill size={17} />
-                  </div>
-                  <div>
-                    <div style={{ fontSize: '13px', fontWeight: 600, color: '#1E1B4B' }}>Order Pharmacy / Equipment</div>
-                    <div style={{ fontSize: '12px', color: '#6B7280' }}>Dressing, flushes, or medical consumables</div>
-                  </div>
-                </div>
-                <ChevronRight size={15} style={{ color: '#2563EB' }} />
-              </button>
-
-              {/* Action 3: Book Appointment / Consultation */}
-              <button
-                type="button"
-                className="btn btn-outline"
-                onClick={() => {
-                  setActiveRequestModal('consultation_booking');
-                  setReqUrgency('routine');
-                  setReqNotes('');
-                  setReqDetails('');
-                }}
-                style={{
-                  width: '100%',
-                  padding: '10px 14px',
-                  borderRadius: 12,
-                  borderColor: '#A7F3D0',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  background: 'linear-gradient(135deg, #FFFFFF, #ECFDF5)',
-                  textAlign: 'left',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div style={{ width: 32, height: 32, borderRadius: 8, background: '#D1FAE5', color: '#059669', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    <Calendar size={17} />
-                  </div>
-                  <div>
-                    <div style={{ fontSize: '13px', fontWeight: 600, color: '#1E1B4B' }}>Book Consultation</div>
-                    <div style={{ fontSize: '12px', color: '#6B7280' }}>Physiotherapist or clinical coordinator</div>
-                  </div>
-                </div>
-                <ChevronRight size={15} style={{ color: '#059669' }} />
-              </button>
             </div>
-          </div>
+          </section>
 
-          {/* Claims & Overtime Card */}
-          <div
+          {/* ── Compact "My Team" Row (Supervisor, Buddy Nurse, Transport Driver - Safety Fix 3) ── */}
+          <section
             className="card"
             style={{
               background: '#FFFFFF',
               borderRadius: 20,
               border: '1px solid #EEF0F4',
-              borderTop: '4px solid #F59E0B',
-              boxShadow: '0 4px 20px rgba(245,158,11,0.06), 0 1px 3px rgba(0,0,0,0.03)',
               padding: 18,
               display: 'flex',
               flexDirection: 'column',
@@ -1675,9 +1382,202 @@ export default function NurseHome() {
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h2 style={{ fontSize: '15px', fontWeight: 700, color: '#1E1B4B', margin: 0 }}>
+              <h3 style={{ fontSize: '14px', fontWeight: 700, color: '#1E1B4B', margin: 0 }}>
+                My Support Team
+              </h3>
+              <span style={{ fontSize: '11px', color: '#6B7280' }}>Duty Contacts</span>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {/* Member 1: Supervisor */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '8px 12px',
+                  background: '#FAF5FF',
+                  borderRadius: 12,
+                  border: '1px solid #E9D5FF',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                  <div style={{ width: 34, height: 34, borderRadius: 10, background: '#7C3AED', color: '#FFFFFF', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '12px' }}>
+                    {supervisor?.name?.slice(0, 2).toUpperCase() || 'SP'}
+                  </div>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: '13px', fontWeight: 700, color: '#1F2937', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {supervisor?.name || 'Dr. Sara Ahmed'}
+                    </div>
+                    <div style={{ fontSize: '11px', color: '#6D28D9', fontWeight: 600 }}>Clinical Supervisor</div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                  {supervisor?.phone ? (
+                    <a
+                      href={`tel:${supervisor.phone}`}
+                      className="btn btn-sm"
+                      style={{ padding: '3px 8px', fontSize: '11px', color: '#6D28D9', background: '#EDE9FE', border: '1px solid #DDD6FE', borderRadius: 6, textDecoration: 'none' }}
+                      title="Call Supervisor"
+                    >
+                      <Phone size={11} style={{ marginRight: 3 }} /> Call
+                    </a>
+                  ) : (
+                    <span style={{ fontSize: '11px', color: '#9CA3AF', fontStyle: 'italic' }}>Not set</span>
+                  )}
+                  {/* Chat: disabled coming soon badge */}
+                  <span
+                    style={{
+                      fontSize: '10px',
+                      fontWeight: 600,
+                      padding: '3px 7px',
+                      borderRadius: 6,
+                      background: '#F3F4F6',
+                      color: '#6B7280',
+                      border: '1px solid #E5E7EB',
+                      cursor: 'not-allowed',
+                    }}
+                    title="In-app messaging coming soon"
+                  >
+                    Chat (Coming soon)
+                  </span>
+                </div>
+              </div>
+
+              {/* Member 2: Transport Driver */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '8px 12px',
+                  background: '#EFF6FF',
+                  borderRadius: 12,
+                  border: '1px solid #BFDBFE',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                  <div style={{ width: 34, height: 34, borderRadius: 10, background: '#2563EB', color: '#FFFFFF', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Car size={16} />
+                  </div>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: '13px', fontWeight: 700, color: '#1F2937', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {transport?.driver_name || 'Nadeem Khan'}
+                    </div>
+                    <div style={{ fontSize: '11px', color: '#2563EB', fontWeight: 600 }}>
+                      Transport Driver ({formatPickupTime(transport?.pickup_time)})
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                  {transport?.driver_phone ? (
+                    <a
+                      href={`tel:${transport.driver_phone}`}
+                      className="btn btn-sm"
+                      style={{ padding: '3px 8px', fontSize: '11px', color: '#1D4ED8', background: '#DBEAFE', border: '1px solid #BFDBFE', borderRadius: 6, textDecoration: 'none' }}
+                      title="Call Driver"
+                    >
+                      <Phone size={11} style={{ marginRight: 3 }} /> Call
+                    </a>
+                  ) : (
+                    <span style={{ fontSize: '11px', color: '#9CA3AF', fontStyle: 'italic' }}>Not set</span>
+                  )}
+                  <span
+                    style={{
+                      fontSize: '10px',
+                      fontWeight: 600,
+                      padding: '3px 7px',
+                      borderRadius: 6,
+                      background: '#F3F4F6',
+                      color: '#6B7280',
+                      border: '1px solid #E5E7EB',
+                      cursor: 'not-allowed',
+                    }}
+                    title="In-app messaging coming soon"
+                  >
+                    Chat (Coming soon)
+                  </span>
+                </div>
+              </div>
+
+              {/* Member 3: Buddy Staff Nurse */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '8px 12px',
+                  background: '#ECFDF5',
+                  borderRadius: 12,
+                  border: '1px solid #A7F3D0',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                  <div style={{ width: 34, height: 34, borderRadius: 10, background: '#059669', color: '#FFFFFF', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '12px' }}>
+                    {buddy?.name?.slice(0, 2).toUpperCase() || 'BD'}
+                  </div>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: '13px', fontWeight: 700, color: '#1F2937', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {buddy?.name || 'Bob Ahmed'}
+                    </div>
+                    <div style={{ fontSize: '11px', color: '#047857', fontWeight: 600 }}>Buddy Staff Nurse</div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                  {buddy?.phone ? (
+                    <a
+                      href={`tel:${buddy.phone}`}
+                      className="btn btn-sm"
+                      style={{ padding: '3px 8px', fontSize: '11px', color: '#0F766E', background: '#CCFBF1', border: '1px solid #99F6E4', borderRadius: 6, textDecoration: 'none' }}
+                      title="Call Buddy"
+                    >
+                      <Phone size={11} style={{ marginRight: 3 }} /> Call
+                    </a>
+                  ) : (
+                    <span style={{ fontSize: '11px', color: '#9CA3AF', fontStyle: 'italic' }}>Not set</span>
+                  )}
+                  <span
+                    style={{
+                      fontSize: '10px',
+                      fontWeight: 600,
+                      padding: '3px 7px',
+                      borderRadius: 6,
+                      background: '#F3F4F6',
+                      color: '#6B7280',
+                      border: '1px solid #E5E7EB',
+                      cursor: 'not-allowed',
+                    }}
+                    title="In-app messaging coming soon"
+                  >
+                    Chat (Coming soon)
+                  </span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* ── Claims & Overtime Card ── */}
+          <section
+            className="card"
+            style={{
+              background: '#FFFFFF',
+              borderRadius: 20,
+              border: '1px solid #EEF0F4',
+              borderTop: '4px solid #F59E0B',
+              boxShadow: '0 4px 20px rgba(245,158,11,0.06)',
+              padding: 18,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 12,
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ fontSize: '15px', fontWeight: 700, color: '#1E1B4B', margin: 0 }}>
                 Claims & Overtime
-              </h2>
+              </h3>
               <button
                 type="button"
                 className="btn btn-ghost btn-sm"
@@ -1724,124 +1624,177 @@ export default function NurseHome() {
               <PlusCircle size={15} />
               <span>Submit Overtime Claim</span>
             </Button>
-          </div>
-
-          {/* Digital Employee ID Card was moved to narrow sticky right column */}
+          </section>
         </div>
       </div>
-      </div>
 
-    </div>
+      {/* ── Slide-over Drawer for Today's Work metrics ── */}
+      <NurseDrawer
+        isOpen={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        type={drawerType}
+        title={drawerTitle}
+        onPatientSelect={(pid, item) => {
+          setDrawerOpen(false);
+          const found = nursePatients.find((p) => p.id === pid);
+          if (found) handleOpenPatient(found);
+          else handleOpenPatient({ id: pid, name: item?.patient_name || item?.name });
+        }}
+      />
 
-    {/* Responsive Stacking & Sticky Right Column Styles for Nurses Portal */}
-    <style>{`
-      .nurse-layout-grid {
-        display: flex;
-        flex-direction: column;
-        gap: 20px;
-      }
-      .nurse-side-column {
-        display: contents;
-      }
-      .nurse-id-card-wrapper {
-        order: 1;
-        display: flex;
-        justify-content: center;
-      }
-      .nurse-main-column {
-        order: 2;
-        display: flex;
-        flex-direction: column;
-        gap: 20px;
-        min-width: 0;
-      }
-      @media (min-width: 1024px) {
-        .nurse-layout-grid {
-          display: grid;
-          grid-template-columns: minmax(0, 1fr) 380px;
-          gap: 24px;
-          align-items: start;
-        }
-        .nurse-side-column {
-          display: block;
-          position: sticky;
-          top: 24px;
-          align-self: start;
-        }
-        .nurse-id-card-wrapper {
-          order: unset;
-        }
-        .nurse-main-column {
-          order: unset;
-        }
-      }
-    `}</style>
-
-      {/* ── Modal 1: Duty Roster Calendar ── */}
+      {/* ── Modal: Write / Edit Handover Note ── */}
       <Modal
-        isOpen={showRosterModal}
-        onClose={() => setShowRosterModal(false)}
-        title={`Staff Duty Roster (${rosterView.toUpperCase()})`}
-        subtitle="Assigned clinical shifts and patient schedules"
-        size="lg"
-      >
-        <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
-          {['daily', 'weekly', 'monthly'].map((v) => (
-            <button
-              key={v}
-              className={`btn btn-sm ${rosterView === v ? 'btn-primary' : 'btn-outline'}`}
-              style={{ textTransform: 'capitalize' }}
-              onClick={() => openRoster(v)}
+        isOpen={showHandoverModal}
+        onClose={() => setShowHandoverModal(false)}
+        title={editingHandoverId ? 'Edit Shift Handover Note' : 'Write Shift Handover Note'}
+        subtitle="Formal bedside handover record (15-minute author edit window, immutable record integrity)"
+        size="md"
+        isDirty={Boolean(handoverText)}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setShowHandoverModal(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              isPill
+              disabled={!handoverText.trim() || submittingHandover}
+              isLoading={submittingHandover}
+              onClick={handleSubmitHandover}
             >
-              {v}
-            </button>
-          ))}
-        </div>
-
-        {loadingRoster ? (
-          <div style={{ padding: 36, textAlign: 'center' }}>
-            <div className="spinner" />
-          </div>
-        ) : rosterShifts.length > 0 ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 380, overflowY: 'auto' }}>
-            {rosterShifts.map((s) => (
-              <div
-                key={s.id}
-                style={{
-                  padding: '12px 14px',
-                  background: '#F9FAFB',
-                  borderRadius: 12,
-                  border: '1px solid #E5E7EB',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                }}
+              {editingHandoverId ? 'Save Edits' : 'Save Handover Note'}
+            </Button>
+          </>
+        }
+      >
+        <form onSubmit={handleSubmitHandover} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {!editingHandoverId ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <label style={{ fontSize: '13px', fontWeight: 600, color: '#374151' }}>Assigned Patient *</label>
+              <select
+                value={handoverPatientId}
+                onChange={(e) => setHandoverPatientId(e.target.value)}
+                style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #D1D5DB', fontSize: '13px' }}
+                required
               >
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: '14px', color: '#1F2937' }}>{s.patient?.name}</div>
-                  <div style={{ fontSize: '13px', color: '#6B7280', marginTop: 2 }}>
-                    {new Date(s.start).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })} •{' '}
-                    {new Date(s.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} –{' '}
-                    {new Date(s.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </div>
-                  <div style={{ fontSize: '12px', color: '#6D28D9', marginTop: 2, fontWeight: 500 }}>
-                    {s.type}
-                  </div>
-                </div>
-                <Badge variant={s.status === 'in_progress' ? 'purple' : 'grey'}>
-                  {s.status}
-                </Badge>
-              </div>
-            ))}
+                {nursePatients.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} (MR: {p.mr_number || '-'})
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : null}
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <label style={{ fontSize: '13px', fontWeight: 600, color: '#374151' }}>Shift *</label>
+              <select
+                value={handoverShiftLabel}
+                onChange={(e) => setHandoverShiftLabel(e.target.value)}
+                style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #D1D5DB', fontSize: '13px' }}
+              >
+                <option value="Day Shift">Day Shift</option>
+                <option value="Evening Shift">Evening Shift</option>
+                <option value="Night Shift">Night Shift</option>
+                <option value="Special Duty">Special Duty</option>
+              </select>
+            </div>
+
+            <Input
+              type="date"
+              label="Shift Date"
+              value={handoverShiftDate}
+              onChange={(e) => setHandoverShiftDate(e.target.value)}
+              disabled={Boolean(editingHandoverId)}
+            />
           </div>
-        ) : (
-          <p style={{ textAlign: 'center', color: '#6B7280', padding: '24px 0', fontSize: '14px' }}>
-            No rostered shifts found for this time window.
-          </p>
-        )}
+
+          <Textarea
+            label="Handover Notes / Continuity Summary *"
+            required
+            showCount
+            maxLength={1000}
+            rows={4}
+            placeholder="Document patient condition, IV cannula status, medication timing, fluid balance, specific warnings for incoming nurse..."
+            value={handoverText}
+            onChange={(e) => setHandoverText(e.target.value)}
+          />
+
+          <div className="alert-callout alert-callout-info" style={{ fontSize: '12px', padding: '8px 12px' }}>
+            <AlertCircle size={14} style={{ color: '#6D28D9', flexShrink: 0, marginTop: 1 }} />
+            <span>
+              Clinical Integrity: Once saved, this handover note cannot be deleted. Authors may edit within 15 minutes. Erroneous entries must be marked &ldquo;Entered in Error&rdquo; with reason.
+            </span>
+          </div>
+
+          {handoverFeedback && (
+            <div className={`alert-callout alert-callout-${handoverFeedback.type === 'error' ? 'danger' : 'success'}`} style={{ fontSize: '13px' }}>
+              <AlertCircle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+              <span>{handoverFeedback.text}</span>
+            </div>
+          )}
+        </form>
       </Modal>
 
-      {/* ── Modal 2: Submit Overtime Claim ── */}
+      {/* ── Modal: Mark Handover Entered in Error ── */}
+      <Modal
+        isOpen={showHandoverErrorModal}
+        onClose={() => setShowHandoverErrorModal(false)}
+        title="Mark Handover as Entered in Error"
+        subtitle="Clinical record integrity requires an audit reason. The note will remain visible struck through."
+        size="md"
+        isDirty={Boolean(errorReason)}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setShowHandoverErrorModal(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              isPill
+              disabled={!errorReason.trim() || submittingError}
+              isLoading={submittingError}
+              onClick={handleSubmitHandoverError}
+            >
+              Confirm Entered in Error
+            </Button>
+          </>
+        }
+      >
+        <form onSubmit={handleSubmitHandoverError} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {errorTargetHandover && (
+            <div style={{ background: '#F9FAFB', padding: '10px 14px', borderRadius: 10, border: '1px solid #E5E7EB', fontSize: '13px' }}>
+              <div style={{ fontWeight: 600, color: '#1F2937' }}>
+                Note text: &ldquo;{errorTargetHandover.text}&rdquo;
+              </div>
+              <div style={{ color: '#6B7280', fontSize: '12px', marginTop: 4 }}>
+                Author: {errorTargetHandover.author_name} • Shift: {errorTargetHandover.shift_label}
+              </div>
+            </div>
+          )}
+
+          <Textarea
+            label="Reason for Error *"
+            required
+            showCount
+            maxLength={300}
+            rows={3}
+            placeholder="e.g. Documented on wrong patient chart, incorrect shift time entered..."
+            value={errorReason}
+            onChange={(e) => setErrorReason(e.target.value)}
+          />
+
+          {errorModalFeedback && (
+            <div className={`alert-callout alert-callout-${errorModalFeedback.type === 'error' ? 'danger' : 'success'}`} style={{ fontSize: '13px' }}>
+              <AlertCircle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+              <span>{errorModalFeedback.text}</span>
+            </div>
+          )}
+        </form>
+      </Modal>
+
+      {/* ── Modal: Submit Overtime Claim ── */}
       <Modal
         isOpen={showClaimModal}
         onClose={() => setShowClaimModal(false)}
@@ -1913,7 +1866,7 @@ export default function NurseHome() {
         </form>
       </Modal>
 
-      {/* ── Modal 3: Claim History ── */}
+      {/* ── Modal: Claim History ── */}
       <Modal
         isOpen={showClaimHistoryModal}
         onClose={() => setShowClaimHistoryModal(false)}
@@ -1976,7 +1929,7 @@ export default function NurseHome() {
         )}
       </Modal>
 
-      {/* ── Modal 4: Clinical Quick Request Modal (Supervisor Visit / Pharmacy / Consultation) ── */}
+      {/* ── Modal: Quick Action Request (Supervisor Visit / Pharmacy / Consultation) ── */}
       <Modal
         isOpen={Boolean(activeRequestModal)}
         onClose={() => setActiveRequestModal(null)}
@@ -2008,24 +1961,27 @@ export default function NurseHome() {
         }
       >
         <form onSubmit={handleSubmitRequest} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {/* Patient identification strip */}
-          {patient && (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: '#EDE9FE', borderRadius: 10, border: '1px solid #DDD6FE' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: '12px', fontWeight: 700, color: '#6D28D9', textTransform: 'uppercase' }}>Patient:</span>
-                <strong style={{ fontSize: '14px', color: '#1F2937' }}>{patient.name}</strong>
-                <span style={{ fontSize: '12px', color: '#6B7280' }}>({patient.patient_code})</span>
-              </div>
-              <Badge variant="purple">MR: {patient.mr_number}</Badge>
+          {/* Patient dropdown if multiple */}
+          {nursePatients.length > 1 ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <label style={{ fontSize: '13px', fontWeight: 600, color: '#374151' }}>Patient *</label>
+              <select
+                value={selectedRequestPatientId}
+                onChange={(e) => setSelectedRequestPatientId(e.target.value)}
+                style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #D1D5DB', fontSize: '13px' }}
+              >
+                {nursePatients.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} (MR: {p.mr_number || '-'})
+                  </option>
+                ))}
+              </select>
             </div>
-          )}
-
-          <div className="alert-callout alert-callout-info" style={{ padding: '8px 12px', fontSize: '13px' }}>
-            <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 1, color: '#6D28D9' }} />
-            <div>
-              <strong>Advisory:</strong> Submitting this sends a direct request to your care coordinator and supervisor. It documents clinical requests in the staff log.
+          ) : nursePatients[0] ? (
+            <div style={{ padding: '8px 12px', background: '#FAF5FF', borderRadius: 8, border: '1px solid #DDD6FE', fontSize: '13px' }}>
+              Patient: <strong>{nursePatients[0].name}</strong> (MR: {nursePatients[0].mr_number || '-'})
             </div>
-          </div>
+          ) : null}
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <label style={{ fontSize: '13px', fontWeight: 600, color: '#374151' }}>Urgency Level</label>
@@ -2058,16 +2014,16 @@ export default function NurseHome() {
           </div>
 
           <Textarea
-            label="Clinical Reason / Items Needed"
+            label="Clinical Reason / Items Needed *"
             required
             showCount
             maxLength={400}
             rows={3}
             placeholder={
               activeRequestModal === 'supervisor_visit'
-                ? 'Reason for supervisor visit request (e.g. acute clinical escalation, catheter insertion difficulty...)'
+                ? 'Reason for supervisor visit request (e.g. acute clinical escalation, catheter difficulty...)'
                 : activeRequestModal === 'pharmacy_order'
-                ? 'Supplies needed (e.g. 5x sterile dressing packs, 100ml normal saline flushes, 20G IV cannulas...)'
+                ? 'Supplies needed (e.g. 5x sterile dressing packs, 100ml normal saline flushes...)'
                 : 'Consultation specialty needed and brief patient history...'
             }
             value={reqNotes}
@@ -2076,7 +2032,7 @@ export default function NurseHome() {
 
           <Input
             label="Additional Details / Instructions (Optional)"
-            placeholder="e.g. Family present, morning visit preferred..."
+            placeholder="e.g. Morning visit preferred..."
             value={reqDetails}
             onChange={(e) => setReqDetails(e.target.value)}
           />
@@ -2090,7 +2046,7 @@ export default function NurseHome() {
         </form>
       </Modal>
 
-      {/* ── Modal 5: View All Active Alerts ── */}
+      {/* ── Modal: View All Active Alerts ── */}
       <Modal
         isOpen={showAlertsModal}
         onClose={() => setShowAlertsModal(false)}
@@ -2111,7 +2067,9 @@ export default function NurseHome() {
                   key={a.id}
                   onClick={() => {
                     setShowAlertsModal(false);
-                    setActivePage('nurse-patient-detail');
+                    const targetPt = nursePatients.find((p) => p.id === a.patient_id) || nursePatients[0];
+                    if (targetPt) handleOpenPatient(targetPt);
+                    else setActivePage('patient-file');
                   }}
                   style={{
                     padding: '12px 16px',
@@ -2146,6 +2104,67 @@ export default function NurseHome() {
           )}
         </div>
       </Modal>
+
+      {/* ── Modal: Patient Picker for Quick Clinical Actions (when multiple patients) ── */}
+      <Modal
+        isOpen={Boolean(patientPickerAction)}
+        onClose={() => setPatientPickerAction(null)}
+        title="Select Patient for Action"
+        subtitle="Choose which patient to perform this clinical action for"
+        size="sm"
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {nursePatients.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => {
+                const action = patientPickerAction;
+                setPatientPickerAction(null);
+                handleOpenPatient(
+                  p,
+                  action === 'vitals' ? 'monitoring' : action === 'mar' ? 'medications' : action === 'notes' ? 'nursing_notes' : 'monitoring'
+                );
+              }}
+              className="btn btn-outline"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '10px 14px',
+                borderRadius: 10,
+                textAlign: 'left',
+              }}
+            >
+              <div>
+                <div style={{ fontWeight: 700, fontSize: '13px', color: '#1F2937' }}>{p.name}</div>
+                <div style={{ fontSize: '11px', color: '#6B7280' }}>MR: {p.mr_number || '-'}</div>
+              </div>
+              <ChevronRight size={15} style={{ color: '#6D28D9' }} />
+            </button>
+          ))}
+        </div>
+      </Modal>
+
+      {/* ── Responsive 2-Column Grid Layout Style ── */}
+      <style>{`
+        .nurse-lower-layout {
+          display: grid;
+          grid-template-columns: 1fr;
+          gap: 20px;
+        }
+        @media (min-width: 1024px) {
+          .nurse-lower-layout {
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+            gap: 24px;
+            align-items: start;
+          }
+        }
+        .today-stat-btn:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 4px 12px rgba(109,40,217,0.08);
+        }
+      `}</style>
     </div>
   );
 }

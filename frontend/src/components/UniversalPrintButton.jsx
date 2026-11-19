@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Printer, Download, X, FileText, CheckCircle, ShieldCheck } from 'lucide-react';
 import useStore from '../store/useStore';
 import { format } from 'date-fns';
+import { getAllergyInfo } from '../utils/allergyHelpers';
 
 export default function UniversalPrintButton({
   type = 'document',
@@ -151,7 +152,7 @@ export default function UniversalPrintButton({
                         <div><strong>Address:</strong> {rec.address}</div>
                         <div><strong>Primary Diagnosis:</strong> {rec.primary_diagnosis}</div>
                         <div><strong>Assigned Care Manager:</strong> {rec.care_manager_name || 'Hina Malik'}</div>
-                        <div><strong>Allergies:</strong> {rec.allergies || 'NKDA'}</div>
+                        <div><strong>Allergies:</strong> {getAllergyInfo(rec.allergy_status, rec.allergies).fullLabel}</div>
                       </div>
                     )}
 

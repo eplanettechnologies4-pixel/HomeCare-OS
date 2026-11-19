@@ -398,7 +398,7 @@ class Command(BaseCommand):
                 existing_bk = Booking.objects.filter(
                     patient=patient_a,
                     assigned_staff=staff,
-                    scheduled_time__date=today
+                    service_type=s_type,
                 ).exclude(status=BookingStatus.CANCELLED).first()
 
                 if not existing_bk:
@@ -417,6 +417,10 @@ class Command(BaseCommand):
                     bk.save()
                     self.stdout.write(f"  Created Booking: Patient A <-> {staff.full_name} ({s_type})")
                 else:
+                    existing_bk.status = b_status
+                    existing_bk.scheduled_time = sched_time
+                    existing_bk.shift_end_time = end_time
+                    existing_bk.save(update_fields=['status', 'scheduled_time', 'shift_end_time'])
                     self.stdout.write(f"  Existing Booking: Patient A <-> {staff.full_name} ({existing_bk.reference_code})")
 
             # 6. Bookings for Patient B (Speech, Psych, Dietician)
@@ -429,7 +433,7 @@ class Command(BaseCommand):
                 existing_bk = Booking.objects.filter(
                     patient=patient_b,
                     assigned_staff=staff,
-                    scheduled_time__date=today
+                    service_type=s_type,
                 ).exclude(status=BookingStatus.CANCELLED).first()
 
                 if not existing_bk:
@@ -447,6 +451,9 @@ class Command(BaseCommand):
                     bk.save()
                     self.stdout.write(f"  Created Booking: Patient B <-> {staff.full_name} ({s_type})")
                 else:
+                    existing_bk.status = b_status
+                    existing_bk.scheduled_time = sched_time
+                    existing_bk.save(update_fields=['status', 'scheduled_time'])
                     self.stdout.write(f"  Existing Booking: Patient B <-> {staff.full_name} ({existing_bk.reference_code})")
 
             self.stdout.write(self.style.SUCCESS("  Assignments committed successfully. ZERO clinical records created.\n"))

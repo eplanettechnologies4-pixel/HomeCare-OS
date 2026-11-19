@@ -11,6 +11,7 @@ import PatientSourceBadge from '../components/PatientSourceBadge';
 import PermanentPatientModal from '../components/PermanentPatientModal';
 import { format } from 'date-fns';
 import DailyReportForm from '../components/DailyReportForm';
+import { getAllergyInfo } from '../utils/allergyHelpers';
 
 import NursesNotesFormA from '../components/NursesNotesFormA';
 import VitalsRecordFormB from '../components/VitalsRecordFormB';
@@ -395,7 +396,7 @@ export default function Patient360() {
             <h3 style={{ fontFamily: 'var(--font-heading)', color: 'var(--teal-700)', margin: '0 0 16px' }}>Medical History & Conditions</h3>
             <div className="info-row"><span className="info-label">Primary Diagnosis</span><span className="info-value font-semibold">{patient.primary_diagnosis}</span></div>
             <div className="info-row"><span className="info-label">Secondary Conditions</span><span className="info-value">Hypertension, Chronic Kidney Disease Stage II</span></div>
-            <div className="info-row"><span className="info-label">Allergies</span><span className="info-value" style={{ color: 'var(--status-red)', fontWeight: 600 }}>{patient.allergies || 'Penicillin (Severe Rash)'}</span></div>
+            <div className="info-row"><span className="info-label">Allergies</span><span className="info-value" style={{ fontWeight: 600 }}>{getAllergyInfo(patient.allergy_status, patient.allergies).fullLabel}</span></div>
             <div className="info-row"><span className="info-label">Surgical History</span><span className="info-value">Right Eye Cataract Surgery (2021)</span></div>
           </div>
         )}

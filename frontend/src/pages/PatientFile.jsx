@@ -18,6 +18,7 @@ import NursesNotesFormA from '../components/NursesNotesFormA';
 import MarSheetFormC from '../components/MarSheetFormC';
 import PrescriptionsTab from '../components/PrescriptionsTab';
 import { normalizeRole, isClinicianRole, getClinicianConfig, canRoleWriteClinical, CLINICAL_WRITE_ROLES } from '../config/clinicianRoleConfig';
+import { getAllergyInfo } from '../utils/allergyHelpers';
 
 // Master Clinical Records Tiles Catalog
 const TILES_CATALOG = {
@@ -794,19 +795,19 @@ export default function PatientFile() {
   // ──────────────────────────────────────────────────────────────────────────
   if (!activePatientId || !patientFileData) {
     return (
-      <div className="patient-file-container" style={{ padding: '24px', maxWidth: '1400px', margin: '0 auto', fontFamily: 'var(--font-body, Inter, sans-serif)' }}>
+      <div className="patient-file-container patient-file-directory-root" style={{ padding: '24px', maxWidth: '1400px', margin: '0 auto', fontFamily: 'var(--font-body, Inter, sans-serif)' }}>
         
         {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
-          <div>
-            <h1 style={{ margin: 0, fontSize: '24px', fontWeight: 800, color: '#1E1B4B', letterSpacing: '-0.5px' }}>
+        <div className="patient-directory-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
+          <div style={{ minWidth: 200, maxWidth: '100%' }}>
+            <h1 style={{ margin: 0, fontSize: '24px', fontWeight: 800, color: '#1E1B4B', letterSpacing: '-0.5px', wordBreak: 'break-word' }}>
               Patient File Directory
             </h1>
             <p style={{ margin: '4px 0 0', color: '#6B7280', fontSize: '13px' }}>
               Unified clinical files, EMR timeline, and active care plans
             </p>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
             {isClinicianRole(currentRole) && (
               <button
                 onClick={() => setShowClassicChart(true)}
@@ -839,7 +840,7 @@ export default function PatientFile() {
 
         {/* Search Bar */}
         <div style={{ background: '#FFFFFF', borderRadius: '16px', padding: '16px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', border: '1px solid #E2E8F0', marginBottom: '20px' }}>
-          <div style={{ position: 'relative', maxWidth: '480px' }}>
+          <div className="patient-directory-search-wrapper" style={{ position: 'relative', width: '100%', maxWidth: '100%' }}>
             <Search size={18} color="#94A3B8" style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)' }} />
             <input
               type="text"
@@ -858,9 +859,9 @@ export default function PatientFile() {
           </div>
         </div>
 
-        {/* Patients Table */}
-        <div style={{ background: '#FFFFFF', borderRadius: '16px', overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', border: '1px solid #E2E8F0' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
+        {/* Patients Table Container (Horizontally Scrollable) */}
+        <div className="patient-directory-table-card" style={{ background: '#FFFFFF', borderRadius: '16px', overflowX: 'auto', WebkitOverflowScrolling: 'touch', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', border: '1px solid #E2E8F0' }}>
+          <table style={{ width: '100%', minWidth: '600px', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
             <thead>
               <tr style={{ background: '#F8FAFC', borderBottom: '1px solid #E2E8F0', color: '#475569', fontWeight: 700, fontSize: '12px', textTransform: 'uppercase' }}>
                 <th style={{ padding: '14px 20px' }}>Patient Name</th>
@@ -1211,9 +1212,22 @@ export default function PatientFile() {
         {/* Diagnosis & Allergy Chips */}
         <div style={{ marginTop: '14px', paddingTop: '12px', borderTop: '1px solid #F1F5F9', display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
           <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', color: '#64748B' }}>Clinical Flags:</span>
-          <span style={{ background: '#FEE2E2', color: '#991B1B', border: '1px solid #FECACA', padding: '2px 10px', borderRadius: '10px', fontSize: '12px', fontWeight: 600 }}>
-            Allergies: {formatVal(p.allergies)}
-          </span>
+          {(() => {
+            const allergyInfo = getAllergyInfo(p.allergy_status, p.allergies);
+            return (
+              <span style={{
+                background: allergyInfo.status === 'has_allergies' ? '#FEE2E2' : (allergyInfo.status === 'nkda' ? '#ECFDF5' : '#FEF3C7'),
+                color: allergyInfo.status === 'has_allergies' ? '#991B1B' : (allergyInfo.status === 'nkda' ? '#065F46' : '#92400E'),
+                border: `1px solid ${allergyInfo.status === 'has_allergies' ? '#FECACA' : (allergyInfo.status === 'nkda' ? '#A7F3D0' : '#FDE68A')}`,
+                padding: '2px 10px',
+                borderRadius: '10px',
+                fontSize: '12px',
+                fontWeight: 600
+              }}>
+                {allergyInfo.status === 'has_allergies' && allergyInfo.allergens.length ? `Allergies: ${allergyInfo.allergens.join(', ')}` : allergyInfo.label}
+              </span>
+            );
+          })()}
           <span style={{ background: '#FEF3C7', color: '#92400E', border: '1px solid #FDE68A', padding: '2px 10px', borderRadius: '10px', fontSize: '12px', fontWeight: 600 }}>
             Diagnosis: {formatVal(p.primary_diagnosis)}
           </span>

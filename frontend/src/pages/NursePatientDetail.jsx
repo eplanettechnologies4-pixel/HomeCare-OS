@@ -7,6 +7,7 @@ import {
 import useStore from '../store/useStore';
 import apiFetch from '../services/api';
 import { Modal, Select, Textarea, SegmentedControl, Button, Badge } from '../components/ui';
+import { getAllergyInfo } from '../utils/allergyHelpers';
 
 export default function NursePatientDetail() {
   const setActivePage = useStore((s) => s.setActivePage);
@@ -253,7 +254,18 @@ export default function NursePatientDetail() {
           </div>
           <div>
             <div style={{ fontSize: '0.7rem', color: 'var(--muted)', textTransform: 'uppercase', fontWeight: 600 }}>Allergies & Alerts</div>
-            <div style={{ fontWeight: 700, color: 'var(--danger)', marginTop: 2 }}>{patient.current_care_plan?.allergies || 'NKDA'}</div>
+            {(() => {
+              const allergyInfo = getAllergyInfo(patient.allergy_status, patient.current_care_plan?.allergies || patient.allergies);
+              return (
+                <div style={{
+                  fontWeight: 700,
+                  color: allergyInfo.status === 'has_allergies' ? 'var(--danger)' : (allergyInfo.status === 'nkda' ? 'var(--success)' : '#D97706'),
+                  marginTop: 2
+                }}>
+                  {allergyInfo.status === 'has_allergies' && allergyInfo.allergens.length ? allergyInfo.allergens.join(', ') : allergyInfo.label}
+                </div>
+              );
+            })()}
           </div>
           <div>
             <div style={{ fontSize: '0.7rem', color: 'var(--muted)', textTransform: 'uppercase', fontWeight: 600 }}>Address & Coordinates</div>

@@ -61,6 +61,12 @@ class StaffMember(models.Model):
         MOBILE = 'mobile', 'Mobile Only'
         BOTH = 'both', 'Web & Mobile'
 
+    # PROVISIONAL - HR terms need sign-off
+    class EmploymentStatus(models.TextChoices):
+        PROBATIONARY = 'probationary', 'Probationary'
+        TRAINED = 'trained', 'Trained'
+        PROFESSIONAL = 'professional', 'Professional'
+
     # Controls which platform(s) this staff member may log into.
     # Web-only roles (admin, accountant, crm_executive) → 'web'
     # Field clinical staff (nurse, doctor, physio, etc.) → 'mobile' or 'both'
@@ -78,6 +84,22 @@ class StaffMember(models.Model):
         blank=True,
         default='09:00 - 17:00',
         verbose_name='Working Hours'
+    )
+
+    # Employment status & probation tracking (PROVISIONAL - HR terms need sign-off)
+    employment_status = models.CharField(
+        max_length=30,
+        choices=EmploymentStatus.choices,
+        blank=True,
+        default='',
+        verbose_name='Employment Status',
+        help_text='PROVISIONAL - HR terms need sign-off',
+    )
+    probation_end_date = models.DateField(
+        null=True,
+        blank=True,
+        verbose_name='Probation End Date',
+        help_text='PROVISIONAL - HR terms need sign-off',
     )
 
     created_at = models.DateTimeField(auto_now_add=True)

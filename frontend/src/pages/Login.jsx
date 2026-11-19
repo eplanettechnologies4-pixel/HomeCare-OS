@@ -232,6 +232,57 @@ export default function Login() {
             </button>
           </form>
 
+          {/* ── QUICK DEMO ACCOUNTS HELPER (1-Click Login Fill) ── */}
+          <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px dashed #E5E7EB' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <span style={{ fontSize: '11px', fontWeight: 700, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                Quick Demo Logins (1-Click Fill)
+              </span>
+              <span style={{ fontSize: '10px', color: '#9CA3AF' }}>Password: TestPassword123!</span>
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {[
+                { label: 'Super Admin', username: 'superadmin', role: 'super_admin', color: '#7C3AED', bg: '#FAF5FF', border: '#DDD6FE' },
+                { label: 'Admin', username: 'admin', role: 'admin', color: '#4338CA', bg: '#EEF2FF', border: '#C7D2FE' },
+                { label: 'Doctor', username: 'doctor', role: 'doctor', color: '#047857', bg: '#ECFDF5', border: '#A7F3D0' },
+                { label: 'Nurse', username: 'nurse', role: 'nurse', color: '#0E7490', bg: '#ECFEFF', border: '#A5F3FC' },
+                { label: 'Care Mgr', username: 'manager', role: 'care_manager', color: '#B45309', bg: '#FFFBEB', border: '#FDE68A' },
+                { label: 'Branch Mgr', username: 'branch_manager', role: 'branch_manager', color: '#374151', bg: '#F3F4F6', border: '#E5E7EB' },
+                { label: 'Physio', username: 'physio', role: 'physio', color: '#1D4ED8', bg: '#EFF6FF', border: '#BFDBFE' },
+                { label: 'Speech', username: 'speech', role: 'speech', color: '#6D28D9', bg: '#F5F3FF', border: '#DDD6FE' },
+                { label: 'Psych', username: 'psych', role: 'psychologist', color: '#BE185D', bg: '#FDF2F8', border: '#FBCFE8' },
+                { label: 'Dietician', username: 'dietician', role: 'dietician', color: '#15803D', bg: '#F0FDF4', border: '#BBF7D0' },
+                { label: 'Accountant', username: 'accountant', role: 'accountant', color: '#4B5563', bg: '#F9FAFB', border: '#E5E7EB' },
+                { label: 'CRM', username: 'crm', role: 'crm_executive', color: '#C026D3', bg: '#FDF4FF', border: '#F5D0FE' },
+                { label: 'Family', username: 'family', role: 'patient_family', color: '#0F766E', bg: '#F0FDFA', border: '#99F6E4' },
+              ].map((acc) => (
+                <button
+                  key={acc.username}
+                  type="button"
+                  onClick={() => {
+                    setEmailOrPhone(acc.username);
+                    setPassword('TestPassword123!');
+                    setErrorMsg('');
+                  }}
+                  title={`Click to fill ${acc.label} (${acc.username})`}
+                  style={{
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    padding: '3px 8px',
+                    borderRadius: '6px',
+                    color: acc.color,
+                    background: acc.bg,
+                    border: `1px solid ${acc.border}`,
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  {acc.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <div className="login-copyright">
             © 2026 HomeCare OS. All rights reserved.
           </div>

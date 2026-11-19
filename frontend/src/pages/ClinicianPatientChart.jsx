@@ -13,6 +13,7 @@ import {
   normalizeRole,
   getClinicianConfig
 } from '../config/clinicianRoleConfig';
+import { getAllergyInfo } from '../utils/allergyHelpers';
 
 export default function ClinicianPatientChart() {
   const currentRole = useStore((s) => s.currentRole);
@@ -238,7 +239,8 @@ export default function ClinicianPatientChart() {
   }
 
   const primaryDiagnosis = patient.current_care_plan?.diagnosis || patient.primary_diagnosis || 'Clinical bedside supervision';
-  const allergies = patient.current_care_plan?.allergies || patient.allergies || 'NKDA';
+  const rawAllergies = patient.current_care_plan?.allergies || patient.allergies || '';
+  const allergyInfo = getAllergyInfo(patient.allergy_status, rawAllergies);
   const careManager = patient.current_care_plan?.care_manager || patient.assigned_care_manager_name || 'Care Coordinator';
 
   return (
@@ -326,8 +328,11 @@ export default function ClinicianPatientChart() {
               </span>
               <span>
                 <strong>Allergies:</strong>{' '}
-                <span style={{ color: allergies === 'NKDA' ? '#059669' : '#DC2626', fontWeight: 700 }}>
-                  {allergies}
+                <span style={{
+                  color: allergyInfo.status === 'has_allergies' ? '#DC2626' : (allergyInfo.status === 'nkda' ? '#059669' : '#D97706'),
+                  fontWeight: 700
+                }}>
+                  {allergyInfo.status === 'has_allergies' && allergyInfo.allergens.length ? allergyInfo.allergens.join(', ') : allergyInfo.label}
                 </span>
               </span>
             </div>
@@ -435,7 +440,14 @@ export default function ClinicianPatientChart() {
               </div>
               <div style={{ padding: 16, background: '#F9FAFB', borderRadius: 10, border: '1px solid #E5E7EB' }}>
                 <div style={{ fontSize: '0.74rem', textTransform: 'uppercase', fontWeight: 700, color: '#6B7280' }}>Allergies & Adverse Reactions</div>
-                <div style={{ fontWeight: 800, color: allergies === 'NKDA' ? '#059669' : '#DC2626', fontSize: '1rem', marginTop: 4 }}>{allergies}</div>
+                <div style={{
+                  fontWeight: 800,
+                  color: allergyInfo.status === 'has_allergies' ? '#DC2626' : (allergyInfo.status === 'nkda' ? '#059669' : '#D97706'),
+                  fontSize: '1rem',
+                  marginTop: 4
+                }}>
+                  {allergyInfo.status === 'has_allergies' && allergyInfo.allergens.length ? allergyInfo.allergens.join(', ') : allergyInfo.label}
+                </div>
               </div>
               <div style={{ padding: 16, background: '#F9FAFB', borderRadius: 10, border: '1px solid #E5E7EB' }}>
                 <div style={{ fontSize: '0.74rem', textTransform: 'uppercase', fontWeight: 700, color: '#6B7280' }}>Blood Group</div>

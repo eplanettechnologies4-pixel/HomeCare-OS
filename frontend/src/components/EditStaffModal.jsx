@@ -33,6 +33,7 @@ export default function EditStaffModal({ staff, onClose, onUpdated }) {
   const currentRole = useStore((s) => s.currentRole);
 
   const isSuperAdmin = currentUser?.role === 'super_admin' || currentRole === 'super_admin';
+  const isManager = isSuperAdmin || currentRole === 'admin' || currentRole === 'branch_manager' || currentUser?.role === 'branch_manager' || currentUser?.role === 'admin';
   const isTargetAdmin = staff.role === 'admin' || staff.role === 'super_admin';
   const isOwnAccount = Boolean(currentUser && (
     (currentUser.staff_id && staff.id === currentUser.staff_id) ||
@@ -40,6 +41,7 @@ export default function EditStaffModal({ staff, onClose, onUpdated }) {
     (currentUser.id && (staff.user === currentUser.id || staff.user_id === currentUser.id))
   ));
   const canEditAccount = isSuperAdmin || !isTargetAdmin;
+  const canEditEmploymentStatus = isManager && !isOwnAccount;
   const availableRoles = isSuperAdmin
     ? ROLES
     : ROLES.filter(r => r.value !== 'admin' && r.value !== 'super_admin');
@@ -54,6 +56,8 @@ export default function EditStaffModal({ staff, onClose, onUpdated }) {
     phone: staff.phone || '',
     email: staff.email || '',
     status: staff.status || 'available',
+    employment_status: staff.employment_status || '',
+    probation_end_date: staff.probation_end_date || '',
   });
 
   // Media files & previews
@@ -158,6 +162,15 @@ export default function EditStaffModal({ staff, onClose, onUpdated }) {
     formData.append('phone', form.phone);
     formData.append('email', form.email);
     formData.append('status', form.status);
+
+    if (canEditEmploymentStatus) {
+      formData.append('employment_status', form.employment_status || '');
+      if (form.employment_status === 'probationary' && form.probation_end_date) {
+        formData.append('probation_end_date', form.probation_end_date);
+      } else {
+        formData.append('probation_end_date', '');
+      }
+    }
 
     if (photoFile) {
       formData.append('photo', photoFile);
@@ -534,6 +547,69 @@ export default function EditStaffModal({ staff, onClose, onUpdated }) {
                     ))}
                   </select>
                 </div>
+              </div>
+
+              {/* ── EMPLOYMENT & PROBATION STATUS (PROVISIONAL - HR TERMS NEED SIGN-OFF) ── */}
+              <div
+                style={{
+                  background: '#FAF5FF',
+                  border: '1px solid #E9D5FF',
+                  borderRadius: 10,
+                  padding: 14,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 10,
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+                  <label className="form-label" style={{ fontWeight: 700, margin: 0, color: '#6D28D9', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Sparkles size={14} color="#7C3AED" /> Employment &amp; HR Status
+                  </label>
+                  <span style={{ fontSize: '0.65rem', color: '#9CA3AF', fontWeight: 600 }}>
+                    PROVISIONAL - HR terms need sign-off
+                  </span>
+                </div>
+
+                <div className="grid-2" style={{ gap: 12 }}>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label className="form-label" style={{ fontWeight: 600, fontSize: '0.78rem' }}>
+                      Status Level {!canEditEmploymentStatus && <span style={{ fontSize: '0.7rem', color: '#9CA3AF' }}>(Restricted)</span>}
+                    </label>
+                    <select
+                      className="form-select"
+                      value={form.employment_status}
+                      onChange={(e) => setForm({ ...form, employment_status: e.target.value })}
+                      disabled={!canEditEmploymentStatus}
+                    >
+                      <option value="">Not set</option>
+                      <option value="probationary">Probationary Period</option>
+                      <option value="trained">Trained Clinician</option>
+                      <option value="professional">Professional Staff</option>
+                      <option value="confirmed">Confirmed Staff</option>
+                    </select>
+                  </div>
+
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label className="form-label" style={{ fontWeight: 600, fontSize: '0.78rem' }}>
+                      Probation End Date {form.employment_status !== 'probationary' && <span style={{ fontSize: '0.7rem', color: '#9CA3AF' }}>(Probation only)</span>}
+                    </label>
+                    <input
+                      type="date"
+                      className="form-input"
+                      value={form.probation_end_date}
+                      onChange={(e) => setForm({ ...form, probation_end_date: e.target.value })}
+                      disabled={!canEditEmploymentStatus || form.employment_status !== 'probationary'}
+                    />
+                  </div>
+                </div>
+
+                {!canEditEmploymentStatus && (
+                  <div style={{ fontSize: '0.72rem', color: '#6B7280' }}>
+                    {isOwnAccount
+                      ? 'Self-editing of employment status is not permitted. Contact HR or an Administrator.'
+                      : 'Only Administrators and Branch Managers may update staff employment status.'}
+                  </div>
+                )}
               </div>
 
               <div className="grid-2" style={{ gap: 12 }}>

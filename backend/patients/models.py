@@ -1,9 +1,12 @@
 import os
 import uuid
+import datetime
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
+from django.utils.translation import gettext_lazy as _
 from patients.encryption import encrypt
 from .mixins import EnteredInErrorMixin, ClinicalManager
 
@@ -77,6 +80,18 @@ class Patient(models.Model):
     secondary_diagnoses = encrypt(models.TextField(blank=True))
     allergies = encrypt(models.TextField(blank=True))
     blood_type = encrypt(models.CharField(max_length=5, blank=True))
+
+    class AllergyStatus(models.TextChoices):
+        NOT_RECORDED = 'not_recorded', _('Allergies not recorded')
+        NKDA = 'nkda', _('No Known Drug Allergies (NKDA)')
+        HAS_ALLERGIES = 'has_allergies', _('Has allergies')
+
+    allergy_status = models.CharField(
+        max_length=20,
+        choices=AllergyStatus.choices,
+        default=AllergyStatus.NOT_RECORDED,
+        help_text=_('Clinical allergy status. NKDA is only valid when explicitly confirmed by clinician.')
+    )
 
     # ── Care management (unencrypted) ─────────────────────────────────────────
     assigned_care_manager = models.ForeignKey(
@@ -362,6 +377,30 @@ class NurseNote(EnteredInErrorMixin, models.Model):
 
     class Meta:
         ordering = ['-recorded_at']
+
+
+class ShiftHandoverNote(EnteredInErrorMixin, models.Model):
+    """
+    Formal shift handover note authored by a field nurse.
+    Subject to strict clinical integrity rules:
+    - PROTECT on patient foreign key (cascade delete blocked).
+    - 15-minute edit window (CLINICAL_RECORD_EDIT_WINDOW_MINUTES).
+    - EnteredInErrorMixin: never physically deletable; error state with reason.
+    - Audit logging without note text.
+    """
+    patient = models.ForeignKey(Patient, on_delete=models.PROTECT, related_name='shift_handover_notes')
+    author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name='authored_handovers')
+    shift_label = models.CharField(max_length=100, blank=True, default='')
+    shift_date = models.DateField(default=datetime.date.today)
+    text = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Handover for {self.patient.full_name} ({self.shift_date})"
 
 
 class LabResult(EnteredInErrorMixin, models.Model):

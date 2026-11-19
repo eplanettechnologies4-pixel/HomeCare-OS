@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import useStore from '../store/useStore';
 import { format, formatDistanceToNow } from 'date-fns';
+import { getAllergyInfo } from '../utils/allergyHelpers';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function VitalBadge({ label, value, unit, icon: Icon, status = 'normal' }) {
@@ -404,9 +405,19 @@ export default function FamilyPortal() {
                     <div style={{ fontWeight: 800, fontSize: '0.85rem', color: '#b91c1c', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
                       <AlertTriangle size={14} /> Known Allergies
                     </div>
-                    <div style={{ fontSize: '0.95rem', fontWeight: 700, color: patient.allergies === 'NKDA' ? '#15803d' : '#b91c1c', lineHeight: 1.5 }}>
-                      {patient.allergies || 'NKDA (No Known Drug Allergies)'}
-                    </div>
+                    {(() => {
+                      const allergyInfo = getAllergyInfo(patient.allergy_status, patient.allergies);
+                      return (
+                        <div style={{
+                          fontSize: '0.95rem',
+                          fontWeight: 700,
+                          color: allergyInfo.status === 'has_allergies' ? '#b91c1c' : (allergyInfo.status === 'nkda' ? '#15803d' : '#b45309'),
+                          lineHeight: 1.5
+                        }}>
+                          {allergyInfo.status === 'has_allergies' && allergyInfo.allergens.length ? allergyInfo.allergens.join(', ') : allergyInfo.label}
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
 

@@ -367,7 +367,9 @@ class PatientFileView(APIView):
                 'written_address': patient.address or '-',
                 'primary_diagnosis': patient.primary_diagnosis or '-',
                 'secondary_diagnoses': patient.secondary_diagnoses or '',
-                'allergies': patient.allergies or 'No Known Drug Allergies (NKDA)',
+                'allergy_status': getattr(patient, 'allergy_status', 'not_recorded'),
+                'allergy_status_display': patient.get_allergy_status_display() if hasattr(patient, 'get_allergy_status_display') else 'Allergies not recorded',
+                'allergies': patient.allergies or '',
                 'blood_type': patient.blood_type or '-',
                 'photo': f"/api/patients/{patient.id}/photo/" if patient.photo else None,
                 'is_active': patient.is_active,
@@ -456,11 +458,54 @@ class PatientHistoryCarePlanUpdateView(APIView):
         section = request.data.get('section')
         text = (request.data.get('text') or '').strip()
 
-        if section not in ('brief_history', 'care_plan'):
-            return Response({'detail': "section must be 'brief_history' or 'care_plan'."}, status=status.HTTP_400_BAD_REQUEST)
+        if section not in ('brief_history', 'care_plan', 'allergies'):
+            return Response({'detail': "section must be 'brief_history', 'care_plan', or 'allergies'."}, status=status.HTTP_400_BAD_REQUEST)
+
+        actor_name = user.get_full_name() or user.username
+
+        if section == 'allergies':
+            allergy_status = request.data.get('allergy_status') or request.data.get('status')
+            if allergy_status not in ('not_recorded', 'nkda', 'has_allergies'):
+                return Response(
+                    {'detail': "allergy_status must be 'not_recorded', 'nkda', or 'has_allergies'."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            allergens = (request.data.get('allergies') or request.data.get('text') or '').strip()
+            patient.allergy_status = allergy_status
+            patient.allergies = allergens if allergy_status == 'has_allergies' else ''
+
+            # Audit edit without logging allergen text
+            edit_entry = {
+                'section': 'allergies',
+                'allergy_status': allergy_status,
+                'edited_by_id': user.id,
+                'edited_by_name': actor_name,
+                'edited_by_role': role,
+                'edited_at': timezone.now().isoformat(),
+            }
+            current_edits = list(patient.history_care_plan_edits or [])
+            current_edits.append(edit_entry)
+            patient.history_care_plan_edits = current_edits
+            patient.save(update_fields=['allergy_status', 'allergies', 'history_care_plan_edits', 'updated_at'])
+
+            AuditLog.objects.create(
+                actor=user,
+                actor_name=actor_name,
+                action="Patient Allergy Status Updated",
+                target_user=f"Patient {patient.patient_code or patient.id}",
+                details=f"Role: {role} | Updated allergy_status to {allergy_status} for Patient ID {patient.id}",
+                timestamp=timezone.now()
+            )
+
+            return Response({
+                'success': True,
+                'section': 'allergies',
+                'allergy_status': patient.allergy_status,
+                'allergies': patient.allergies,
+                'edits': [e for e in current_edits if e.get('section') == 'allergies'],
+            })
 
         # Append edit audit trail
-        actor_name = user.get_full_name() or user.username
         edit_entry = {
             'section': section,
             'text': text,

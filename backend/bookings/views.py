@@ -698,7 +698,8 @@ class BookingViewSet(viewsets.ModelViewSet):
             ec_name = (data.get('emergency_contact_name') or 'Family').strip()
             ec_phone = (data.get('emergency_contact_phone') or phone).strip()
             diagnosis = (data.get('diagnosis') or data.get('primary_diagnosis') or 'General Home Health Care').strip()
-            allergies = (data.get('allergies') or 'NKDA').strip()
+            allergies = (data.get('allergies') or '').strip()
+            allergy_status = 'has_allergies' if (allergies and allergies.upper() != 'NKDA') else ('nkda' if allergies.upper() == 'NKDA' else 'not_recorded')
             blood_type = (data.get('blood_type') or 'O+').strip()
             email = (data.get('email') or '').strip()
 
@@ -721,7 +722,8 @@ class BookingViewSet(viewsets.ModelViewSet):
                 latitude=lat,
                 longitude=lng,
                 primary_diagnosis=diagnosis,
-                allergies=allergies,
+                allergies=allergies if allergy_status == 'has_allergies' else '',
+                allergy_status=allergy_status,
                 blood_type=blood_type,
                 emergency_contact_name=ec_name,
                 emergency_contact_phone=ec_phone,

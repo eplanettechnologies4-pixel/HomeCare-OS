@@ -66,8 +66,9 @@ class IsAdminOrSuperAdmin(BasePermission):
 class IsStaffManagementAllowed(BasePermission):
     """
     Staff directory viewing is permitted for authenticated staff,
-    but mutating actions (create, edit, delete, password changes)
-    require Admin or Super Admin privileges.
+    mutating actions require Admin, Super Admin, or Branch Manager privileges,
+    except that staff members may attempt partial updates on their own profile
+    (field-level write restrictions enforced in serializer).
     """
     message = "Staff management actions (create, edit, delete, password change) require Admin privileges."
 
@@ -77,8 +78,19 @@ class IsStaffManagementAllowed(BasePermission):
         # Read-only actions (list, retrieve, available, attendance) allowed for authenticated staff
         if request.method in SAFE_METHODS or getattr(view, 'action', None) in ('attendance', 'available', 'on_visit'):
             return True
-        # Mutations require administrative role
-        return get_user_role(request.user) in ('super_admin', 'admin', 'branch_manager')
+        if get_user_role(request.user) in ('super_admin', 'admin', 'branch_manager'):
+            return True
+        # Allow staff to reach object-level permission for updating self
+        if getattr(view, 'action', None) in ('update', 'partial_update'):
+            return True
+        return False
+
+    def has_object_permission(self, request, view, obj):
+        if request.method in SAFE_METHODS:
+            return True
+        if get_user_role(request.user) in ('super_admin', 'admin', 'branch_manager'):
+            return True
+        return obj.user_id == request.user.id
 
 
 class IsFinancialStaff(BasePermission):

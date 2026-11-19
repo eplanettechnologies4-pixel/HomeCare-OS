@@ -101,7 +101,68 @@
 
 ---
 
-## 6. Security & Permission Boundaries
+## 6. Nurse Overview Redesign & Clinical Safety Fixes (November 2026)
+
+### 6.1 Safety Fix 1: Allergy Status & Strict Display Rules
+- **Backend Model:** `Patient.allergy_status` field with choices: `not_recorded` (default), `nkda`, `has_allergies`.
+- **Removed Unsafe Defaults:** `Booking.allergies` default removed. No hardcoded or fallback `"NKDA"` is allowed anywhere in backend, frontend, or print layouts.
+- **Display Rules (Universal `getAllergyInfo` helper):**
+  - `not_recorded`: Amber badge "Allergies not recorded" (warning border/background).
+  - `nkda`: Green badge "NKDA" (No Known Drug Allergies) **only** when explicitly recorded by clinician.
+  - `has_allergies`: Red badges with parsed individual allergen chips (e.g. `Penicillin`, `NSAIDs`). If no details recorded, red badge "Allergies - details missing".
+- **RBAC & Audit:** Allergies can ONLY be modified via `PatientHistoryCarePlanUpdateView` (`/api/patients/<id>/history-care-plan/` with `section: 'allergies'`).
+  - Allowed roles: `doctor` (treating), `care_manager`, `admin`, `super_admin`.
+  - Nurses are read-only (HTTP 403 Forbidden).
+  - Audit logging records that allergy status was updated without storing allergen text in compliance logs.
+
+### 6.2 Safety Fix 2: Shift Handover Clinical Record
+- **Model:** `ShiftHandoverNote` (`backend/patients/models.py`).
+  - Fields: `patient` (FK with `on_delete=PROTECT`), `author` (User FK), `shift_label`, `shift_date`, `text`, `created_at`, `updated_at`.
+  - Inherits `EnteredInErrorMixin`: physical deletion blocked (`raise ProtectedError`), `is_entered_in_error`, `entered_in_error_by`, `entered_in_error_at`, `entered_in_error_reason`.
+  - **Edit Window:** 15-minute author edit window (`CLINICAL_RECORD_EDIT_WINDOW_MINUTES`). After window, updates return 409 Conflict.
+  - **Audit:** Audit log created on write without note text.
+- **Removed Hardcoded Boilerplate:** Removed hardcoded fallback text ("Standard clinical bedside care. Maintain strict vital signs monitoring..."). Handover notes appear ONLY when explicitly authored.
+- **RBAC:**
+  - Write: Nurse only (for assigned patients).
+  - Read: Assigned nurses, treating doctor, care manager, admin, super_admin.
+  - Mark in error: Author only.
+- **Endpoints:**
+  - `GET/POST /api/staff-portal/handovers/`
+  - `GET/PATCH /api/staff-portal/handovers/<pk>/`
+  - `POST /api/staff-portal/handovers/<pk>/mark-entered-in-error/`
+
+### 6.3 Safety Fix 3: External Communication (Call & Chat)
+- **WhatsApp Chat:** Displays disabled button with "Coming soon" chip to prevent fake message links.
+- **Phone Call:** Native `tel:` URI only when a valid phone number exists; renders "Not set" muted state when missing.
+
+### 6.4 Nurse Portal Lower Section Redesign
+- **Top Greeting & Smart Roster:** Integrated `StaffOverviewHeader` and `SmartRosterSection`. Removed redundant large "Duty Completed - Shift ended 100%" card (`nurse-time-left-card`).
+- **Slim "Today's Work" Bar:**
+  - 6 interactive stat chips:
+    1. My patients today (count of assigned active patients)
+    2. Vitals overdue (boundary configured at `settings.NURSE_VITALS_DUE_HOURS`, default 4 hours; patients whose latest vital signs are older than 4h or who have no vitals recorded)
+    3. Active medications (verified active prescriptions + time of last administration)
+    4. My orders awaiting verification (prescriptions with `pending_verification`)
+    5. Shift notes pending (> 2 hours since observation/visit)
+    6. Active alerts (critical/abnormal vitals, unresolved complaints, family concerns)
+  - Clicking any chip opens `NurseDrawer` slide-over listing filtered patient cards; clicking any patient navigates to `/patients/:id` (`PatientFile`).
+- **Two-Column Desktop Layout (>= 1024px; 1-column < 1024px; 440px responsive mobile):**
+  - **Left Column ("My Patients"):**
+    - Patient cards ordered with `in_progress` visits first.
+    - Identification: Name, MR number, age, gender.
+    - Safety & Triage: Dynamic allergy status badge, primary diagnosis, latest vitals tier (`critical`, `less_critical`, `mild`, `unclassified`, `stable` - unclassified is never displayed as normal/stable), time since last vitals, active complaint banner, address with Google Maps link.
+    - Bedside Quick Actions: Record vitals, Give medication (MAR), Nurse note, Intake/Output, Open file.
+    - Filter search box appears automatically when assigned patients > 6.
+    - Shift Handover section removed from Overview to keep bedside focus clean; handover records remain managed at patient clinical file level.
+  - **Right Column:**
+    - Real-source Alerts & Reminders (overdue vitals, medication due, active complaints, pending verification). Erroneous vitals are strictly excluded.
+    - Quick Clinical Actions (nurse bedside actions).
+    - Compact "My Team" card (Care Manager / Supervisor, Buddy Staff Nurse, Transport Driver) with call & coming soon chat.
+    - Overtime Claims card.
+
+---
+
+## 7. Security & Permission Boundaries
 
 | Role | Patient Records Access | Allowed Actions | Restricted Actions |
 |---|---|---|---|

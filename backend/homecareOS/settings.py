@@ -446,4 +446,7 @@ PATIENT_FILE_DEFAULT_RECORD_WINDOW_DAYS = 183
 # Clinical record edit grace window in minutes (Provisional)
 CLINICAL_RECORD_EDIT_WINDOW_MINUTES = 15  # PROVISIONAL - needs clinical policy sign-off
 
+# Nurse Portal: Hours before vitals are marked overdue for patients on active duty
+NURSE_VITALS_DUE_HOURS = 4  # PROVISIONAL - needs clinical sign-off
+
 

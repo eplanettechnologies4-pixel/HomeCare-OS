@@ -153,7 +153,7 @@ class Booking(models.Model):
 
     # Clinical Intake
     diagnosis = models.TextField(blank=True)
-    allergies = models.TextField(blank=True, default='NKDA')
+    allergies = models.TextField(blank=True, default='')
     has_prescription = models.BooleanField(default=False)
     consult_doctor_needed = models.BooleanField(default=False)
     prescription_attachment = models.FileField(upload_to='prescriptions/', null=True, blank=True)

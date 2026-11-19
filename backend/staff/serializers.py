@@ -50,6 +50,7 @@ class StaffListSerializer(serializers.ModelSerializer):
     full_name = serializers.ReadOnlyField()
     role_display = serializers.CharField(source='get_role_display', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
+    employment_status_display = serializers.CharField(source='get_employment_status_display', read_only=True)
     username = serializers.CharField(source='user.username', read_only=True, default='')
     last_login = serializers.DateTimeField(source='user.last_login', read_only=True, default=None)
     platform_allowed_display = serializers.CharField(source='get_platform_allowed_display', read_only=True)
@@ -63,13 +64,36 @@ class StaffListSerializer(serializers.ModelSerializer):
             'photo', 'id_card_front', 'id_card_back',
             'rating', 'hire_date', 'is_active',
             'username', 'last_login', 'platform_allowed', 'platform_allowed_display',
+            'employment_status', 'employment_status_display', 'probation_end_date',
         ]
+
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        request = self.context.get('request')
+        actor = getattr(request, 'user', None) if request else None
+
+        is_privileged = False
+        is_self = False
+        if actor and actor.is_authenticated:
+            actor_role = get_user_role(actor)
+            if actor_role in ('super_admin', 'admin', 'branch_manager') or getattr(actor, 'is_superuser', False):
+                is_privileged = True
+            if instance.user_id and instance.user_id == actor.id:
+                is_self = True
+
+        if not (is_privileged or is_self):
+            ret.pop('employment_status', None)
+            ret.pop('employment_status_display', None)
+            ret.pop('probation_end_date', None)
+
+        return ret
 
 
 class StaffDetailSerializer(serializers.ModelSerializer):
     full_name = serializers.ReadOnlyField()
     role_display = serializers.CharField(source='get_role_display', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
+    employment_status_display = serializers.CharField(source='get_employment_status_display', read_only=True)
     photo = Base64OrImageField(required=False, allow_null=True)
     id_card_front = Base64OrImageField(required=False, allow_null=True)
     id_card_back = Base64OrImageField(required=False, allow_null=True)
@@ -80,6 +104,27 @@ class StaffDetailSerializer(serializers.ModelSerializer):
     class Meta:
         model = StaffMember
         fields = '__all__'
+
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        request = self.context.get('request')
+        actor = getattr(request, 'user', None) if request else None
+
+        is_privileged = False
+        is_self = False
+        if actor and actor.is_authenticated:
+            actor_role = get_user_role(actor)
+            if actor_role in ('super_admin', 'admin', 'branch_manager') or getattr(actor, 'is_superuser', False):
+                is_privileged = True
+            if instance.user_id and instance.user_id == actor.id:
+                is_self = True
+
+        if not (is_privileged or is_self):
+            ret.pop('employment_status', None)
+            ret.pop('employment_status_display', None)
+            ret.pop('probation_end_date', None)
+
+        return ret
 
     def get_certifications(self, obj):
         return CertificationSerializer(obj.certifications.all(), many=True).data
@@ -135,26 +180,53 @@ class StaffDetailSerializer(serializers.ModelSerializer):
                 if not is_actor_super_admin and new_role not in allowed_staff_roles:
                     raise PermissionDenied('You do not have permission to assign this role.')
 
+            # 5. Employment status & probation end date: Writable ONLY by admin, super_admin, branch_manager.
+            # Read-only for self and non-admins.
+            status_in_attrs = 'employment_status' in attrs
+            probation_in_attrs = 'probation_end_date' in attrs
+            status_changed = status_in_attrs and (attrs['employment_status'] != (instance.employment_status or ''))
+            probation_changed = probation_in_attrs and (attrs['probation_end_date'] != instance.probation_end_date)
+
+            if status_changed or probation_changed:
+                can_edit_hr = (actor_role in ('super_admin', 'admin', 'branch_manager')) or getattr(actor, 'is_superuser', False)
+
+                if target_user and target_user == actor:
+                    raise serializers.ValidationError({
+                        'employment_status': ['You cannot edit your own employment status or probation date.']
+                    })
+
+                if not can_edit_hr:
+                    raise PermissionDenied('Only Administrators and Branch Managers can update employment status.')
+
         return attrs
 
     def update(self, instance, validated_data):
         old_role = instance.role
         old_platform = instance.platform_allowed
+        old_emp_status = instance.employment_status
+        old_prob_date = instance.probation_end_date
+
         new_role = validated_data.get('role', old_role)
         new_platform = validated_data.get('platform_allowed', old_platform)
+        new_emp_status = validated_data.get('employment_status', old_emp_status)
+        new_prob_date = validated_data.get('probation_end_date', old_prob_date)
 
         updated_instance = super().update(instance, validated_data)
 
-        # Audit log if role or platform_allowed changed
+        # Audit log if role, platform_allowed, or employment status changed
         request = self.context.get('request')
         actor = getattr(request, 'user', None) if request else None
-        if old_role != new_role or old_platform != new_platform:
-            changes = []
-            if old_role != new_role:
-                changes.append(f"Role changed from {old_role} to {new_role}")
-            if old_platform != new_platform:
-                changes.append(f"Platform allowed changed from {old_platform} to {new_platform}")
+        changes = []
+        if old_role != new_role:
+            changes.append(f"Role changed from {old_role} to {new_role}")
+        if old_platform != new_platform:
+            changes.append(f"Platform allowed changed from {old_platform} to {new_platform}")
+        if old_emp_status != new_emp_status:
+            changes.append(f"Employment status changed from '{old_emp_status or 'not set'}' to '{new_emp_status or 'not set'}'")
+        if old_prob_date != new_prob_date:
+            changes.append(f"Probation end date changed from {old_prob_date} to {new_prob_date}")
 
+        if changes:
             AuditLog.objects.create(
                 actor=actor if (actor and actor.is_authenticated) else None,
                 actor_name=actor.get_full_name() if (actor and actor.is_authenticated) else 'System Administrator',

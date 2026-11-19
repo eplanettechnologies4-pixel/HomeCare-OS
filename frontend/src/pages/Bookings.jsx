@@ -12,6 +12,7 @@ import UniversalPrintButton from '../components/UniversalPrintButton';
 import { format } from 'date-fns';
 import { Stepper } from '../components/ui/Stepper';
 import { SERVICE_CATEGORIES, SERVICE_CATALOG_ITEMS, getItemsByCategory, findCatalogItem, PHARMACY_REQUIREMENTS_NOTE } from '../data/serviceCatalog';
+import { getAllergyInfo } from '../utils/allergyHelpers';
 
 const STATUS_BADGE = {
   pending:     'badge-amber',
@@ -1050,7 +1051,7 @@ function BookingDrawer({ booking, onClose }) {
             <div className="info-row"><span className="info-label">Contact</span><span className="info-value">{booking.patient?.phone || booking.phone || '—'}</span></div>
             <div className="info-row"><span className="info-label">Emergency Contact</span><span className="info-value">{booking.emergency_contact_name ? `${booking.emergency_contact_name} (${booking.emergency_contact_phone})` : (booking.patient?.emergency_contact || '—')}</span></div>
             <div className="info-row"><span className="info-label">Diagnosis</span><span className="info-value" style={{ color: 'var(--status-red)', fontWeight: 600 }}>{booking.diagnosis || booking.patient?.primary_diagnosis || '—'}</span></div>
-            <div className="info-row"><span className="info-label">Allergies</span><span className="info-value">{booking.allergies || booking.patient?.allergies || 'NKDA'}</span></div>
+            <div className="info-row"><span className="info-label">Allergies</span><span className="info-value">{getAllergyInfo(booking.patient?.allergy_status, booking.allergies || booking.patient?.allergies).fullLabel}</span></div>
           </div>
 
           {/* Location & Map Pin */}

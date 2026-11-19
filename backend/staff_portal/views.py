@@ -26,7 +26,10 @@ from homecareOS.permissions import (
 )
 from notifications.models import Notification
 from notifications.views import create_notification
-from patients.models import DoctorNote, Patient, PhysioNote, VitalSign
+from patients.models import DoctorNote, Patient, PhysioNote, VitalSign, ShiftHandoverNote, Prescription, MARAdministration, PatientActiveComplaint
+from patients.serializers import ShiftHandoverNoteSerializer
+from patients.record_integrity import handle_mark_entered_in_error
+from patients.scoping import is_field_nurse_user, check_nurse_patient_access
 from quality.models import ManagerVisitChecklist
 from staff.models import AttendanceRecord, LeaveRequest, StaffMember, RosterAssignment, RosterWeek
 
@@ -354,7 +357,9 @@ class StaffPortalHomeView(APIView):
                 'patient_code': p.patient_code or f"PT-{p.id}",
                 'mr_number': p.mr_number,
                 'age': p.age or target_booking.patient_age,
-                'allergies': getattr(p, 'allergies', None) or 'NKDA',
+                'allergy_status': getattr(p, 'allergy_status', 'not_recorded'),
+                'allergy_status_display': p.get_allergy_status_display() if hasattr(p, 'get_allergy_status_display') else 'Allergies not recorded',
+                'allergies': getattr(p, 'allergies', None) or '',
                 'latest_vitals': latest_vitals_dict,
                 'sparkline': sparkline_points,
                 'chart_counts': chart_counts,
@@ -514,6 +519,157 @@ class StaffPortalHomeView(APIView):
                 'target': fc.chart_type,
             })
 
+        # 5d. Nurse's transcribed orders verified or rejected in last 24h
+        recent_rx_verifications = Prescription.objects.filter(
+            prescribed_by=staff,
+            verified_at__gte=now - datetime.timedelta(hours=24),
+            verification_status__in=['verified', 'rejected']
+        ).select_related('patient')
+        for rx in recent_rx_verifications:
+            st_label = 'verified' if rx.verification_status == 'verified' else 'rejected'
+            alerts_raw.append({
+                'id': f"rx-verif-{rx.id}",
+                'type': f'order_{st_label}',
+                'severity': 'medium' if rx.verification_status == 'verified' else 'high',
+                'title': f"Order for {rx.medication} ({rx.patient.full_name}) was {st_label} by doctor",
+                'patient_id': rx.patient.id,
+                'source_record': f"rx_{rx.id}",
+                'created_at': rx.verified_at.isoformat() if rx.verified_at else now.isoformat(),
+                'target': 'medications',
+            })
+
+        # 5e. Nurse Patients & Vitals Overdue Analysis
+        today_start = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+        today_end = local_now.replace(hour=23, minute=59, second=59, microsecond=999999)
+        vitals_due_hours = getattr(settings, 'NURSE_VITALS_DUE_HOURS', 4)
+
+        nurse_patients_list = []
+        vitals_overdue_list = []
+        patients_today_list = []
+
+        if assigned_patient_ids:
+            assigned_patients_qs = Patient.objects.filter(
+                id__in=assigned_patient_ids, is_active=True
+            ).select_related('assigned_care_manager')
+
+            for p in assigned_patients_qs:
+                latest_v = VitalSign.objects.filter(
+                    patient=p, is_entered_in_error=False
+                ).order_by('-recorded_at').first()
+
+                tier_res = _classify_patient_vitals(latest_v, now)
+                tier = tier_res[0] if isinstance(tier_res, (tuple, list)) else tier_res
+                if tier in ('no_recent_vitals', None, ''):
+                    tier = 'unclassified'
+
+                has_booking_today = Booking.objects.filter(
+                    Q(assigned_staff=staff) | Q(buddy=staff) | Q(buddy_staff=staff),
+                    patient=p,
+                    scheduled_time__range=[today_start, today_end],
+                ).exclude(status=BookingStatus.CANCELLED).exists()
+
+                if has_booking_today:
+                    patients_today_list.append({
+                        'id': p.id,
+                        'patient_id': p.id,
+                        'name': p.full_name,
+                        'mr_number': p.mr_number,
+                        'age': p.age,
+                        'gender': p.gender,
+                        'gender_display': p.get_gender_display(),
+                        'primary_diagnosis': p.primary_diagnosis or '-',
+                        'allergy_status': getattr(p, 'allergy_status', 'not_recorded'),
+                        'allergies': p.allergies or '',
+                        'latest_tier': tier,
+                    })
+
+                    # Vitals overdue check: patient with active visit today has no non-error vitals within NURSE_VITALS_DUE_HOURS
+                    is_overdue = False
+                    if not latest_v:
+                        is_overdue = True
+                    else:
+                        elapsed_hours = (now - latest_v.recorded_at).total_seconds() / 3600.0
+                        if elapsed_hours >= vitals_due_hours:
+                            is_overdue = True
+
+                    if is_overdue:
+                        vitals_overdue_list.append({
+                            'id': p.id,
+                            'patient_id': p.id,
+                            'patient_name': p.full_name,
+                            'mr_number': p.mr_number,
+                            'last_recorded_at': latest_v.recorded_at.isoformat() if latest_v else None,
+                            'hours_overdue': round((now - latest_v.recorded_at).total_seconds() / 3600.0, 1) if latest_v else None,
+                            'latest_tier': tier,
+                        })
+                        alerts_raw.append({
+                            'id': f"vitals-overdue-{p.id}",
+                            'type': 'vitals_overdue',
+                            'severity': 'high',
+                            'title': f"Vitals Overdue for {p.full_name} (> {vitals_due_hours}h since last recorded)",
+                            'patient_id': p.id,
+                            'source_record': f"patient_{p.id}",
+                            'created_at': now.isoformat(),
+                            'target': 'vitals',
+                        })
+
+                # Active complaint
+                active_comp = PatientActiveComplaint.objects.filter(patient=p, resolved_at__isnull=True).first()
+
+                # Latest handover note in last 24h
+                latest_ho = ShiftHandoverNote.objects.filter(
+                    patient=p,
+                    created_at__gte=now - datetime.timedelta(hours=24),
+                    is_entered_in_error=False,
+                ).order_by('-created_at').first()
+
+                is_current = bool(target_booking and target_booking.patient_id == p.id)
+
+                last_v_text = None
+                if latest_v:
+                    reasons_str = []
+                    if latest_v.blood_pressure_systolic:
+                        reasons_str.append(f"BP {latest_v.blood_pressure_systolic}/{latest_v.blood_pressure_diastolic or '-'}")
+                    if latest_v.heart_rate:
+                        reasons_str.append(f"HR {latest_v.heart_rate}")
+                    if latest_v.spo2:
+                        reasons_str.append(f"SpO2 {latest_v.spo2}%")
+                    last_v_text = ' • '.join(reasons_str) if reasons_str else 'Recorded'
+
+                nurse_patients_list.append({
+                    'id': p.id,
+                    'patient_id': p.id,
+                    'name': p.full_name,
+                    'mr_number': p.mr_number,
+                    'age': p.age,
+                    'gender': p.gender,
+                    'gender_display': p.get_gender_display(),
+                    'allergy_status': getattr(p, 'allergy_status', 'not_recorded'),
+                    'allergy_status_display': p.get_allergy_status_display() if hasattr(p, 'get_allergy_status_display') else 'Allergies not recorded',
+                    'allergies': p.allergies or '',
+                    'primary_diagnosis': p.primary_diagnosis or 'Under clinical observation',
+                    'latest_tier': tier,
+                    'last_vitals_time': latest_v.recorded_at.isoformat() if latest_v else None,
+                    'last_vitals_text': last_v_text,
+                    'has_active_complaint': bool(active_comp),
+                    'active_complaint_text': active_comp.complaint_text if active_comp else '',
+                    'address': p.address or 'Address not recorded',
+                    'latitude': float(p.latitude) if p.latitude else None,
+                    'longitude': float(p.longitude) if p.longitude else None,
+                    'latest_handover': {
+                        'id': latest_ho.id,
+                        'text': latest_ho.text,
+                        'author_name': latest_ho.author.get_full_name() or latest_ho.author.username if latest_ho.author else 'Staff Nurse',
+                        'shift_label': latest_ho.shift_label,
+                        'created_at': latest_ho.created_at.isoformat(),
+                    } if latest_ho else None,
+                    'is_current_visit': is_current,
+                    'is_active_today': has_booking_today,
+                })
+
+            # Sort: current visit first, then active today, then name
+            nurse_patients_list.sort(key=lambda x: (not x['is_current_visit'], not x['is_active_today'], x['name']))
+
         # Deduplicate on server by (type + patient + source record), keeping only the latest
         alerts_raw.sort(key=lambda a: a.get('created_at', ''), reverse=True)
         deduped_alerts = []
@@ -528,6 +684,51 @@ class StaffPortalHomeView(APIView):
             'high': [a for a in deduped_alerts if a.get('severity') == 'high'],
             'medium': [a for a in deduped_alerts if a.get('severity') == 'medium'],
             'reminder': [a for a in deduped_alerts if a.get('severity') in ['low', 'reminder']],
+        }
+
+        # Active verified medications across assigned patients
+        active_medications_qs = Prescription.objects.filter(
+            patient_id__in=assigned_patient_ids,
+            verification_status='verified',
+        ).select_related('patient')
+
+        # Nurse's own transcribed prescriptions awaiting verification
+        pending_rx_qs = Prescription.objects.filter(
+            prescribed_by=staff,
+            verification_status='pending_verification',
+        ).select_related('patient')
+
+        # Pending notes count
+        pending_notes_alerts = [a for a in deduped_alerts if a.get('type') == 'pending_notes']
+
+        # Today's Work block
+        today_work = {
+            'patients_today': len(patients_today_list),
+            'vitals_overdue': len(vitals_overdue_list),
+            'active_medications': active_medications_qs.count(),
+            'pending_verification': pending_rx_qs.count(),
+            'pending_notes': len(pending_notes_alerts),
+            'alerts_count': len(deduped_alerts),
+            'my_patients_today': len(patients_today_list),
+            'my_orders_awaiting_verification': pending_rx_qs.count(),
+            'shift_notes_pending': len(pending_notes_alerts),
+            'active_alerts': len(deduped_alerts),
+        }
+
+        # Latest handovers for assigned patients in last 24h
+        handovers_qs = ShiftHandoverNote.objects.filter(
+            patient_id__in=assigned_patient_ids,
+            created_at__gte=now - datetime.timedelta(hours=24),
+            is_entered_in_error=False,
+        ).select_related('patient', 'author').order_by('-created_at')
+        handovers_data = ShiftHandoverNoteSerializer(handovers_qs, many=True, context={'request': request}).data
+
+        # Shared Roster Summary & Employment Status
+        roster_summary = compute_roster_summary(staff, local_now, local_tz)
+        emp_status_block = {
+            'status': staff.employment_status,
+            'status_display': staff.get_employment_status_display() if staff.employment_status else 'Not set',
+            'probation_end_date': staff.probation_end_date.isoformat() if staff.probation_end_date else None,
         }
 
         # 6. Claims summary
@@ -545,18 +746,9 @@ class StaffPortalHomeView(APIView):
         }
 
         # Quick stats for hero row
-        today_start = timezone.make_aware(datetime.datetime.combine(local_now.date(), datetime.time.min))
-        today_end = timezone.make_aware(datetime.datetime.combine(local_now.date(), datetime.time.max))
-        patients_today_count = Booking.objects.filter(
-            Q(assigned_staff=staff) | Q(buddy=staff),
-            scheduled_time__range=[today_start, today_end]
-        ).values('patient_id').distinct().count()
-
-        pending_notes_count = 1 if any(a.get('type') == 'pending_notes' for a in deduped_alerts) else 0
-
         quick_stats = {
-            'patients_today': max(1, patients_today_count) if target_booking else patients_today_count,
-            'pending_notes': pending_notes_count,
+            'patients_today': len(patients_today_list),
+            'pending_notes': len(pending_notes_alerts),
             'active_alerts': len(deduped_alerts),
             'claims_pending': claims_summary['pending'],
         }
@@ -568,7 +760,7 @@ class StaffPortalHomeView(APIView):
         staff_ts = staff.updated_at.isoformat() if staff.updated_at else ''
         booking_ts = target_booking.updated_at.isoformat() if target_booking and target_booking.updated_at else ''
         patient_ts = target_booking.patient.updated_at.isoformat() if target_booking and target_booking.patient and target_booking.patient.updated_at else ''
-        version_str = f"{staff.id}_{staff.full_name}_{staff.designation}_{staff_ts}_{booking_ts}_{patient_ts}_{duty_state}_{len(deduped_alerts)}_{claims_summary['pending']}_{unread_notifications}"
+        version_str = f"{staff.id}_{staff.full_name}_{staff.designation}_{staff_ts}_{booking_ts}_{patient_ts}_{duty_state}_{len(deduped_alerts)}_{claims_summary['pending']}_{unread_notifications}_{len(nurse_patients_list)}_{len(handovers_data)}"
         version_hash = hashlib.md5(version_str.encode('utf-8')).hexdigest()[:12]
 
         return Response({
@@ -587,9 +779,408 @@ class StaffPortalHomeView(APIView):
             'all_alerts': deduped_alerts,         # Complete deduplicated list
             'grouped_alerts': grouped_alerts,
             'quick_stats': quick_stats,
+            'today_work': today_work,
+            'nurse_patients': nurse_patients_list,
+            'handovers': handovers_data,
+            'roster_summary': roster_summary,
+            'employment_status': emp_status_block,
             'claims_summary': claims_summary,
             'unread_notifications': unread_notifications,
         })
+
+
+# ── Helper Functions for Clinician Portal & Roster ────────────────────────────
+
+def _calculate_shift_hours(assign):
+    """
+    Computes scheduled hours for an assignment.
+    Off days (is_off or shift_name 'off') -> 0.0h
+    Standby days ('standby' in shift_name) -> 0.0h
+    Otherwise, if start_time and end_time are present:
+    Normal shift (e.g. 08:00 to 16:00) -> 8.0h
+    Overnight shift (e.g. 20:00 to 08:00) -> 12.0h
+    """
+    if not assign or assign.is_off or assign.shift_name.strip().lower() == 'off':
+        return 0.0
+    if 'standby' in assign.shift_name.strip().lower():
+        return 0.0
+    if not assign.start_time or not assign.end_time:
+        return 0.0
+
+    start_sec = assign.start_time.hour * 3600 + assign.start_time.minute * 60 + assign.start_time.second
+    end_sec = assign.end_time.hour * 3600 + assign.end_time.minute * 60 + assign.end_time.second
+    if end_sec <= start_sec:
+        sec_diff = (86400 - start_sec) + end_sec
+    else:
+        sec_diff = end_sec - start_sec
+    return round(sec_diff / 3600.0, 2)
+
+
+def compute_roster_summary(staff, local_now=None, local_tz=None):
+    if local_tz is None:
+        tz_name = getattr(settings, 'OFFICE_TIMEZONE', 'Asia/Karachi')
+        try:
+            local_tz = ZoneInfo(tz_name)
+        except Exception:
+            local_tz = timezone.get_current_timezone()
+    if local_now is None:
+        local_now = timezone.now().astimezone(local_tz)
+
+    today_date = local_now.date()
+    days_since_monday = today_date.weekday()
+    week_start = today_date - datetime.timedelta(days=days_since_monday)
+    week_end = week_start + datetime.timedelta(days=6)
+
+    import calendar
+    _, last_day = calendar.monthrange(today_date.year, today_date.month)
+    month_start = today_date.replace(day=1)
+    month_end = today_date.replace(day=last_day)
+
+    min_date = min(week_start, month_start, today_date - datetime.timedelta(days=1))
+    max_date = max(week_end, month_end, today_date + datetime.timedelta(days=14))
+
+    assignments = []
+    if staff:
+        assignments = list(
+            RosterAssignment.objects.filter(
+                staff=staff,
+                is_published=True,
+                date__range=[min_date, max_date],
+            ).select_related('shift_template').order_by('date')
+        )
+
+    # 1. Today's duty status
+    today_assign = next((a for a in assignments if a.date == today_date), None)
+    yesterday_assign = next((a for a in assignments if a.date == today_date - datetime.timedelta(days=1)), None)
+
+    duty_status = 'Off'
+    current_shift_name = 'No Shift Scheduled'
+    shift_window = 'None'
+    shift_location = ''
+    progress_percent = 0.0
+
+    in_overnight = False
+    if yesterday_assign and yesterday_assign.start_time and yesterday_assign.end_time and (not yesterday_assign.is_off) and ('standby' not in yesterday_assign.shift_name.strip().lower()):
+        if yesterday_assign.end_time <= yesterday_assign.start_time:
+            y_s_dt = timezone.make_aware(datetime.datetime.combine(yesterday_assign.date, yesterday_assign.start_time), timezone=local_tz)
+            y_e_dt = timezone.make_aware(datetime.datetime.combine(today_date, yesterday_assign.end_time), timezone=local_tz)
+            if y_s_dt <= local_now <= y_e_dt:
+                in_overnight = True
+                duty_status = 'On duty'
+                current_shift_name = yesterday_assign.shift_name
+                shift_window = f"{yesterday_assign.start_time.strftime('%H:%M')} - {yesterday_assign.end_time.strftime('%H:%M')}"
+                shift_location = yesterday_assign.location or 'Main Hospital / Clinic'
+                total_s = max(1, (y_e_dt - y_s_dt).total_seconds())
+                elapsed = (local_now - y_s_dt).total_seconds()
+                progress_percent = round(min(100.0, max(0.0, (elapsed / total_s) * 100.0)), 1)
+
+    if not in_overnight:
+        if today_assign:
+            shift_location = today_assign.location or 'Main Hospital / Clinic'
+            if today_assign.is_off or today_assign.shift_name.strip().lower() == 'off':
+                duty_status = 'Off'
+                current_shift_name = today_assign.shift_name or 'Off Duty'
+                shift_window = 'Off'
+            elif 'standby' in today_assign.shift_name.strip().lower():
+                duty_status = 'Standby'
+                current_shift_name = today_assign.shift_name
+                shift_window = 'Standby'
+            else:
+                current_shift_name = today_assign.shift_name
+                if today_assign.start_time and today_assign.end_time:
+                    shift_window = f"{today_assign.start_time.strftime('%H:%M')} - {today_assign.end_time.strftime('%H:%M')}"
+                    t_s_dt = timezone.make_aware(datetime.datetime.combine(today_date, today_assign.start_time), timezone=local_tz)
+                    if today_assign.end_time <= today_assign.start_time:
+                        t_e_dt = timezone.make_aware(datetime.datetime.combine(today_date + datetime.timedelta(days=1), today_assign.end_time), timezone=local_tz)
+                    else:
+                        t_e_dt = timezone.make_aware(datetime.datetime.combine(today_date, today_assign.end_time), timezone=local_tz)
+
+                    if t_s_dt <= local_now <= t_e_dt:
+                        duty_status = 'On duty'
+                        total_s = max(1, (t_e_dt - t_s_dt).total_seconds())
+                        elapsed = (local_now - t_s_dt).total_seconds()
+                        progress_percent = round(min(100.0, max(0.0, (elapsed / total_s) * 100.0)), 1)
+                    else:
+                        duty_status = 'Off'
+                else:
+                    duty_status = 'On duty'
+        else:
+            duty_status = 'Off'
+            current_shift_name = 'No Shift Scheduled'
+            shift_window = 'None'
+
+    # Next duty
+    next_duty = None
+    for a in assignments:
+        if a.is_off or a.shift_name.strip().lower() == 'off' or 'standby' in a.shift_name.strip().lower():
+            continue
+        if a.date > today_date:
+            next_duty = {
+                'date': a.date.isoformat(),
+                'shift_name': a.shift_name,
+                'window': f"{a.start_time.strftime('%H:%M')} - {a.end_time.strftime('%H:%M')}" if (a.start_time and a.end_time) else '',
+                'location': a.location or 'Main Hospital / Clinic',
+            }
+            break
+        elif a.date == today_date and a.start_time:
+            t_s = timezone.make_aware(datetime.datetime.combine(today_date, a.start_time), timezone=local_tz)
+            if local_now < t_s:
+                next_duty = {
+                    'date': a.date.isoformat(),
+                    'shift_name': a.shift_name,
+                    'window': f"{a.start_time.strftime('%H:%M')} - {a.end_time.strftime('%H:%M')}",
+                    'location': a.location or 'Main Hospital / Clinic',
+                }
+                break
+
+    # 2. 7-day strip (Mon-Sun)
+    day_names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+    weekly_strip = []
+    week_assignments = [a for a in assignments if week_start <= a.date <= week_end]
+    week_hours = 0.0
+
+    for i in range(7):
+        d_date = week_start + datetime.timedelta(days=i)
+        assign = next((a for a in week_assignments if a.date == d_date), None)
+        h = _calculate_shift_hours(assign)
+        week_hours += h
+
+        st = 'off'
+        if assign:
+            if assign.is_off or assign.shift_name.strip().lower() == 'off':
+                st = 'off'
+            elif 'standby' in assign.shift_name.strip().lower():
+                st = 'standby'
+            else:
+                st = 'on'
+
+        weekly_strip.append({
+            'date': d_date.isoformat(),
+            'day_name': day_names[i],
+            'day_number': d_date.day,
+            'is_today': (d_date == today_date),
+            'status': st,
+            'shift_name': assign.shift_name if assign else 'Off',
+            'window': f"{assign.start_time.strftime('%H:%M')} - {assign.end_time.strftime('%H:%M')}" if (assign and assign.start_time and assign.end_time) else ('Off' if st == 'off' else ('Standby' if st == 'standby' else '')),
+            'hours': h,
+            'location': assign.location if assign else '',
+            'color': assign.color if assign else '#9CA3AF',
+        })
+
+    week_hours = round(week_hours, 2)
+
+    # 3. Summary metrics
+    today_hours = _calculate_shift_hours(today_assign)
+    month_assignments = [a for a in assignments if month_start <= a.date <= month_end]
+    month_hours = round(sum(_calculate_shift_hours(a) for a in month_assignments), 2)
+
+    def _count_days(assign_list):
+        on_cnt = 0
+        off_cnt = 0
+        sb_cnt = 0
+        for a in assign_list:
+            if a.is_off or a.shift_name.strip().lower() == 'off':
+                off_cnt += 1
+            elif 'standby' in a.shift_name.strip().lower():
+                sb_cnt += 1
+            else:
+                on_cnt += 1
+        return on_cnt, off_cnt, sb_cnt
+
+    days_on_w, days_off_w, days_sb_w = _count_days(week_assignments)
+    days_on_m, days_off_m, days_sb_m = _count_days(month_assignments)
+
+    max_weekly_hours = getattr(settings, 'ROSTER_MAX_WEEKLY_HOURS', 60)
+    weekly_hours_percent = round((week_hours / max_weekly_hours) * 100, 1) if max_weekly_hours else 0.0
+
+    # Mini calendar month days
+    month_days = []
+    for d in range(1, last_day + 1):
+        m_date = month_start.replace(day=d)
+        assign = next((a for a in month_assignments if a.date == m_date), None)
+        h = _calculate_shift_hours(assign)
+        st = 'off'
+        if assign:
+            if assign.is_off or assign.shift_name.strip().lower() == 'off':
+                st = 'off'
+            elif 'standby' in assign.shift_name.strip().lower():
+                st = 'standby'
+            else:
+                st = 'on'
+        month_days.append({
+            'date': m_date.isoformat(),
+            'day_number': d,
+            'is_today': (m_date == today_date),
+            'status': st,
+            'shift_name': assign.shift_name if assign else 'Off',
+            'hours': h,
+        })
+
+    return {
+        'duty_status': {
+            'status': duty_status,
+            'shift_name': current_shift_name,
+            'window': shift_window,
+            'location': shift_location,
+            'progress_percent': progress_percent,
+            'next_duty': next_duty,
+        },
+        'summary_tiles': {
+            'hours_today': today_hours,
+            'hours_week': week_hours,
+            'hours_month': month_hours,
+            'days_on_week': days_on_w,
+            'days_off_week': days_off_w,
+            'days_standby_week': days_sb_w,
+            'days_on_month': days_on_m,
+            'days_off_month': days_off_m,
+            'days_standby_month': days_sb_m,
+            'max_weekly_hours': max_weekly_hours,
+            'weekly_hours_percent': weekly_hours_percent,
+            'weekly_provisional_note': 'PROVISIONAL - HR sign-off needed',
+        },
+        'weekly_strip': weekly_strip,
+        'week_total_hours': week_hours,
+        'month_days': month_days,
+    }
+
+
+def _classify_patient_vitals(latest_v, now=None):
+    if not latest_v:
+        return 'no_recent_vitals', ['No vitals recorded']
+
+    if now is None:
+        now = timezone.now()
+    recent_window_hrs = getattr(settings, 'RECENT_VITALS_WINDOW_HOURS', 24)
+    vitals_cutoff = now - datetime.timedelta(hours=recent_window_hrs)
+    if latest_v.recorded_at < vitals_cutoff:
+        return 'no_recent_vitals', [f'No vitals recorded within past {recent_window_hrs} hours']
+
+    tier_thresholds = getattr(settings, 'CLINICAL_TIER_THRESHOLDS', {})
+    crit_th = tier_thresholds.get('critical', {})
+    less_th = tier_thresholds.get('less_critical', {})
+    mild_th = tier_thresholds.get('mild', {})
+
+    v_th = getattr(settings, 'VITALS_THRESHOLDS', {})
+    sys_max = v_th.get('systolic_max', 140)
+    sys_min = v_th.get('systolic_min', 90)
+    dia_max = v_th.get('diastolic_max', 90)
+    dia_min = v_th.get('diastolic_min', 60)
+    hr_max = v_th.get('heart_rate_max', 100)
+    hr_min = v_th.get('heart_rate_min', 50)
+    spo2_min = v_th.get('spo2_min', 92)
+    temp_max = v_th.get('temperature_max', 38.0)
+    temp_min = v_th.get('temperature_min', 35.5)
+    bg_max = v_th.get('blood_glucose_max', 180)
+    bg_min = v_th.get('blood_glucose_min', 70)
+    stable_sys_max = mild_th.get('systolic_min', 135) - 1
+
+    sys = latest_v.blood_pressure_systolic
+    dia = latest_v.blood_pressure_diastolic
+    hr = latest_v.heart_rate
+    spo2 = latest_v.spo2
+    temp = float(latest_v.temperature) if latest_v.temperature else None
+    bg = float(latest_v.blood_glucose) if latest_v.blood_glucose else None
+
+    # 1. Critical Tier Check
+    is_critical = (
+        (spo2 is not None and spo2 <= crit_th.get('spo2_max', -1)) or
+        (sys is not None and (sys >= crit_th.get('systolic_high', 999) or sys <= crit_th.get('systolic_low', -1))) or
+        (hr is not None and (hr >= crit_th.get('heart_rate_high', 999) or hr <= crit_th.get('heart_rate_low', -1))) or
+        (temp is not None and temp >= crit_th.get('temperature_high', 999.0))
+    )
+    if is_critical:
+        return 'critical', []
+
+    # 2. Less Critical Tier Check
+    is_less_critical = (
+        (spo2 is not None and less_th.get('spo2_min', 0) <= spo2 <= less_th.get('spo2_max', 0)) or
+        (sys is not None and (
+            (less_th.get('systolic_high_min', 999) <= sys <= less_th.get('systolic_high_max', 0)) or
+            (less_th.get('systolic_low_min', 999) <= sys <= less_th.get('systolic_low_max', 0))
+        )) or
+        (hr is not None and (
+            (less_th.get('heart_rate_high_min', 999) <= hr <= less_th.get('heart_rate_high_max', 0)) or
+            (less_th.get('heart_rate_low_min', 999) <= hr <= less_th.get('heart_rate_low_max', 0))
+        )) or
+        (temp is not None and less_th.get('temperature_high_min', 999.0) <= temp <= less_th.get('temperature_high_max', 0.0))
+    )
+    if is_less_critical:
+        return 'less_critical', []
+
+    # 3. Mild Tier Check
+    is_mild = (
+        (sys is not None and mild_th.get('systolic_min', 999) <= sys <= mild_th.get('systolic_max', 0)) or
+        (temp is not None and mild_th.get('temperature_min', 999.0) <= temp <= mild_th.get('temperature_max', 0.0))
+    )
+    if is_mild:
+        return 'mild', []
+
+    # 4. Unclassified Check (abnormal in baseline VITALS_THRESHOLDS but unbracketed in acute tiers)
+    is_unclassified = (
+        (sys is not None and (sys < sys_min or sys > stable_sys_max)) or
+        (dia is not None and (dia < dia_min or dia > dia_max)) or
+        (hr is not None and (hr < hr_min or hr > hr_max)) or
+        (spo2 is not None and spo2 < spo2_min) or
+        (temp is not None and (temp < temp_min or temp > temp_max)) or
+        (bg is not None and (bg < bg_min or bg > bg_max))
+    )
+    if is_unclassified:
+        reasons = []
+        if dia is not None and (dia < dia_min or dia > dia_max):
+            reasons.append(f"Diastolic BP {dia} mmHg outside normal ({dia_min}-{dia_max})")
+        if bg is not None and (bg < bg_min or bg > bg_max):
+            reasons.append(f"Blood glucose {bg} mg/dL outside normal ({bg_min}-{bg_max})")
+        if temp is not None and temp < temp_min:
+            reasons.append(f"Hypothermia: Temperature {temp}°C below normal ({temp_min}°C)")
+        if not reasons:
+            reasons.append("Vital signs outside baseline normal range - unclassified tier")
+        return 'unclassified', reasons
+
+    return 'stable', []
+
+
+def _get_doctor_tier_groups(user, now=None):
+    if now is None:
+        now = timezone.now()
+    from patients.scoping import get_assigned_patient_ids_for_clinician
+    assigned_pids = get_assigned_patient_ids_for_clinician(user)
+    pt_qs = Patient.objects.filter(is_active=True)
+    if assigned_pids is not None:
+        pt_qs = pt_qs.filter(id__in=assigned_pids)
+
+    groups = {
+        'critical': [],
+        'less_critical': [],
+        'mild': [],
+        'unclassified': [],
+        'no_recent_vitals': [],
+        'stable': [],
+    }
+
+    for pt in pt_qs:
+        latest_v = VitalSign.objects.filter(patient=pt, is_entered_in_error=False).order_by('-recorded_at').first()
+        tier, reasons = _classify_patient_vitals(latest_v, now)
+        v_dict = {
+            'patient_id': pt.id,
+            'patient_name': pt.full_name,
+            'patient_code': pt.patient_code or f"PT-{pt.id}",
+            'mr_number': pt.mr_number,
+            'diagnosis': pt.primary_diagnosis or 'Under clinical care',
+            'last_recorded': latest_v.recorded_at.isoformat() if latest_v else None,
+            'bp': f"{latest_v.blood_pressure_systolic}/{latest_v.blood_pressure_diastolic or '-'}" if (latest_v and latest_v.blood_pressure_systolic) else '-',
+            'hr': latest_v.heart_rate if latest_v else None,
+            'spo2': latest_v.spo2 if latest_v else None,
+            'temp': float(latest_v.temperature) if (latest_v and latest_v.temperature) else None,
+            'blood_glucose': float(latest_v.blood_glucose) if (latest_v and latest_v.blood_glucose) else None,
+            'recorded_at': latest_v.recorded_at.isoformat() if latest_v else None,
+        }
+        if reasons:
+            v_dict['unclassified_reasons'] = reasons
+            v_dict['reason'] = reasons[0]
+        groups[tier].append(v_dict)
+
+    return groups
 
 
 # ── 1b. GET /api/staff-portal/clinician-home/ ─────────────────────────────────
@@ -732,11 +1323,13 @@ class ClinicianPortalHomeView(APIView):
         pending_referrals = []
         pending_consultations = []
         pending_procedures = []
-        for r in sr_qs.order_by('-created_at')[:20]:
+        for r in sr_qs.order_by('-created_at'):
             item = {
                 'id': r.id,
+                'patient_id': r.patient_id,
                 'patient_name': r.patient.full_name if r.patient else 'Unknown',
                 'patient_code': r.patient.patient_code if r.patient else '',
+                'mr_number': r.patient.mr_number if r.patient else '',
                 'urgency': r.urgency,
                 'notes': r.notes,
                 'created_at': r.created_at.isoformat(),
@@ -761,7 +1354,7 @@ class ClinicianPortalHomeView(APIView):
             if assigned_doc_pids is not None:
                 rx_qs = rx_qs.filter(patient_id__in=assigned_doc_pids)
 
-            for rx in rx_qs.order_by('-created_at')[:20]:
+            for rx in rx_qs.order_by('-created_at'):
                 entered_name = rx.entered_by.get_full_name() if rx.entered_by else (rx.uploaded_by.full_name if rx.uploaded_by else rx.prescribed_by)
                 prescriptions_to_verify.append({
                     'id': rx.id,
@@ -790,21 +1383,11 @@ class ClinicianPortalHomeView(APIView):
             'prescriptions_to_verify_count': len(prescriptions_to_verify),
         }
 
-        # 5. High-Alert Patients (Critical, Less critical, Mild, Stable)
-        from patients.scoping import get_assigned_patient_ids_for_clinician
-        assigned_pids = get_assigned_patient_ids_for_clinician(request.user)
-        pt_qs = Patient.objects.filter(is_active=True)
-        if assigned_pids is not None:
-            pt_qs = pt_qs.filter(id__in=assigned_pids)
-
-        recent_window_hrs = getattr(settings, 'RECENT_VITALS_WINDOW_HOURS', 24)
-        vitals_cutoff = now - datetime.timedelta(hours=recent_window_hrs)
-
+        # 5. High-Alert Patients (Critical, Less critical, Mild, Unclassified, Stable)
         tier_thresholds = getattr(settings, 'CLINICAL_TIER_THRESHOLDS', {})
         crit_th = tier_thresholds.get('critical', {})
         less_th = tier_thresholds.get('less_critical', {})
         mild_th = tier_thresholds.get('mild', {})
-
         v_th = getattr(settings, 'VITALS_THRESHOLDS', {})
         sys_max = v_th.get('systolic_max', 140)
         sys_min = v_th.get('systolic_min', 90)
@@ -817,111 +1400,10 @@ class ClinicianPortalHomeView(APIView):
         temp_min = v_th.get('temperature_min', 35.5)
         bg_max = v_th.get('blood_glucose_max', 180)
         bg_min = v_th.get('blood_glucose_min', 70)
-
-        # Stable systolic upper limit removes overlap with mild (mild starts at 135)
         stable_sys_max = mild_th.get('systolic_min', 135) - 1
+        recent_window_hrs = getattr(settings, 'RECENT_VITALS_WINDOW_HOURS', 24)
 
-        high_alert_groups = {
-            'critical': [],
-            'less_critical': [],
-            'mild': [],
-            'unclassified': [],       # Outside baseline normal but matches no tier (Needs review)
-            'no_recent_vitals': [],   # No vitals within recent window
-            'stable': [],
-        }
-
-        for pt in pt_qs[:30]:
-            latest_v = VitalSign.objects.filter(patient=pt, is_entered_in_error=False).order_by('-recorded_at').first()
-
-            if not latest_v or latest_v.recorded_at < vitals_cutoff:
-                high_alert_groups['no_recent_vitals'].append({
-                    'patient_id': pt.id,
-                    'patient_name': pt.full_name,
-                    'patient_code': pt.patient_code or f"PT-{pt.id}",
-                    'mr_number': pt.mr_number,
-                    'diagnosis': pt.primary_diagnosis or 'Under clinical care',
-                    'last_recorded': latest_v.recorded_at.isoformat() if latest_v else None,
-                    'reason': 'No recent vitals recorded within the past 24 hours' if latest_v else 'No vitals recorded',
-                })
-                continue
-
-            v_dict = {
-                'patient_id': pt.id,
-                'patient_name': pt.full_name,
-                'patient_code': pt.patient_code or f"PT-{pt.id}",
-                'mr_number': pt.mr_number,
-                'diagnosis': pt.primary_diagnosis or 'Under clinical care',
-                'bp': f"{latest_v.blood_pressure_systolic}/{latest_v.blood_pressure_diastolic or '-'}" if latest_v.blood_pressure_systolic else '-',
-                'hr': latest_v.heart_rate,
-                'spo2': latest_v.spo2,
-                'temp': float(latest_v.temperature) if latest_v.temperature else None,
-                'blood_glucose': float(latest_v.blood_glucose) if latest_v.blood_glucose else None,
-                'recorded_at': latest_v.recorded_at.isoformat(),
-            }
-
-            sys = latest_v.blood_pressure_systolic
-            dia = latest_v.blood_pressure_diastolic
-            hr = latest_v.heart_rate
-            spo2 = latest_v.spo2
-            temp = float(latest_v.temperature) if latest_v.temperature else None
-            bg = float(latest_v.blood_glucose) if latest_v.blood_glucose else None
-
-            # 1. Critical Tier Check
-            is_critical = (
-                (spo2 is not None and spo2 <= crit_th.get('spo2_max', -1)) or
-                (sys is not None and (sys >= crit_th.get('systolic_high', 999) or sys <= crit_th.get('systolic_low', -1))) or
-                (hr is not None and (hr >= crit_th.get('heart_rate_high', 999) or hr <= crit_th.get('heart_rate_low', -1))) or
-                (temp is not None and temp >= crit_th.get('temperature_high', 999.0))
-            )
-            # 2. Less Critical Tier Check
-            is_less_critical = (
-                (spo2 is not None and less_th.get('spo2_min', 0) <= spo2 <= less_th.get('spo2_max', 0)) or
-                (sys is not None and (
-                    (less_th.get('systolic_high_min', 999) <= sys <= less_th.get('systolic_high_max', 0)) or
-                    (less_th.get('systolic_low_min', 999) <= sys <= less_th.get('systolic_low_max', 0))
-                )) or
-                (hr is not None and (
-                    (less_th.get('heart_rate_high_min', 999) <= hr <= less_th.get('heart_rate_high_max', 0)) or
-                    (less_th.get('heart_rate_low_min', 999) <= hr <= less_th.get('heart_rate_low_max', 0))
-                )) or
-                (temp is not None and less_th.get('temperature_high_min', 999.0) <= temp <= less_th.get('temperature_high_max', 0.0))
-            )
-            # 3. Mild Tier Check
-            is_mild = (
-                (sys is not None and mild_th.get('systolic_min', 999) <= sys <= mild_th.get('systolic_max', 0)) or
-                (temp is not None and mild_th.get('temperature_min', 999.0) <= temp <= mild_th.get('temperature_max', 0.0))
-            )
-            # 4. Unclassified Safety Check (abnormal in baseline VITALS_THRESHOLDS but unbracketed in acute tiers)
-            is_unclassified = (
-                (sys is not None and (sys < sys_min or sys > stable_sys_max)) or
-                (dia is not None and (dia < dia_min or dia > dia_max)) or
-                (hr is not None and (hr < hr_min or hr > hr_max)) or
-                (spo2 is not None and spo2 < spo2_min) or
-                (temp is not None and (temp < temp_min or temp > temp_max)) or
-                (bg is not None and (bg < bg_min or bg > bg_max))
-            )
-
-            if is_critical:
-                high_alert_groups['critical'].append(v_dict)
-            elif is_less_critical:
-                high_alert_groups['less_critical'].append(v_dict)
-            elif is_mild:
-                high_alert_groups['mild'].append(v_dict)
-            elif is_unclassified:
-                # Value outside normal limits with no clinical acute tier (e.g. glucose 400, diastolic 130, hypothermia)
-                reasons = []
-                if dia is not None and (dia < dia_min or dia > dia_max):
-                    reasons.append(f"Diastolic BP {dia} mmHg outside normal ({dia_min}-{dia_max})")
-                if bg is not None and (bg < bg_min or bg > bg_max):
-                    reasons.append(f"Blood glucose {bg} mg/dL outside normal ({bg_min}-{bg_max})")
-                if temp is not None and temp < temp_min:
-                    reasons.append(f"Hypothermia: Temperature {temp}°C below normal ({temp_min}°C)")
-                if not reasons:
-                    reasons.append("Vital signs outside baseline normal range - unclassified tier")
-                v_dict['unclassified_reasons'] = reasons
-                high_alert_groups['unclassified'].append(v_dict)
-            else:
-                high_alert_groups['stable'].append(v_dict)
+        high_alert_groups = _get_doctor_tier_groups(request.user, now=now)
 
         quick_links = [
             {'id': 'patients', 'label': 'Patient Records', 'page': 'patient-chart', 'icon': 'Folder'},
@@ -1029,9 +1511,22 @@ class ClinicianPortalHomeView(APIView):
                 'video': video_counts,
             }
 
+        # 7. Employment Status Block & Roster Summary Block
+        employment_status_block = None
+        if staff:
+            employment_status_block = {
+                'status': staff.employment_status or '',
+                'status_display': staff.get_employment_status_display() if staff.employment_status else '',
+                'probation_end_date': staff.probation_end_date.isoformat() if staff.probation_end_date else None,
+            }
+
+        roster_summary_block = compute_roster_summary(staff, local_now, local_tz)
+
         resp_data = {
             'staff': digital_id,
             'working_hours': working_hours,
+            'employment_status': employment_status_block,
+            'roster_summary': roster_summary_block,
             'today_visits': today_visits,
             'pending_requests': pending_requests,
             'high_alert_patients': high_alert_groups,
@@ -1044,6 +1539,671 @@ class ClinicianPortalHomeView(APIView):
             resp_data['consultation_counts'] = consultation_counts
 
         return Response(resp_data)
+
+
+# ── Drawer Scoped List Endpoints for Doctor Portal ────────────────────────────
+
+class DoctorConsultationsListView(APIView):
+    """
+    Drawer endpoint returning physical consultations for the logged-in doctor.
+    Supports ?filter=today|this_week|this_month|completed|scheduled|total.
+    Role must be doctor. Non-doctor gets 403. Unassigned clinician or unassigned patient gets 403/404.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        user_role = get_user_role(request.user)
+        staff = _resolve_staff_member(request.user)
+        is_doctor = (user_role == 'doctor' or (staff and staff.role == 'doctor'))
+        if not is_doctor:
+            return Response({'detail': 'Doctor privileges required.'}, status=status.HTTP_403_FORBIDDEN)
+
+        from patients.scoping import get_assigned_patient_ids_for_clinician, check_clinician_patient_access
+        assigned_pids = get_assigned_patient_ids_for_clinician(request.user)
+        patient_id = request.query_params.get('patient_id')
+        if patient_id:
+            check_clinician_patient_access(request.user, patient_id)
+        elif not assigned_pids:
+            return Response({'detail': 'No assigned patients found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        filter_param = request.query_params.get('filter', 'today').lower().strip()
+        doctor_service_types = [
+            ServiceType.DOCTOR_CONSULTATION,
+            ServiceType.DOCTORS,
+            'doctor_consultation',
+            'doctors',
+        ]
+        qs = Booking.objects.filter(
+            assigned_staff=staff,
+            service_type__in=doctor_service_types,
+        ).exclude(status=BookingStatus.CANCELLED).exclude(service_mode=ServiceMode.ONLINE)
+
+        if patient_id:
+            qs = qs.filter(patient_id=patient_id)
+        elif assigned_pids is not None:
+            qs = qs.filter(patient_id__in=assigned_pids)
+
+        now = timezone.now()
+        tz_name = getattr(settings, 'OFFICE_TIMEZONE', 'Asia/Karachi')
+        try:
+            local_tz = ZoneInfo(tz_name)
+        except Exception:
+            local_tz = timezone.get_current_timezone()
+        local_now = now.astimezone(local_tz)
+
+        today_start = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+        today_end = local_now.replace(hour=23, minute=59, second=59, microsecond=999999)
+        days_since_monday = local_now.weekday()
+        week_start = (local_now - datetime.timedelta(days=days_since_monday)).replace(hour=0, minute=0, second=0, microsecond=0)
+        week_end = (week_start + datetime.timedelta(days=6)).replace(hour=23, minute=59, second=59, microsecond=999999)
+        import calendar
+        _, last_day = calendar.monthrange(local_now.year, local_now.month)
+        month_start = local_now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        month_end = local_now.replace(day=last_day, hour=23, minute=59, second=59, microsecond=999999)
+
+        scheduled_statuses = [
+            BookingStatus.ASSIGNED,
+            BookingStatus.IN_PROGRESS,
+            BookingStatus.EN_ROUTE,
+            BookingStatus.PENDING,
+            'confirmed',
+            'assigned',
+            'in_progress',
+        ]
+
+        if filter_param == 'today':
+            qs = qs.filter(scheduled_time__range=(today_start, today_end))
+        elif filter_param == 'this_week':
+            qs = qs.filter(scheduled_time__range=(week_start, week_end))
+        elif filter_param == 'this_month':
+            qs = qs.filter(scheduled_time__range=(month_start, month_end))
+        elif filter_param == 'completed':
+            qs = qs.filter(status=BookingStatus.COMPLETED)
+        elif filter_param == 'scheduled':
+            qs = qs.filter(status__in=scheduled_statuses).exclude(status=BookingStatus.COMPLETED)
+        # 'total' leaves qs as all physical_qs
+
+        bookings = qs.select_related('patient').order_by('-scheduled_time')
+        results = []
+        for b in bookings:
+            p = b.patient
+            results.append({
+                'id': b.id,
+                'patient_id': p.id if p else None,
+                'patient_name': p.full_name if p else '',
+                'patient_code': p.patient_code if p else f"PT-{b.patient_id}",
+                'mr_number': p.mr_number if p else '',
+                'age': p.age if p else None,
+                'gender': p.get_gender_display() if (p and hasattr(p, 'get_gender_display')) else (p.gender if p else ''),
+                'diagnosis': b.diagnosis or (p.primary_diagnosis if p else ''),
+                'location': b.address or (p.address if p else ''),
+                'scheduled_time': b.scheduled_time.isoformat() if b.scheduled_time else None,
+                'status': b.status,
+                'service_type': b.service_type,
+            })
+
+        return Response({
+            'filter': filter_param,
+            'count': len(results),
+            'results': results,
+        })
+
+
+class DoctorPendingRequestsListView(APIView):
+    """
+    Drawer endpoint returning pending clinical requests (referrals, consultations, procedures, prescriptions_to_verify)
+    for the logged-in doctor.
+    Supports ?type=referrals|consultations|procedures|prescriptions_to_verify|all.
+    Role must be doctor. Non-doctor gets 403. Unassigned clinician or unassigned patient gets 403/404.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        user_role = get_user_role(request.user)
+        staff = _resolve_staff_member(request.user)
+        is_doctor = (user_role == 'doctor' or (staff and staff.role == 'doctor'))
+        if not is_doctor:
+            return Response({'detail': 'Doctor privileges required.'}, status=status.HTTP_403_FORBIDDEN)
+
+        from patients.scoping import get_assigned_patient_ids_for_clinician, check_clinician_patient_access
+        assigned_pids = get_assigned_patient_ids_for_clinician(request.user)
+        patient_id = request.query_params.get('patient_id')
+        if patient_id:
+            check_clinician_patient_access(request.user, patient_id)
+        elif not assigned_pids:
+            return Response({'detail': 'No assigned patients found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        req_type = request.query_params.get('type', 'all').lower().strip()
+
+        # Fetch StaffRequests
+        sr_qs = StaffRequest.objects.filter(status='pending').select_related('patient', 'staff')
+        if patient_id:
+            sr_qs = sr_qs.filter(patient_id=patient_id)
+        elif assigned_pids is not None:
+            sr_qs = sr_qs.filter(Q(patient_id__in=assigned_pids) | Q(staff=staff))
+
+        pending_referrals = []
+        pending_consultations = []
+        pending_procedures = []
+        for r in sr_qs.order_by('-created_at'):
+            item = {
+                'id': r.id,
+                'patient_id': r.patient_id,
+                'patient_name': r.patient.full_name if r.patient else 'Unknown',
+                'patient_code': r.patient.patient_code if r.patient else '',
+                'mr_number': r.patient.mr_number if r.patient else '',
+                'urgency': r.urgency,
+                'notes': r.notes,
+                'created_at': r.created_at.isoformat(),
+                'type': r.request_type,
+            }
+            if r.request_type == 'referral':
+                pending_referrals.append(item)
+            elif r.request_type == 'appointment':
+                pending_consultations.append(item)
+            elif r.request_type == 'procedure_change':
+                pending_procedures.append(item)
+
+        # Fetch Prescriptions to verify
+        prescriptions_to_verify = []
+        from patients.models import Prescription
+        rx_qs = Prescription.objects.filter(
+            verification_status='pending_verification'
+        ).select_related('patient', 'entered_by', 'uploaded_by')
+        if patient_id:
+            rx_qs = rx_qs.filter(patient_id=patient_id)
+        elif assigned_pids is not None:
+            rx_qs = rx_qs.filter(patient_id__in=assigned_pids)
+
+        for rx in rx_qs.order_by('-created_at'):
+            entered_name = rx.entered_by.get_full_name() if rx.entered_by else (rx.uploaded_by.full_name if rx.uploaded_by else rx.prescribed_by)
+            prescriptions_to_verify.append({
+                'id': rx.id,
+                'patient_id': rx.patient_id,
+                'patient_name': rx.patient.full_name if rx.patient else 'Unknown',
+                'patient_code': rx.patient.patient_code if rx.patient else '',
+                'mr_number': rx.patient.mr_number if rx.patient else '',
+                'medication': rx.medication,
+                'dosage': rx.dosage,
+                'frequency': rx.frequency,
+                'route': rx.route,
+                'duration_days': rx.duration_days,
+                'ordering_doctor_name': rx.ordering_doctor_name,
+                'entered_by': entered_name,
+                'order_source': rx.order_source,
+                'created_at': rx.created_at.isoformat(),
+                'type': 'prescription_verification',
+            })
+
+        if req_type == 'referrals':
+            results = pending_referrals
+        elif req_type == 'consultations':
+            results = pending_consultations
+        elif req_type == 'procedures':
+            results = pending_procedures
+        elif req_type == 'prescriptions_to_verify':
+            results = prescriptions_to_verify
+        else:
+            results = pending_referrals + pending_consultations + pending_procedures + prescriptions_to_verify
+
+        return Response({
+            'type': req_type,
+            'count': len(results),
+            'results': results,
+        })
+
+
+class DoctorPatientsByTierListView(APIView):
+    """
+    Drawer endpoint returning patients assigned to the doctor filtered by acute clinical tier:
+    critical, less_critical, mild, unclassified, stable.
+    Role must be doctor. Non-doctor gets 403. Unassigned clinician or unassigned patient gets 403/404.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        user_role = get_user_role(request.user)
+        staff = _resolve_staff_member(request.user)
+        is_doctor = (user_role == 'doctor' or (staff and staff.role == 'doctor'))
+        if not is_doctor:
+            return Response({'detail': 'Doctor privileges required.'}, status=status.HTTP_403_FORBIDDEN)
+
+        from patients.scoping import get_assigned_patient_ids_for_clinician, check_clinician_patient_access
+        assigned_pids = get_assigned_patient_ids_for_clinician(request.user)
+        patient_id = request.query_params.get('patient_id')
+        if patient_id:
+            check_clinician_patient_access(request.user, patient_id)
+        elif not assigned_pids:
+            return Response({'detail': 'No assigned patients found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        tier = request.query_params.get('tier', 'critical').lower().strip()
+        groups = _get_doctor_tier_groups(request.user)
+        results = groups.get(tier, [])
+
+        if patient_id:
+            pid_int = int(patient_id)
+            results = [r for r in results if r['patient_id'] == pid_int]
+
+        return Response({
+            'tier': tier,
+            'count': len(results),
+            'results': results,
+        })
+
+
+class NurseTodayWorkListView(APIView):
+    """
+    Drawer endpoint returning items for the nurse's 'Today's Work' numbers:
+    - patients_today: assigned patients with an active or scheduled visit today
+    - vitals_overdue: patients with active visits whose latest non-error vitals are older than NURSE_VITALS_DUE_HOURS
+    - active_medications: active verified medications across assigned patients
+    - pending_verification: nurse's own transcribed prescriptions awaiting verification
+    - pending_notes: patients with active shift > 2h without a nurse note
+    - alerts: active alerts for the nurse's patients
+    Role must be nurse (field nurse). Non-nurses get 403 Forbidden.
+    Scoped strictly to assigned patients.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        user_role = get_user_role(request.user)
+        staff = _resolve_staff_member(request.user)
+        is_nurse = (user_role == 'nurse' or (staff and staff.role == 'nurse'))
+        if not is_nurse:
+            return Response({'detail': 'Nurse privileges required.'}, status=status.HTTP_403_FORBIDDEN)
+
+        from patients.scoping import get_assigned_patient_ids_for_clinician
+        assigned_pids = get_assigned_patient_ids_for_clinician(request.user)
+        if not assigned_pids:
+            return Response({'detail': 'No assigned patients found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        type_param = request.query_params.get('type', 'patients_today').lower().strip()
+        now = timezone.now()
+        tz_name = getattr(settings, 'OFFICE_TIMEZONE', 'Asia/Karachi')
+        try:
+            local_tz = ZoneInfo(tz_name)
+        except Exception:
+            local_tz = timezone.get_current_timezone()
+        local_now = now.astimezone(local_tz)
+
+        today_start = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+        today_end = local_now.replace(hour=23, minute=59, second=59, microsecond=999999)
+        vitals_due_hours = getattr(settings, 'NURSE_VITALS_DUE_HOURS', 4)
+
+        results = []
+
+        if type_param == 'patients_today':
+            bookings = Booking.objects.filter(
+                Q(assigned_staff=staff) | Q(buddy=staff) | Q(buddy_staff=staff),
+                patient_id__in=assigned_pids,
+                scheduled_time__range=[today_start, today_end],
+            ).exclude(status=BookingStatus.CANCELLED).select_related('patient')
+
+            seen = set()
+            for b in bookings:
+                p = b.patient
+                if p.id not in seen:
+                    seen.add(p.id)
+                    latest_v = VitalSign.objects.filter(patient=p, is_entered_in_error=False).order_by('-recorded_at').first()
+                    tier_res = _classify_patient_vitals(latest_v, now)
+                    t_name = tier_res[0] if isinstance(tier_res, (tuple, list)) else tier_res
+                    if t_name in ('no_recent_vitals', None, ''):
+                        t_name = 'unclassified'
+                    results.append({
+                        'patient_id': p.id,
+                        'name': p.full_name,
+                        'mr_number': p.mr_number,
+                        'age': p.age,
+                        'gender': p.gender,
+                        'gender_display': p.get_gender_display(),
+                        'primary_diagnosis': p.primary_diagnosis or '-',
+                        'allergy_status': getattr(p, 'allergy_status', 'not_recorded'),
+                        'allergy_status_display': p.get_allergy_status_display() if hasattr(p, 'get_allergy_status_display') else 'Allergies not recorded',
+                        'allergies': p.allergies or '',
+                        'latest_tier': t_name,
+                        'booking_id': b.id,
+                        'scheduled_time': b.scheduled_time.isoformat() if b.scheduled_time else None,
+                        'service_type': b.get_service_type_display() if hasattr(b, 'get_service_type_display') else b.service_type,
+                    })
+
+        elif type_param == 'vitals_overdue':
+            # Patients with active or scheduled visit today
+            patient_ids_today = set(Booking.objects.filter(
+                Q(assigned_staff=staff) | Q(buddy=staff) | Q(buddy_staff=staff),
+                patient_id__in=assigned_pids,
+                scheduled_time__range=[today_start, today_end],
+            ).exclude(status=BookingStatus.CANCELLED).values_list('patient_id', flat=True))
+
+            for pid in patient_ids_today:
+                p = Patient.objects.filter(id=pid).first()
+                if not p:
+                    continue
+                latest_v = VitalSign.objects.filter(patient=p, is_entered_in_error=False).order_by('-recorded_at').first()
+                is_overdue = False
+                if not latest_v:
+                    is_overdue = True
+                else:
+                    elapsed = (now - latest_v.recorded_at).total_seconds() / 3600.0
+                    if elapsed >= vitals_due_hours:
+                        is_overdue = True
+
+                if is_overdue:
+                    tier_res = _classify_patient_vitals(latest_v, now)
+                    t_name = tier_res[0] if isinstance(tier_res, (tuple, list)) else tier_res
+                    if t_name in ('no_recent_vitals', None, ''):
+                        t_name = 'unclassified'
+                    results.append({
+                        'patient_id': p.id,
+                        'patient_name': p.full_name,
+                        'mr_number': p.mr_number,
+                        'last_recorded_at': latest_v.recorded_at.isoformat() if latest_v else None,
+                        'hours_overdue': round((now - latest_v.recorded_at).total_seconds() / 3600.0, 1) if latest_v else None,
+                        'latest_tier': t_name,
+                    })
+
+        elif type_param == 'active_medications':
+            rxs = Prescription.objects.filter(
+                patient_id__in=assigned_pids,
+                verification_status='verified',
+            ).select_related('patient').order_by('patient__last_name', 'medication')
+
+            for rx in rxs:
+                last_admin = MARAdministration.objects.filter(
+                    prescription=rx,
+                    is_entered_in_error=False,
+                ).order_by('-administered_at').first()
+
+                results.append({
+                    'id': rx.id,
+                    'patient_id': rx.patient.id,
+                    'patient_name': rx.patient.full_name,
+                    'mr_number': rx.patient.mr_number,
+                    'medication': rx.medication,
+                    'dosage': rx.dosage,
+                    'route': rx.route,
+                    'frequency': rx.frequency,
+                    'last_administered_at': last_admin.administered_at.isoformat() if last_admin else None,
+                    'status': rx.verification_status,
+                })
+
+        elif type_param == 'pending_verification':
+            pending_rxs = Prescription.objects.filter(
+                prescribed_by=staff,
+                verification_status='pending_verification',
+            ).select_related('patient').order_by('-date')
+
+            for rx in pending_rxs:
+                results.append({
+                    'id': rx.id,
+                    'patient_id': rx.patient.id,
+                    'patient_name': rx.patient.full_name,
+                    'mr_number': rx.patient.mr_number,
+                    'medication': rx.medication,
+                    'dosage': rx.dosage,
+                    'route': rx.route,
+                    'frequency': rx.frequency,
+                    'date': rx.date.isoformat() if hasattr(rx.date, 'isoformat') else str(rx.date),
+                    'verification_status': rx.verification_status,
+                })
+
+        elif type_param == 'pending_notes':
+            timeout_hours = getattr(settings, 'SHIFT_NOTE_TIMEOUT_HOURS', 2)
+            active_bks = Booking.objects.filter(
+                Q(assigned_staff=staff) | Q(buddy=staff) | Q(buddy_staff=staff),
+                patient_id__in=assigned_pids,
+                scheduled_time__lte=now - datetime.timedelta(hours=timeout_hours),
+                status__in=[BookingStatus.ASSIGNED, BookingStatus.IN_PROGRESS, BookingStatus.EN_ROUTE],
+            ).exclude(status=BookingStatus.CANCELLED).select_related('patient')
+
+            seen = set()
+            for b in active_bks:
+                if b.patient_id in seen:
+                    continue
+                has_note = b.patient.nurse_notes.filter(
+                    recorded_by=staff,
+                    recorded_at__gte=b.scheduled_time
+                ).exists()
+                if not has_note:
+                    seen.add(b.patient_id)
+                    results.append({
+                        'patient_id': b.patient.id,
+                        'patient_name': b.patient.full_name,
+                        'mr_number': b.patient.mr_number,
+                        'shift_started_at': b.scheduled_time.isoformat(),
+                        'hours_elapsed': round((now - b.scheduled_time).total_seconds() / 3600.0, 1),
+                        'booking_id': b.id,
+                    })
+
+        elif type_param == 'alerts':
+            alerts_raw = []
+            for pid in assigned_pids:
+                p = Patient.objects.filter(id=pid).first()
+                if not p:
+                    continue
+                latest_v = VitalSign.objects.filter(patient=p, is_entered_in_error=False).order_by('-recorded_at').first()
+                has_booking_today = Booking.objects.filter(
+                    Q(assigned_staff=staff) | Q(buddy=staff) | Q(buddy_staff=staff),
+                    patient=p,
+                    scheduled_time__range=[today_start, today_end],
+                ).exclude(status=BookingStatus.CANCELLED).exists()
+                if has_booking_today and (not latest_v or (now - latest_v.recorded_at).total_seconds() / 3600.0 >= vitals_due_hours):
+                    alerts_raw.append({
+                        'id': f"vitals-overdue-{p.id}",
+                        'type': 'vitals_overdue',
+                        'severity': 'high',
+                        'title': f"Vitals Overdue for {p.full_name}",
+                        'patient_id': p.id,
+                        'source_record': f"patient_{p.id}",
+                        'created_at': now.isoformat(),
+                    })
+                if latest_v and _classify_patient_vitals(latest_v, now) == 'critical':
+                    alerts_raw.append({
+                        'id': f"critical-vitals-{latest_v.id}",
+                        'type': 'critical_vitals',
+                        'severity': 'high',
+                        'title': f"Critical Vitals Alert for {p.full_name}",
+                        'patient_id': p.id,
+                        'source_record': f"vital_{latest_v.id}",
+                        'created_at': latest_v.recorded_at.isoformat(),
+                    })
+            for rx in Prescription.objects.filter(
+                prescribed_by=staff,
+                verified_at__gte=now - datetime.timedelta(hours=24),
+                verification_status__in=['verified', 'rejected']
+            ).select_related('patient'):
+                alerts_raw.append({
+                    'id': f"rx-verif-{rx.id}",
+                    'type': f'order_{rx.verification_status}',
+                    'severity': 'medium' if rx.verification_status == 'verified' else 'high',
+                    'title': f"Order for {rx.medication} ({rx.patient.full_name}) was {rx.verification_status}",
+                    'patient_id': rx.patient.id,
+                    'source_record': f"rx_{rx.id}",
+                    'created_at': rx.verified_at.isoformat() if rx.verified_at else now.isoformat(),
+                })
+            # Deduplicate alerts
+            seen_keys = set()
+            for a in alerts_raw:
+                k = (a.get('type'), a.get('patient_id'), a.get('source_record'))
+                if k not in seen_keys:
+                    seen_keys.add(k)
+                    results.append(a)
+
+        return Response({
+            'type': type_param,
+            'count': len(results),
+            'results': results,
+        })
+
+
+class ShiftHandoverNoteListView(APIView):
+    """
+    List and create shift handover notes.
+    Write: Nurse only (assigned patient). Audited without note text.
+    Read: Assigned nurses, treating doctor, care manager, admin, super_admin.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        role = get_user_role(user)
+        is_admin_or_cm = (role in ('super_admin', 'admin', 'care_manager')) or getattr(user, 'is_superuser', False)
+
+        patient_id = request.query_params.get('patient_id')
+        from patients.scoping import get_assigned_patient_ids_for_clinician, check_clinician_patient_access
+
+        if patient_id:
+            if not is_admin_or_cm:
+                check_clinician_patient_access(user, patient_id)
+            pids = [int(patient_id)]
+        else:
+            if is_admin_or_cm:
+                pids = None
+            else:
+                pids = get_assigned_patient_ids_for_clinician(user)
+                if not pids:
+                    return Response([], status=status.HTTP_200_OK)
+
+        now = timezone.now()
+        qs = ShiftHandoverNote.objects.filter(is_entered_in_error=False)
+        if request.query_params.get('all') != 'true':
+            qs = qs.filter(created_at__gte=now - datetime.timedelta(hours=24))
+
+        if pids is not None:
+            qs = qs.filter(patient_id__in=pids)
+
+        qs = qs.select_related('patient', 'author').order_by('-created_at')
+        serializer = ShiftHandoverNoteSerializer(qs, many=True, context={'request': request})
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        user = request.user
+        role = get_user_role(user)
+        staff = _resolve_staff_member(user)
+
+        is_nurse = (role == 'nurse' or (staff and staff.role == 'nurse'))
+        if not is_nurse:
+            return Response(
+                {'detail': 'Only assigned nurses may author shift handover notes.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        patient_id = request.data.get('patient_id') or request.data.get('patient')
+        if not patient_id:
+            return Response({'detail': 'patient_id is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        patient = Patient.objects.filter(id=patient_id, is_active=True).first()
+        if not patient:
+            return Response({'detail': 'Patient not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        from patients.scoping import get_assigned_patient_ids_for_clinician
+        assigned_pids = get_assigned_patient_ids_for_clinician(user)
+        if assigned_pids is not None and patient.id not in assigned_pids:
+            return Response(
+                {'detail': 'Nurse is not assigned to this patient.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        text = (request.data.get('text') or '').strip()
+        if not text:
+            return Response({'detail': 'Handover text is required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        shift_label = (request.data.get('shift_label') or '').strip()
+        shift_date_str = request.data.get('shift_date')
+        if shift_date_str:
+            try:
+                shift_date = datetime.date.fromisoformat(shift_date_str)
+            except ValueError:
+                shift_date = timezone.now().date()
+        else:
+            shift_date = timezone.now().date()
+
+        handover = ShiftHandoverNote.objects.create(
+            patient=patient,
+            author=user,
+            shift_label=shift_label,
+            shift_date=shift_date,
+            text=text,
+        )
+
+        actor_name = user.get_full_name() or user.username
+        AuditLog.objects.create(
+            actor=user,
+            actor_name=actor_name,
+            action="Shift Handover Note Created",
+            target_user=f"Patient {patient.patient_code or patient.id}",
+            details=f"Nurse ID {user.id} created handover note for Patient ID {patient.id}",
+            timestamp=timezone.now()
+        )
+
+        serializer = ShiftHandoverNoteSerializer(handover, context={'request': request})
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class ShiftHandoverNoteDetailView(APIView):
+    """
+    Retrieve, edit (within 15-minute window), or block physical delete of ShiftHandoverNote.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_object(self, pk):
+        return get_object_or_404(ShiftHandoverNote, pk=pk)
+
+    def patch(self, request, pk):
+        note = self.get_object(pk)
+        user = request.user
+
+        if note.author_id != user.id:
+            return Response({'detail': 'Only the author nurse may edit this handover note.'}, status=status.HTTP_403_FORBIDDEN)
+
+        if note.is_entered_in_error:
+            return Response({'detail': 'Cannot edit a record marked as entered in error.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not note.is_within_edit_window():
+            window = getattr(settings, 'CLINICAL_RECORD_EDIT_WINDOW_MINUTES', 15)
+            return Response(
+                {'detail': f"Author edit window of {window} minutes has expired."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        text = (request.data.get('text') or '').strip()
+        if not text:
+            return Response({'detail': 'Handover text cannot be empty.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        note.text = text
+        if request.data.get('shift_label'):
+            note.shift_label = request.data.get('shift_label').strip()
+        note.save(update_fields=['text', 'shift_label', 'updated_at'])
+
+        AuditLog.objects.create(
+            actor=user,
+            actor_name=user.get_full_name() or user.username,
+            action="Shift Handover Note Edited",
+            target_user=f"Patient {note.patient.patient_code or note.patient.id}",
+            details=f"Nurse ID {user.id} edited handover note ID {note.id}",
+            timestamp=timezone.now()
+        )
+
+        serializer = ShiftHandoverNoteSerializer(note, context={'request': request})
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def delete(self, request, pk):
+        return Response(
+            {'detail': 'Physical deletion of clinical handover notes is prohibited. Mark as entered in error instead.'},
+            status=status.HTTP_405_METHOD_NOT_ALLOWED
+        )
+
+
+class ShiftHandoverNoteMarkErrorView(APIView):
+    """
+    Mark ShiftHandoverNote entered in error.
+    Author (within 15m) or treating doctor at any time. Reason is required.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, pk):
+        note = get_object_or_404(ShiftHandoverNote, pk=pk)
+        return handle_mark_entered_in_error(request, note.patient, note, 'handover')
+
 
 
 # ── 2. GET /api/staff-portal/roster/ ───────────────────────────────────────────
@@ -1286,6 +2446,10 @@ class StaffPortalPatientsListView(APIView):
                     status=BookingStatus.CANCELLED
                 ).order_by('scheduled_time').first()
             )
+            latest_v = VitalSign.objects.filter(patient=p, is_entered_in_error=False).order_by('-recorded_at').first()
+            tier, _ = _classify_patient_vitals(latest_v, now)
+            has_complaint = p.active_complaints.filter(resolved_at__isnull=True).exists() if hasattr(p, 'active_complaints') else False
+
             results.append({
                 'id': p.id,
                 'name': p.full_name,
@@ -1296,6 +2460,8 @@ class StaffPortalPatientsListView(APIView):
                 'diagnosis': p.primary_diagnosis or 'Under clinical observation',
                 'location': p.address,
                 'is_active': p.is_active,
+                'has_active_complaint': has_complaint,
+                'latest_tier': tier,
                 'next_visit': next_booking.scheduled_time.isoformat() if next_booking else None,
                 'next_visit_type': next_booking.get_service_type_display() if next_booking and hasattr(next_booking, 'get_service_type_display') else (next_booking.service_type if next_booking else None),
             })
@@ -1358,7 +2524,9 @@ class StaffPortalPatientDetailView(APIView):
 
         care_plan = {
             'diagnosis': patient.primary_diagnosis or (active_booking.diagnosis if active_booking else ''),
-            'allergies': patient.allergies or 'NKDA',
+            'allergy_status': getattr(patient, 'allergy_status', 'not_recorded'),
+            'allergy_status_display': patient.get_allergy_status_display() if hasattr(patient, 'get_allergy_status_display') else 'Allergies not recorded',
+            'allergies': patient.allergies or '',
             'blood_type': patient.blood_type or 'Unknown',
             'care_manager': patient.assigned_care_manager.full_name if patient.assigned_care_manager else 'Assigned Care Coordinator',
             'clinical_requirements': active_booking.clinical_requirements if active_booking else '',
