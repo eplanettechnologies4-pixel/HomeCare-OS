@@ -449,4 +449,17 @@ CLINICAL_RECORD_EDIT_WINDOW_MINUTES = 15  # PROVISIONAL - needs clinical policy 
 # Nurse Portal: Hours before vitals are marked overdue for patients on active duty
 NURSE_VITALS_DUE_HOURS = 4  # PROVISIONAL - needs clinical sign-off
 
+# ── Staff Lifecycle Configuration ───────────────────────────────────────────
+# Thresholds and defaults (PROVISIONAL - needs HR sign-off)
+STAFF_MIN_MANAGEMENT_FEEDBACK = 1       # PROVISIONAL - needs HR sign-off
+STAFF_MIN_FAMILY_FEEDBACK = 1           # PROVISIONAL - needs HR sign-off
+STAFF_PROBATION_DEFAULT_DAYS = 90       # PROVISIONAL - needs HR sign-off
+STAFF_ACTIVATION_CODE_DAYS = 7          # PROVISIONAL - needs HR sign-off
+STAFF_DOCUMENT_MAX_MB = 10              # PROVISIONAL - needs HR sign-off
+STAFF_STAGES_ALLOWED_CLINICAL = ('probation', 'active')  # PROVISIONAL - needs HR sign-off
+
+# Private storage path for confidential staff documentation
+PRIVATE_MEDIA_ROOT = os.path.join(str(BASE_DIR), 'private_media')
+
+
 

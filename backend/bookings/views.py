@@ -386,6 +386,9 @@ class BookingViewSet(viewsets.ModelViewSet):
             staff = StaffMember.objects.get(pk=staff_id)
         except StaffMember.DoesNotExist:
             return Response({'error': 'Primary staff not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        if getattr(staff, 'lifecycle_stage', None) == 'trainee':
+            return Response({'error': f'Staff member {staff.full_name} is currently a Trainee and cannot be assigned to bookings.'}, status=status.HTTP_400_BAD_REQUEST)
         
         booking.assigned_staff = staff
         booking.status = request.data.get('status', 'assigned')
@@ -395,7 +398,10 @@ class BookingViewSet(viewsets.ModelViewSet):
         backup_staff_id = request.data.get('backup_staff_id')
         if backup_staff_id:
             try:
-                booking.backup_staff = StaffMember.objects.get(pk=backup_staff_id)
+                b_staff = StaffMember.objects.get(pk=backup_staff_id)
+                if getattr(b_staff, 'lifecycle_stage', None) == 'trainee':
+                    return Response({'error': f'Staff member {b_staff.full_name} is currently a Trainee and cannot be assigned as backup staff.'}, status=status.HTTP_400_BAD_REQUEST)
+                booking.backup_staff = b_staff
             except StaffMember.DoesNotExist:
                 booking.backup_staff = None
         else:
@@ -413,7 +419,10 @@ class BookingViewSet(viewsets.ModelViewSet):
         buddy_staff_id = request.data.get('buddy_staff_id')
         if buddy_staff_id:
             try:
-                booking.buddy_staff = StaffMember.objects.get(pk=buddy_staff_id)
+                b_staff = StaffMember.objects.get(pk=buddy_staff_id)
+                if getattr(b_staff, 'lifecycle_stage', None) == 'trainee':
+                    return Response({'error': f'Staff member {b_staff.full_name} is currently a Trainee and cannot be assigned as buddy staff.'}, status=status.HTTP_400_BAD_REQUEST)
+                booking.buddy_staff = b_staff
             except StaffMember.DoesNotExist:
                 pass
 

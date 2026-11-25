@@ -230,6 +230,20 @@ export default function Login() {
             >
               {loading ? 'Authenticating...' : 'Sign In to Dashboard →'}
             </button>
+
+            <div style={{ marginTop: 12, textAlign: 'center' }}>
+              <a
+                href="/activate"
+                style={{
+                  fontSize: '0.82rem',
+                  color: 'var(--teal-700)',
+                  fontWeight: 600,
+                  textDecoration: 'none',
+                }}
+              >
+                New staff member? Activate your account with code →
+              </a>
+            </div>
           </form>
 
           {/* ── QUICK DEMO ACCOUNTS HELPER (1-Click Login Fill) ── */}

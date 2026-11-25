@@ -2087,6 +2087,12 @@ class ShiftHandoverNoteListView(APIView):
                 status=status.HTTP_403_FORBIDDEN
             )
 
+        if staff and getattr(staff, 'lifecycle_stage', None) == 'trainee':
+            return Response(
+                {'detail': 'Staff member in Trainee stage cannot author shift handover notes.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
         patient_id = request.data.get('patient_id') or request.data.get('patient')
         if not patient_id:
             return Response({'detail': 'patient_id is required.'}, status=status.HTTP_400_BAD_REQUEST)

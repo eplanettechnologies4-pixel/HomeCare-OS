@@ -19,6 +19,7 @@ from homecareOS.auth_views import (
     ForgotPasswordView,
     VerifyOTPView,
     ResetPasswordView,
+    StaffActivateView,
 )
 from homecareOS.location_resolver import ResolveLocationLinkView
 from lms.views import CertificateVerifyView
@@ -38,6 +39,8 @@ urlpatterns = [
     path('api/auth/refresh/', TokenRefreshView.as_view(),          name='token_refresh'),
     # Mobile: who-am-I + platform_allowed gate
     path('api/auth/me/',      MeView.as_view(),              name='auth-me'),
+    # Staff First-Time Account Activation
+    path('api/auth/activate-staff/', StaffActivateView.as_view(),   name='auth-activate-staff'),
     # Forgot-password OTP flow (3 steps)
     path('api/auth/forgot-password/', ForgotPasswordView.as_view(), name='auth-forgot-password'),
     path('api/auth/verify-otp/',      VerifyOTPView.as_view(),      name='auth-verify-otp'),

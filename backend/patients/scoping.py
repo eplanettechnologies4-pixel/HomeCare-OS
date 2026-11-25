@@ -49,7 +49,7 @@ def get_assigned_patient_ids_for_user(user, now=None):
         return None  # Unrestricted for doctors, care managers, admins, physios, etc.
 
     staff = getattr(user, 'staffmember', None)
-    if not staff:
+    if not staff or getattr(staff, 'lifecycle_stage', None) == 'trainee':
         return set()
 
     if now is None:
@@ -164,7 +164,7 @@ def get_assigned_patient_ids_for_clinician(user, now=None):
         return None
 
     staff = getattr(user, 'staffmember', None)
-    if not staff:
+    if not staff or getattr(staff, 'lifecycle_stage', None) == 'trainee':
         return set()
 
     if now is None:

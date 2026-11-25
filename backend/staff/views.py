@@ -66,6 +66,26 @@ class StaffViewSet(viewsets.ModelViewSet):
             staff.user.save(update_fields=['is_active'])
         return Response(StaffListSerializer(staff).data)
 
+    @action(detail=True, methods=['get'], url_path='onboarding')
+    def onboarding(self, request, pk=None):
+        from .lifecycle_views import StaffOnboardingSummaryView
+        return StaffOnboardingSummaryView().get(request, pk=pk)
+
+    @action(detail=True, methods=['post'], url_path='regenerate-code')
+    def regenerate_code(self, request, pk=None):
+        from .lifecycle_views import StaffRegenerateCodeView
+        return StaffRegenerateCodeView().post(request, pk=pk)
+
+    @action(detail=True, methods=['post'], url_path='stage/advance')
+    def stage_advance(self, request, pk=None):
+        from .lifecycle_views import StaffStageAdvanceView
+        return StaffStageAdvanceView().post(request, pk=pk)
+
+    @action(detail=True, methods=['post'], url_path='stage/return')
+    def stage_return(self, request, pk=None):
+        from .lifecycle_views import StaffStageReturnView
+        return StaffStageReturnView().post(request, pk=pk)
+
 
 class LeaveRequestViewSet(viewsets.ModelViewSet):
     queryset = LeaveRequest.objects.select_related('staff').all()

@@ -216,6 +216,10 @@ class LabOrderViewSet(viewsets.ModelViewSet):
         if role not in ('nurse', 'lab_tech'):
             return Response({'error': 'Only field nurses and lab technicians may collect lab samples.'}, status=status.HTTP_403_FORBIDDEN)
 
+        staff = getattr(request.user, 'staffmember', None)
+        if staff and getattr(staff, 'lifecycle_stage', None) == 'trainee':
+            return Response({'error': 'Staff member in Trainee stage cannot collect lab specimens.'}, status=status.HTTP_403_FORBIDDEN)
+
         order = self.get_object()
         lat = request.data.get('lat') or request.data.get('latitude')
         lng = request.data.get('lng') or request.data.get('longitude')

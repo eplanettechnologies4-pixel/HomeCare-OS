@@ -9,6 +9,14 @@ from .roster_views import (
     RosterPublishWeekView, RosterHistoryView,
     ShiftChangeRequestView, ShiftChangeRequestApprovalView
 )
+from .lifecycle_views import (
+    StaffOnboardingSummaryView, StaffRegenerateCodeView,
+    StaffStageAdvanceView, StaffStageReturnView,
+    StaffRequirementUploadView, StaffRequirementVerifyView,
+    StaffRequirementRejectView, StaffRequirementWaiveView,
+    StaffRequirementAssessmentView, StaffRequirementFeedbackView,
+    StaffDocumentDownloadView,
+)
 
 router = DefaultRouter()
 router.register(r'members', StaffViewSet, basename='staff-member')
@@ -16,6 +24,21 @@ router.register(r'leave-requests', LeaveRequestViewSet, basename='leave-request'
 router.register(r'attendance', AttendanceViewSet, basename='attendance')
 
 urlpatterns = [
+    # Staff Lifecycle, Onboarding & Document Verification
+    path('requirements/<int:pk>/upload/', StaffRequirementUploadView.as_view(), name='staff-requirement-upload'),
+    path('requirements/<int:pk>/verify/', StaffRequirementVerifyView.as_view(), name='staff-requirement-verify'),
+    path('requirements/<int:pk>/reject/', StaffRequirementRejectView.as_view(), name='staff-requirement-reject'),
+    path('requirements/<int:pk>/waive/', StaffRequirementWaiveView.as_view(), name='staff-requirement-waive'),
+    path('requirements/<int:pk>/record-assessment/', StaffRequirementAssessmentView.as_view(), name='staff-requirement-assessment'),
+    path('requirements/<int:pk>/add-feedback/', StaffRequirementFeedbackView.as_view(), name='staff-requirement-feedback'),
+    path('documents/<int:pk>/download/', StaffDocumentDownloadView.as_view(), name='staff-document-download'),
+
+    # Direct Staff Stage & Onboarding Route Aliases (api/staff/<id>/...)
+    path('<int:pk>/onboarding/', StaffOnboardingSummaryView.as_view(), name='staff-onboarding-alias'),
+    path('<int:pk>/regenerate-code/', StaffRegenerateCodeView.as_view(), name='staff-regenerate-code-alias'),
+    path('<int:pk>/stage/advance/', StaffStageAdvanceView.as_view(), name='staff-stage-advance-alias'),
+    path('<int:pk>/stage/return/', StaffStageReturnView.as_view(), name='staff-stage-return-alias'),
+
     # Roster Management & Scheduling
     path('shift-templates/', ShiftTemplateListCreateView.as_view(), name='shift-template-list'),
     path('shift-templates/<int:pk>/', ShiftTemplateDetailView.as_view(), name='shift-template-detail'),

@@ -22,6 +22,7 @@ from rest_framework import status, serializers
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.throttling import AnonRateThrottle
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework_simplejwt.views import TokenObtainPairView
 
@@ -104,6 +105,8 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
             'platform_allowed': platform_allowed,
             'staff_id': staff_member.id if staff_member else None,
             'employee_id': staff_member.employee_id if staff_member else None,
+            'lifecycle_stage': getattr(staff_member, 'lifecycle_stage', None) if staff_member else None,
+            'lifecycle_stage_display': staff_member.get_lifecycle_stage_display() if staff_member else None,
         }
 
         return data
@@ -181,6 +184,8 @@ class MeView(APIView):
                 'platform_allowed': platform_allowed,
                 'status': staff_member.status,
                 'rating': float(staff_member.rating),
+                'lifecycle_stage': getattr(staff_member, 'lifecycle_stage', None),
+                'lifecycle_stage_display': staff_member.get_lifecycle_stage_display(),
             })
         else:
             # ── No StaffMember: check for patient/family portal account ──────
@@ -383,3 +388,110 @@ class ResetPasswordView(APIView):
         record.save(update_fields=['reset_token'])
 
         return Response({'detail': 'Password updated successfully. Please log in with your new password.'})
+
+
+
+# ── Staff First-Time Account Activation ───────────────────────────────────────
+
+class StaffActivateView(APIView):
+    """
+    Public but throttled endpoint for newly created staff members to activate
+    their accounts and set their initial login password.
+    POST /api/auth/activate-staff/
+    Payload: { username, code, new_password }
+    """
+    permission_classes = [AllowAny]
+    throttle_classes = [AnonRateThrottle]
+
+    def post(self, request):
+        import datetime
+        from django.contrib.auth.hashers import check_password
+        from django.contrib.auth.password_validation import validate_password
+        from django.core.exceptions import ValidationError as DjangoValidationError
+        from staff.models import StaffMember, StaffActivationCode
+        from accounts.models import AuditLog
+
+        username = str(request.data.get('username') or '').strip()
+        code = str(request.data.get('code') or '').strip().upper()
+        new_password = str(request.data.get('new_password') or '')
+
+        if not username or not code or not new_password:
+            return Response(
+                {'error': 'Username, activation code, and new password are required.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        generic_error = 'Invalid username or activation code.'
+        # Dummy PBKDF2 hash used to equalize response timing when user/code is not found
+        DUMMY_HASH = 'pbkdf2_sha256$870000$dummy$dummyhashvaluepaddingtoequalizetimingtimingtiming='
+
+        user = User.objects.filter(username__iexact=username).first()
+        if not user:
+            check_password(code, DUMMY_HASH)
+            return Response({'error': generic_error}, status=status.HTTP_400_BAD_REQUEST)
+
+        staff = getattr(user, 'staffmember', None) or getattr(user, 'staff_profile', None) or StaffMember.objects.filter(user=user).first()
+        if not staff:
+            check_password(code, DUMMY_HASH)
+            return Response({'error': generic_error}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Get latest active activation code for this staff member
+        code_record = StaffActivationCode.objects.filter(staff=staff).order_by('-created_at').first()
+        if not code_record:
+            check_password(code, DUMMY_HASH)
+            return Response({'error': generic_error}, status=status.HTTP_400_BAD_REQUEST)
+
+        now = timezone.now()
+
+        # Check lockout: wrong attempts count, lock after 5 for 15 minutes
+        if code_record.locked_until and code_record.locked_until > now:
+            mins = int((code_record.locked_until - now).total_seconds() / 60) + 1
+            return Response(
+                {'error': f'Too many failed attempts. Account activation is locked. Please try again in {mins} minutes.'},
+                status=status.HTTP_429_TOO_MANY_REQUESTS
+            )
+
+        # Check if already used or expired (generic error to prevent username or token enumeration)
+        if code_record.used_at is not None or code_record.expires_at < now:
+            check_password(code, code_record.code_hash or DUMMY_HASH)
+            code_record.attempts += 1
+            if code_record.attempts >= 5:
+                code_record.locked_until = now + datetime.timedelta(minutes=15)
+            code_record.save(update_fields=['attempts', 'locked_until'])
+            return Response({'error': generic_error}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Verify activation code hash
+        if not check_password(code, code_record.code_hash):
+            code_record.attempts += 1
+            if code_record.attempts >= 5:
+                code_record.locked_until = now + datetime.timedelta(minutes=15)
+            code_record.save(update_fields=['attempts', 'locked_until'])
+            return Response({'error': generic_error}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Apply Django standard password validators
+        try:
+            validate_password(new_password, user=user)
+        except DjangoValidationError as e:
+            return Response({'password': list(e.messages)}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Success: update password, mark code used
+        user.set_password(new_password)
+        user.save(update_fields=['password'])
+        code_record.used_at = now
+        code_record.save(update_fields=['used_at'])
+
+        try:
+            AuditLog.objects.create(
+                actor=user,
+                actor_name=user.username,
+                action='Activated Staff Account',
+                target_user=user.username,
+                details=f"Staff member {staff.full_name} ({user.username}) successfully activated their account.",
+            )
+        except Exception:
+            pass
+
+        return Response({
+            'success': True,
+            'message': 'Account activated successfully. You can now log in with your new password.'
+        }, status=status.HTTP_200_OK)

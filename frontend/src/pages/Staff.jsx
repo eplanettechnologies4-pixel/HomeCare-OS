@@ -13,6 +13,8 @@ import VisitFeedbackTab from '../components/VisitFeedbackTab';
 import ManagerChecklistTab from '../components/ManagerChecklistTab';
 import FullHdImageViewerModal from '../components/FullHdImageViewerModal';
 import StaffRosterTab from '../components/StaffRosterTab';
+import StaffOnboardingDrawer from '../components/StaffOnboardingDrawer';
+import { getStageBadge } from '../utils/staffLifecycleHelpers';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay } from 'date-fns';
 
 const STATUS_BADGE = {
@@ -84,6 +86,9 @@ export default function Staff() {
 
   const [search, setSearch]               = useState('');
   const [selectedRole, setSelectedRole]   = useState('');
+  const [selectedStage, setSelectedStage] = useState('');
+  const [onboardingStaff, setOnboardingStaff] = useState(null);
+  const [dirViewMode, setDirViewMode]     = useState('table'); // 'table' | 'cards'
   const [selectedNurseForCal, setSelectedNurseForCal] = useState(staff.find(s=>s.role==='nurse')?.id || 1);
 
   const [selectedDayDetails, setSelectedDayDetails] = useState(null);
@@ -144,9 +149,21 @@ export default function Staff() {
   // Filter staff for directory
   const filteredStaff = staff.filter(s => {
     if (selectedRole && s.role !== selectedRole) return false;
+    if (selectedStage) {
+      if (selectedStage === 'null') {
+        if (s.lifecycle_stage !== null && s.lifecycle_stage !== undefined) return false;
+      } else if (s.lifecycle_stage !== selectedStage) {
+        return false;
+      }
+    }
     if (!search) return true;
     const q = search.toLowerCase();
-    return s.full_name.toLowerCase().includes(q) || s.specialization.toLowerCase().includes(q) || s.employee_id.toLowerCase().includes(q);
+    return (
+      (s.full_name && s.full_name.toLowerCase().includes(q)) ||
+      (s.specialization && s.specialization.toLowerCase().includes(q)) ||
+      (s.employee_id && s.employee_id.toLowerCase().includes(q)) ||
+      (s.username && s.username.toLowerCase().includes(q))
+    );
   });
 
   // ── Derived Attendance Calculation Function ──────────────────────────────
@@ -356,7 +373,7 @@ export default function Staff() {
                 onChange={e => setSearch(e.target.value)}
               />
             </div>
-            <select className="form-select" style={{ flex: '0 1 160px' }} value={selectedRole} onChange={e => setSelectedRole(e.target.value)}>
+            <select className="form-select" style={{ flex: '0 1 150px' }} value={selectedRole} onChange={e => setSelectedRole(e.target.value)}>
               <option value="">All Roles</option>
               <option value="nurse">Nurse</option>
               <option value="doctor">Doctor</option>
@@ -366,6 +383,40 @@ export default function Staff() {
               <option value="dietician">Dietician</option>
               <option value="care_manager">Care Manager</option>
             </select>
+
+            <select
+              className="form-select"
+              style={{ flex: '0 1 150px' }}
+              value={selectedStage}
+              onChange={e => setSelectedStage(e.target.value)}
+              title="Filter by Staff Lifecycle Stage"
+            >
+              <option value="">All Stages</option>
+              <option value="trainee">Trainee</option>
+              <option value="probation">Probation</option>
+              <option value="active">Active</option>
+              <option value="null">Not reviewed</option>
+            </select>
+
+            <div style={{ display: 'inline-flex', background: 'var(--sage-100)', padding: 3, borderRadius: 6, gap: 2 }}>
+              <button
+                type="button"
+                className={`btn btn-sm ${dirViewMode === 'table' ? 'btn-primary' : 'btn-ghost'}`}
+                style={{ fontSize: '0.72rem', padding: '3px 9px' }}
+                onClick={() => setDirViewMode('table')}
+              >
+                Table View
+              </button>
+              <button
+                type="button"
+                className={`btn btn-sm ${dirViewMode === 'cards' ? 'btn-primary' : 'btn-ghost'}`}
+                style={{ fontSize: '0.72rem', padding: '3px 9px' }}
+                onClick={() => setDirViewMode('cards')}
+              >
+                Card View
+              </button>
+            </div>
+
             {isAdminOrCareMgr && (
               <button
                 className="btn btn-primary"
@@ -394,85 +445,244 @@ export default function Staff() {
                 </button>
               )}
             </div>
+          ) : dirViewMode === 'table' ? (
+            <div className="data-table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Employee</th>
+                    <th>Role & Spec</th>
+                    <th>Stage</th>
+                    <th>Onboarding / Docs</th>
+                    <th>Duty Status</th>
+                    <th style={{ textAlign: 'right' }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredStaff.map(s => {
+                    const sBadge = getStageBadge(s.lifecycle_stage);
+                    return (
+                      <tr key={s.id} onClick={() => setSelectedStaff(s)} style={{ cursor: 'pointer' }}>
+                        <td>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            {s.photo ? (
+                              <img
+                                src={s.photo}
+                                alt={s.full_name}
+                                style={{ width: 36, height: 36, borderRadius: 6, objectFit: 'cover' }}
+                              />
+                            ) : (
+                              <div className="avatar avatar-sm" style={{ background: ROLE_COLORS[s.role] + '22', color: ROLE_COLORS[s.role] }}>
+                                {(s.full_name || s.username || 'S').split(' ').map(n=>n[0]).join('')}
+                              </div>
+                            )}
+                            <div>
+                              <div style={{ fontWeight: 700, color: 'var(--teal-900)', display: 'flex', alignItems: 'center', gap: 5 }}>
+                                <span>{s.full_name}</span>
+                                {(s.id_card_front || s.id_card_back) && (
+                                  <span className="badge badge-amber" style={{ fontSize: '0.6rem', padding: '1px 4px' }} title="CNIC Attached">
+                                    🪪 ID
+                                  </span>
+                                )}
+                              </div>
+                              <div style={{ fontSize: '0.72rem', color: 'var(--status-grey)' }}>
+                                {s.employee_id} {s.username && `• @${s.username}`}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                        <td>
+                          <div style={{ fontWeight: 600 }}>{s.role_display}</div>
+                          <div style={{ fontSize: '0.72rem', color: '#64748b' }}>{s.specialization || 'General Care'}</div>
+                        </td>
+                        <td>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
+                            <span className={`badge ${sBadge.className}`} style={{ fontSize: '0.72rem', fontWeight: 700 }}>
+                              {sBadge.label}
+                            </span>
+                            {s.review_due && (
+                              <span className="badge badge-amber" style={{ fontSize: '0.62rem', fontWeight: 800 }}>
+                                ⚠️ Review Due
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            {s.docs_progress ? (
+                              <span className="badge badge-teal" style={{ fontSize: '0.72rem' }}>
+                                {s.docs_progress}
+                              </span>
+                            ) : (
+                              <span style={{ fontSize: '0.72rem', color: '#94a3b8' }}>—</span>
+                            )}
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              style={{ padding: '2px 8px', fontSize: '0.72rem', color: 'var(--teal-700)', borderColor: '#cbd5e1' }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setOnboardingStaff(s);
+                              }}
+                            >
+                              <FileText size={12} style={{ marginRight: 4 }} /> Checklist
+                            </button>
+                          </div>
+                        </td>
+                        <td>
+                          <span className={`badge ${STATUS_BADGE[s.status] || 'badge-green'}`}>
+                            {s.status_display || 'Available'}
+                          </span>
+                        </td>
+                        <td style={{ textAlign: 'right' }}>
+                          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 4 }} onClick={e => e.stopPropagation()}>
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              style={{ padding: '3px 8px', fontSize: '0.72rem', color: 'var(--teal-700)', borderColor: '#cbd5e1' }}
+                              title="Onboarding Drawer"
+                              onClick={() => setOnboardingStaff(s)}
+                            >
+                              Onboarding
+                            </button>
+                            {isAdminOrCareMgr && (
+                              <>
+                                <button
+                                  type="button"
+                                  className="btn btn-ghost btn-sm"
+                                  style={{ padding: '3px 8px', fontSize: '0.72rem', color: '#b87320', borderColor: '#fef3c7' }}
+                                  title="Edit Staff Member"
+                                  onClick={() => setEditingStaff(s)}
+                                >
+                                  <Edit3 size={12} /> Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn-danger btn-sm"
+                                  style={{ padding: '3px 8px', fontSize: '0.72rem' }}
+                                  title="Delete Staff Member"
+                                  onClick={(e) => handleDeleteStaff(s, e)}
+                                >
+                                  <Trash2 size={12} /> Delete
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
-              {filteredStaff.map(s => (
-                <div key={s.id} className="card" style={{ padding: 18, cursor: 'pointer' }} onClick={() => setSelectedStaff(s)}>
-                  <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', marginBottom: 12 }}>
-                    {s.photo ? (
-                      <div
-                        style={{
-                          width: 48,
-                          height: 48,
-                          borderRadius: 8,
-                          overflow: 'hidden',
-                          border: '2px solid var(--amber-500)',
-                          background: '#f8fafc',
-                          boxShadow: '0 2px 6px rgba(0,0,0,0.1)',
-                          flexShrink: 0,
-                          cursor: 'pointer',
-                        }}
-                        title="Click to inspect Full HD Photo"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setHdViewer({ open: true, url: s.photo, title: `${s.full_name}'s Profile DP`, badge: 'Square Full HD' });
-                        }}
-                      >
-                        <img
-                          src={s.photo}
-                          alt={s.full_name}
-                          style={{ width: '100%', height: '100%', objectFit: 'cover', imageRendering: '-webkit-optimize-contrast' }}
-                        />
+              {filteredStaff.map(s => {
+                const sBadge = getStageBadge(s.lifecycle_stage);
+                return (
+                  <div key={s.id} className="card" style={{ padding: 18, cursor: 'pointer' }} onClick={() => setSelectedStaff(s)}>
+                    <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', marginBottom: 12 }}>
+                      {s.photo ? (
+                        <div
+                          style={{
+                            width: 48,
+                            height: 48,
+                            borderRadius: 8,
+                            overflow: 'hidden',
+                            border: '2px solid var(--amber-500)',
+                            background: '#f8fafc',
+                            boxShadow: '0 2px 6px rgba(0,0,0,0.1)',
+                            flexShrink: 0,
+                            cursor: 'pointer',
+                          }}
+                          title="Click to inspect Full HD Photo"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setHdViewer({ open: true, url: s.photo, title: `${s.full_name}'s Profile DP`, badge: 'Square Full HD' });
+                          }}
+                        >
+                          <img
+                            src={s.photo}
+                            alt={s.full_name}
+                            style={{ width: '100%', height: '100%', objectFit: 'cover', imageRendering: '-webkit-optimize-contrast' }}
+                          />
+                        </div>
+                      ) : (
+                        <div className="avatar avatar-lg" style={{ background: ROLE_COLORS[s.role] + '22', color: ROLE_COLORS[s.role], borderRadius: 8 }}>
+                          {(s.full_name || s.username || 'Staff').split(' ').map(n=>n[0]).join('')}
+                        </div>
+                      )}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--teal-800)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.full_name}</span>
+                          {(s.id_card_front || s.id_card_back) && (
+                            <span className="badge badge-amber" style={{ fontSize: '0.62rem', padding: '1px 5px', marginLeft: 6 }} title="National ID Card Attached">
+                              🪪 ID
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ fontSize: '0.78rem', color: 'var(--status-grey)' }}>{s.role_display}</div>
+                        <Stars rating={s.rating || 5.0} />
                       </div>
-                    ) : (
-                      <div className="avatar avatar-lg" style={{ background: ROLE_COLORS[s.role] + '22', color: ROLE_COLORS[s.role], borderRadius: 8 }}>
-                        {(s.full_name || s.username || 'Staff').split(' ').map(n=>n[0]).join('')}
-                      </div>
-                    )}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--teal-800)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.full_name}</span>
-                        {(s.id_card_front || s.id_card_back) && (
-                          <span className="badge badge-amber" style={{ fontSize: '0.62rem', padding: '1px 5px', marginLeft: 6 }} title="National ID Card Attached">
-                            🪪 ID
-                          </span>
-                        )}
-                      </div>
-                      <div style={{ fontSize: '0.78rem', color: 'var(--status-grey)' }}>{s.role_display}</div>
-                      <Stars rating={s.rating || 5.0} />
                     </div>
-                  </div>
-                  <div style={{ fontSize: '0.8rem', color: '#4b5563', marginBottom: 10 }}>
-                    <span style={{ fontWeight: 600 }}>Spec:</span> {s.specialization || 'General Care'}
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--sage-100)', paddingTop: 10 }}>
-                    <span className={`badge ${STATUS_BADGE[s.status] || 'badge-green'}`}>{s.status_display || 'Available'}</span>
-                    <span className="ts" style={{ fontSize: '0.75rem', color: 'var(--status-grey)' }}>ID: {s.employee_id}</span>
-                  </div>
-                  {isAdminOrCareMgr && (
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
+                      <span className={`badge ${sBadge.className}`} style={{ fontSize: '0.68rem', fontWeight: 700 }}>
+                        {sBadge.label}
+                      </span>
+                      {s.docs_progress && (
+                        <span className="badge badge-teal" style={{ fontSize: '0.68rem' }}>
+                          {s.docs_progress}
+                        </span>
+                      )}
+                      {s.review_due && (
+                        <span className="badge badge-amber" style={{ fontSize: '0.68rem', fontWeight: 800 }}>
+                          ⚠️ Review Due
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: '0.8rem', color: '#4b5563', marginBottom: 10 }}>
+                      <span style={{ fontWeight: 600 }}>Spec:</span> {s.specialization || 'General Care'}
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--sage-100)', paddingTop: 10 }}>
+                      <span className={`badge ${STATUS_BADGE[s.status] || 'badge-green'}`}>{s.status_display || 'Available'}</span>
+                      <span className="ts" style={{ fontSize: '0.75rem', color: 'var(--status-grey)' }}>ID: {s.employee_id}</span>
+                    </div>
                     <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 10, paddingTop: 8, borderTop: '1px dashed #e5e7eb' }}>
                       <button
                         type="button"
                         className="btn btn-ghost btn-sm"
-                        style={{ padding: '3px 8px', fontSize: '0.75rem', color: '#b87320', borderColor: '#fef3c7' }}
-                        title="Edit Staff Member"
-                        onClick={(e) => { e.stopPropagation(); setEditingStaff(s); }}
+                        style={{ padding: '3px 8px', fontSize: '0.75rem', color: 'var(--teal-700)', borderColor: '#cbd5e1' }}
+                        title="View Onboarding Checklist"
+                        onClick={(e) => { e.stopPropagation(); setOnboardingStaff(s); }}
                       >
-                        <Edit3 size={13} /> Edit
+                        <FileText size={13} /> Onboarding
                       </button>
-                      <button
-                        type="button"
-                        className="btn btn-danger btn-sm"
-                        style={{ padding: '3px 8px', fontSize: '0.75rem' }}
-                        title="Delete Staff Member"
-                        onClick={(e) => handleDeleteStaff(s, e)}
-                      >
-                        <Trash2 size={13} /> Delete
-                      </button>
+                      {isAdminOrCareMgr && (
+                        <>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            style={{ padding: '3px 8px', fontSize: '0.75rem', color: '#b87320', borderColor: '#fef3c7' }}
+                            title="Edit Staff Member"
+                            onClick={(e) => { e.stopPropagation(); setEditingStaff(s); }}
+                          >
+                            <Edit3 size={13} /> Edit
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-danger btn-sm"
+                            style={{ padding: '3px 8px', fontSize: '0.75rem' }}
+                            title="Delete Staff Member"
+                            onClick={(e) => handleDeleteStaff(s, e)}
+                          >
+                            <Trash2 size={13} /> Delete
+                          </button>
+                        </>
+                      )}
                     </div>
-                  )}
-                </div>
-              ))}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -1036,6 +1246,16 @@ export default function Staff() {
               setSelectedStaff({ ...selectedStaff, ...updated });
             }
           }}
+        />
+      )}
+
+      {/* Staff Onboarding Drawer */}
+      {onboardingStaff && (
+        <StaffOnboardingDrawer
+          staff={onboardingStaff}
+          isOpen={!!onboardingStaff}
+          onClose={() => setOnboardingStaff(null)}
+          onUpdated={fetchStaff}
         />
       )}
 

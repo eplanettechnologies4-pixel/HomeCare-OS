@@ -45,6 +45,8 @@ const NurseCallHelp       = lazy(() => import('./pages/NurseCallHelp'));
 const ClinicianHome       = lazy(() => import('./pages/ClinicianHome'));
 const ClinicianPatientChart = lazy(() => import('./pages/ClinicianPatientChart'));
 const PatientFile         = lazy(() => import('./pages/PatientFile'));
+const ActivateStaff       = lazy(() => import('./pages/ActivateStaff'));
+const MyOnboarding        = lazy(() => import('./pages/MyOnboarding'));
 
 function PageSkeleton() {
   return (
@@ -88,6 +90,7 @@ const PAGE_META = {
   'resignation':    { title: 'Resignation Notice',  subtitle: 'Employment transition & notice period' },
   'my-timesheet':   { title: 'My Timesheet',        subtitle: 'Electronic attendance and overtime records' },
   'company-policies': { title: 'Company Policies',  subtitle: 'Clinical hygiene & standard operating procedures' },
+  'my-onboarding':    { title: 'My Onboarding',     subtitle: 'Trainee document submission and verification checklist' },
 };
 
 const PAGE_COMPONENTS = {
@@ -123,6 +126,7 @@ const PAGE_COMPONENTS = {
   'resignation':    NurseResignation,
   'my-timesheet':   NurseTimesheet,
   'company-policies': NursePolicies,
+  'my-onboarding':  MyOnboarding,
 };
 
 export default function App() {
@@ -157,7 +161,26 @@ export default function App() {
     if (currentRole === 'nurse' && activePage === 'lms') {
       useStore.getState().setActivePage('my-trainings');
     }
-  }, [currentRole, activePage]);
+    if (currentUser?.lifecycle_stage === 'trainee') {
+      if (!['overview', 'my-onboarding'].includes(activePage)) {
+        useStore.getState().setActivePage('overview');
+      }
+    }
+  }, [currentRole, activePage, currentUser?.lifecycle_stage]);
+
+  // Public Staff Account Activation Route (/activate)
+  const isActivateRoute = (typeof window !== 'undefined') && (
+    window.location.pathname.startsWith('/activate') ||
+    window.location.hash.includes('activate') ||
+    activePage === 'activate'
+  );
+  if (isActivateRoute) {
+    return (
+      <Suspense fallback={<PageSkeleton />}>
+        <ActivateStaff />
+      </Suspense>
+    );
+  }
 
   // Unauthenticated → Login Screen directly (no public website)
   if (!isAuthenticated) {
@@ -202,14 +225,18 @@ export default function App() {
   const clinicianConfig = clinician ? getClinicianConfig(currentRole) : null;
   const isNurse = normalizeRole(currentRole) === 'nurse';
   const isSupportOrFamilyRole = ['accountant', 'crm_executive', 'patient_family'].includes(currentRole);
-  const isAllowed =
-    isSuperAdmin ||
-    allowedNav.includes(activePage) ||
-    (activePage === 'patient-file' && !isSupportOrFamilyRole) ||
-    (activePage === 'patient-chart' && clinician) ||
-    (activePage === 'nurse-patient-detail' && isNurse) ||
-    (activePage === 'patient-360' && allowedNav.includes('patients')) ||
-    (clinician && (activePage === 'pharmacy' || activePage === 'equipment'));
+  const isTrainee = currentUser?.lifecycle_stage === 'trainee';
+  const isAllowed = isTrainee
+    ? ['overview', 'my-onboarding'].includes(activePage)
+    : (
+        isSuperAdmin ||
+        allowedNav.includes(activePage) ||
+        (activePage === 'patient-file' && !isSupportOrFamilyRole) ||
+        (activePage === 'patient-chart' && clinician) ||
+        (activePage === 'nurse-patient-detail' && isNurse) ||
+        (activePage === 'patient-360' && allowedNav.includes('patients')) ||
+        (clinician && (activePage === 'pharmacy' || activePage === 'equipment'))
+      );
 
   if (!isAllowed) {
     return (

@@ -123,15 +123,30 @@ function Sidebar() {
     return ROLE_CONFIG[resolvedRole]?.nav || ['overview'];
   }, [resolvedRole]);
 
+  const isTrainee = currentUser?.lifecycle_stage === 'trainee';
+  const traineeNavGroups = useMemo(() => [
+    {
+      title: 'Trainee Portal',
+      items: [
+        { id: 'overview', label: 'Overview', icon: LayoutDashboard },
+        { id: 'my-onboarding', label: 'My Onboarding', icon: FileText },
+      ],
+    },
+  ], []);
+
   const isClinician = useMemo(() => isClinicianRole(resolvedRole), [resolvedRole]);
   const clinicianConfig = useMemo(() => getClinicianConfig(resolvedRole), [resolvedRole]);
-  const clinicianNavGroups = useMemo(() => clinicianConfig.sidebarGroups, [clinicianConfig]);
+  const clinicianNavGroups = useMemo(() => {
+    if (isTrainee) return traineeNavGroups;
+    return clinicianConfig.sidebarGroups;
+  }, [isTrainee, traineeNavGroups, clinicianConfig]);
   const adminNavGroups = useMemo(() => {
+    if (isTrainee) return traineeNavGroups;
     return NAV_GROUPS.map((group) => ({
       ...group,
       items: group.items.filter((item) => allowedNav.includes(item.id)),
     })).filter((group) => group.items.length > 0);
-  }, [allowedNav]);
+  }, [isTrainee, traineeNavGroups, allowedNav]);
 
   // For staff roles, rail is 72px unless pinned. For admin, follows isCollapsed.
   const effectiveCollapsed = isClinician ? !isPinned : isCollapsed;

@@ -34,6 +34,9 @@ RUN SECRET_KEY=build-time-placeholder \
     FIELD_ENCRYPTION_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= \
     python manage.py collectstatic --noinput
 
+# Ensure private media storage directory exists
+RUN mkdir -p /app/private_media
+
 EXPOSE 8000
 
 CMD ["daphne", "-b", "0.0.0.0", "-p", "8000", "--proxy-headers", "homecareOS.asgi:application"]

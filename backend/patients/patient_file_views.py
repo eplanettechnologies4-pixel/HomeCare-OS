@@ -657,6 +657,9 @@ class PatientScheduledItemView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def patch(self, request, pk, item_id=None):
+        staff = getattr(request.user, 'staffmember', None)
+        if staff and getattr(staff, 'lifecycle_stage', None) == 'trainee':
+            raise PermissionDenied("Staff members in Trainee stage cannot complete scheduled items.")
         patient = _resolve_patient_with_scoping(request.user, pk)
         user = request.user
         role = get_user_role(user)
@@ -685,6 +688,10 @@ class PatientScheduledItemView(APIView):
             item.save(update_fields=['status'])
 
         elif new_status == ScheduledItem.Status.DONE:
+            staff = getattr(user, 'staffmember', None)
+            if staff and getattr(staff, 'lifecycle_stage', None) == 'trainee':
+                raise PermissionDenied("Staff members in Trainee stage cannot complete scheduled items.")
+
             # Check role permissions to mark done
             # Nurse can mark procedure and blood_test done
             # Therapist can mark appointment/therapy done
@@ -731,6 +738,9 @@ class PatientScheduledItemMarkErrorView(APIView):
     permission_classes = [IsAuthenticated, DenyNonClinicalRoles]
 
     def post(self, request, pk, item_id):
+        staff = getattr(request.user, 'staffmember', None)
+        if staff and getattr(staff, 'lifecycle_stage', None) == 'trainee':
+            raise PermissionDenied("Staff members in Trainee stage cannot mark records as entered in error.")
         patient = _resolve_patient_with_scoping(request.user, pk)
         try:
             item = patient.scheduled_items.get(pk=item_id)

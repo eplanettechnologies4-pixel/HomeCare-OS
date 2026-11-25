@@ -73,6 +73,7 @@ services:
     volumes:
       - static_files:/app/staticfiles
       - media_files:/app/media
+      - private_media_files:/app/private_media
     ports:
       # Hardened: loopback only on host so requests MUST pass through Nginx
       - "127.0.0.1:8000:8000"
@@ -156,6 +157,7 @@ volumes:
   postgres_data:
   static_files:
   media_files:
+  private_media_files:
 
 # ── Internal network (Postgres port never leaves this network) ───────────────
 networks:

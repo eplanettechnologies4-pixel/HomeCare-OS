@@ -1,5 +1,18 @@
 from django.db import models
 from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
+from django.core.validators import MinValueValidator, MaxValueValidator
+from django.utils import timezone
+from django.core.files.storage import FileSystemStorage
+from django.conf import settings
+import os
+import uuid
+
+
+def get_private_staff_storage():
+    private_root = getattr(settings, 'PRIVATE_MEDIA_ROOT', os.path.join(str(settings.BASE_DIR), 'private_media'))
+    os.makedirs(private_root, exist_ok=True)
+    return FileSystemStorage(location=private_root, base_url=None)
 
 
 class StaffRole(models.TextChoices):
@@ -66,6 +79,26 @@ class StaffMember(models.Model):
         PROBATIONARY = 'probationary', 'Probationary'
         TRAINED = 'trained', 'Trained'
         PROFESSIONAL = 'professional', 'Professional'
+
+    # PROVISIONAL - HR terms need sign-off
+    class LifecycleStage(models.TextChoices):
+        TRAINEE = 'trainee', 'Trainee'
+        PROBATION = 'probation', 'Probation'
+        ACTIVE = 'active', 'Active'
+
+    # Lifecycle stage & progression tracking (null = Not reviewed / existing staff)
+    lifecycle_stage = models.CharField(
+        max_length=20,
+        choices=LifecycleStage.choices,
+        null=True,
+        blank=True,
+        db_index=True,
+        verbose_name='Lifecycle Stage',
+        help_text='PROVISIONAL - needs HR sign-off',
+    )
+    trainee_started_at = models.DateTimeField(null=True, blank=True)
+    probation_started_at = models.DateTimeField(null=True, blank=True)
+    active_since = models.DateTimeField(null=True, blank=True)
 
     # Controls which platform(s) this staff member may log into.
     # Web-only roles (admin, accountant, crm_executive) → 'web'
@@ -272,4 +305,185 @@ class RosterAssignment(models.Model):
 
     def __str__(self):
         return f"{self.staff.full_name} — {self.date}: {self.shift_name} (Rev {self.revision})"
+
+
+# ==============================================================================
+# STAFF LIFECYCLE, ONBOARDING CHECKLISTS, ASSESSMENTS & VERIFICATION MODELS
+# ==============================================================================
+
+class StaffRequirementType(models.Model):
+    class Kind(models.TextChoices):
+        DOCUMENT = 'document', 'Document'
+        ASSESSMENT = 'assessment', 'Assessment'
+        FEEDBACK = 'feedback', 'Feedback'
+
+    class Gate(models.TextChoices):
+        TRAINEE_TO_PROBATION = 'trainee_to_probation', 'Trainee to Probation'
+        PROBATION_TO_ACTIVE = 'probation_to_active', 'Probation to Active'
+
+    code = models.CharField(max_length=50, unique=True, db_index=True)
+    label = models.CharField(max_length=150, help_text='PROVISIONAL - needs HR sign-off')
+    kind = models.CharField(max_length=20, choices=Kind.choices)
+    gate = models.CharField(max_length=30, choices=Gate.choices)
+    required_count = models.PositiveIntegerField(default=1, help_text='PROVISIONAL - needs HR sign-off')
+    sort_order = models.PositiveIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+    requires_expiry = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ['gate', 'sort_order', 'id']
+
+    def __str__(self):
+        return f"{self.label} ({self.get_kind_display()})"
+
+
+class StaffRequirement(models.Model):
+    class Status(models.TextChoices):
+        PENDING = 'pending', 'Pending'
+        SUBMITTED = 'submitted', 'Submitted'
+        VERIFIED = 'verified', 'Verified'
+        REJECTED = 'rejected', 'Rejected'
+        WAIVED = 'waived', 'Waived'
+
+    staff = models.ForeignKey(StaffMember, on_delete=models.CASCADE, related_name='requirements')
+    requirement_type = models.ForeignKey(StaffRequirementType, on_delete=models.PROTECT, related_name='staff_requirements')
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING, db_index=True)
+    verified_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='verified_staff_requirements')
+    verified_at = models.DateTimeField(null=True, blank=True)
+    rejection_reason = models.TextField(blank=True)
+    waived_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='waived_staff_requirements')
+    waiver_reason = models.TextField(blank=True)
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['requirement_type__gate', 'requirement_type__sort_order', 'id']
+        unique_together = [('staff', 'requirement_type')]
+
+    def __str__(self):
+        return f"{self.staff.full_name} - {self.requirement_type.label} ({self.status})"
+
+
+def staff_document_upload_path(instance, filename):
+    ext = os.path.splitext(filename)[1].lower()
+    random_name = f"{uuid.uuid4().hex}{ext}"
+    staff_id = instance.requirement.staff_id if instance.requirement_id else 'common'
+    return os.path.join('staff_documents', f"staff_{staff_id}", random_name)
+
+
+class StaffDocument(models.Model):
+    requirement = models.ForeignKey(StaffRequirement, on_delete=models.CASCADE, related_name='documents')
+    file = models.FileField(storage=get_private_staff_storage, upload_to=staff_document_upload_path)
+    original_filename = models.CharField(max_length=255)
+    stored_filename = models.CharField(max_length=255)
+    content_type = models.CharField(max_length=100)
+    size = models.PositiveIntegerField(help_text='File size in bytes')
+    uploaded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    expiry_date = models.DateField(null=True, blank=True)
+    is_current = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['-uploaded_at']
+
+    def __str__(self):
+        return f"{self.original_filename} ({self.requirement.requirement_type.label})"
+
+
+class StaffAssessment(models.Model):
+    requirement = models.ForeignKey(StaffRequirement, on_delete=models.CASCADE, related_name='assessments')
+    course_name = models.CharField(max_length=200, blank=True)
+    completed_date = models.DateField(null=True, blank=True)
+    exam_result = models.CharField(max_length=10, choices=[('pass', 'Pass'), ('fail', 'Fail')], blank=True)
+    score = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    exam_date = models.DateField(null=True, blank=True)
+    assessor = models.CharField(max_length=150, blank=True)
+    competency_passed = models.BooleanField(null=True, blank=True)
+    competency_date = models.DateField(null=True, blank=True)
+    notes = models.TextField(blank=True)
+    lms_assignment = models.ForeignKey(
+        'lms.CourseAssignment', null=True, blank=True, on_delete=models.SET_NULL, related_name='staff_assessments'
+    )
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Assessment for {self.requirement.staff.full_name} ({self.requirement.requirement_type.label})"
+
+
+class StaffFeedback(models.Model):
+    class Source(models.TextChoices):
+        MANAGEMENT = 'management', 'Management'
+        PATIENT_FAMILY = 'patient_family', 'Patient Family'
+
+    requirement = models.ForeignKey(StaffRequirement, on_delete=models.CASCADE, related_name='feedbacks')
+    source = models.CharField(max_length=20, choices=Source.choices)
+    rating = models.PositiveSmallIntegerField(
+        validators=[MinValueValidator(1), MaxValueValidator(5)],
+        help_text='Rating from 1 to 5'
+    )
+    comment = models.TextField()
+    entered_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    patient = models.ForeignKey(
+        'patients.Patient', null=True, blank=True, on_delete=models.SET_NULL, related_name='staff_feedbacks'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Feedback ({self.source}) for {self.requirement.staff.full_name}: {self.rating}/5"
+
+
+class StaffStageEvent(models.Model):
+    staff = models.ForeignKey(StaffMember, on_delete=models.CASCADE, related_name='stage_events')
+    from_stage = models.CharField(max_length=20, null=True, blank=True)
+    to_stage = models.CharField(max_length=20)
+    decided_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    decided_at = models.DateTimeField(auto_now_add=True)
+    note = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ['-decided_at']
+
+    def __str__(self):
+        return f"{self.staff.full_name}: {self.from_stage or 'None'} -> {self.to_stage}"
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            raise ValidationError("StaffStageEvent is append-only and cannot be updated.")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("StaffStageEvent records cannot be deleted.")
+
+
+class StaffActivationCode(models.Model):
+    staff = models.ForeignKey(StaffMember, on_delete=models.CASCADE, related_name='activation_codes')
+    code_hash = models.CharField(max_length=128)
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    used_at = models.DateTimeField(null=True, blank=True)
+    attempts = models.PositiveIntegerField(default=0)
+    locked_until = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def is_valid(self):
+        now = timezone.now()
+        if self.used_at is not None:
+            return False
+        if self.expires_at < now:
+            return False
+        if self.locked_until and self.locked_until > now:
+            return False
+        return True
+
 

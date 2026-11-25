@@ -88,41 +88,38 @@ export default function StaffOverviewHeader({
 
   const staffDisplayName = staff?.name?.split(' ')[0] || staff?.first_name || 'Staff Member';
 
-  // Employment Status configuration
-  const empStatus = employmentStatus?.status || staff?.employment_status || '';
-  const empDisplay = employmentStatus?.status_display || staff?.employment_status_display || '';
-  const probationEnd = employmentStatus?.probation_end_date || staff?.probation_end_date;
+  // Employment / Lifecycle Stage configuration
+  const stage = staff?.lifecycle_stage ?? employmentStatus?.lifecycle_stage ?? null;
+  const probationEnd = staff?.probation_end_date || employmentStatus?.probation_end_date;
 
-  let empChipText = 'Employment Status: Not set';
+  let empChipText = 'Not reviewed';
   let empChipBg = '#F3F4F6';
   let empChipColor = '#4B5563';
   let empChipBorder = '#E5E7EB';
 
-  if (empStatus === 'probationary') {
-    const endStr = probationEnd
-      ? new Date(probationEnd).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
-      : 'date not set';
-    empChipText = `Probationary period – ends ${endStr}`;
+  if (stage === 'trainee') {
+    empChipText = 'Trainee – Onboarding in progress';
     empChipBg = '#EFF6FF';
     empChipColor = '#1D4ED8';
     empChipBorder = '#BFDBFE';
-  } else if (empStatus === 'confirmed') {
-    empChipText = 'Confirmed Staff';
+  } else if (stage === 'probation') {
+    const endStr = probationEnd
+      ? new Date(probationEnd).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+      : 'date not set';
+    empChipText = `Probation – ends ${endStr}`;
+    empChipBg = '#FEF3C7';
+    empChipColor = '#92400E';
+    empChipBorder = '#FDE68A';
+  } else if (stage === 'active') {
+    empChipText = 'Active Employee';
     empChipBg = '#ECFDF5';
     empChipColor = '#059669';
     empChipBorder = '#A7F3D0';
-  } else if (empStatus === 'trained') {
-    empChipText = 'Trained Clinician';
-    empChipBg = '#FAF5FF';
-    empChipColor = '#7C3AED';
-    empChipBorder = '#DDD6FE';
-  } else if (empStatus === 'professional') {
-    empChipText = 'Professional Staff';
-    empChipBg = '#F0FDF4';
-    empChipColor = '#15803D';
-    empChipBorder = '#BBF7D0';
-  } else if (empDisplay) {
-    empChipText = empDisplay;
+  } else {
+    empChipText = 'Not reviewed';
+    empChipBg = '#F3F4F6';
+    empChipColor = '#6B7280';
+    empChipBorder = '#E5E7EB';
   }
 
   return (

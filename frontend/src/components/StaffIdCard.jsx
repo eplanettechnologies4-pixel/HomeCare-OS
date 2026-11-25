@@ -142,6 +142,40 @@ export default function StaffIdCard({ staffMember }) {
                   </span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  {targetStaff.lifecycle_stage === 'trainee' && (
+                    <span
+                      style={{
+                        fontSize: '0.62rem',
+                        padding: '2px 7px',
+                        fontWeight: 800,
+                        borderRadius: 4,
+                        background: 'rgba(59, 130, 246, 0.3)',
+                        color: '#93C5FD',
+                        border: '1px solid rgba(147, 197, 253, 0.6)',
+                        letterSpacing: '0.5px',
+                      }}
+                      title="Trainee Lifecycle Stage"
+                    >
+                      TRAINEE
+                    </span>
+                  )}
+                  {targetStaff.lifecycle_stage === 'probation' && (
+                    <span
+                      style={{
+                        fontSize: '0.62rem',
+                        padding: '2px 7px',
+                        fontWeight: 800,
+                        borderRadius: 4,
+                        background: 'rgba(245, 158, 11, 0.3)',
+                        color: '#FDE047',
+                        border: '1px solid rgba(253, 224, 71, 0.6)',
+                        letterSpacing: '0.5px',
+                      }}
+                      title="Probation Lifecycle Stage"
+                    >
+                      PROBATION
+                    </span>
+                  )}
                   <span className="badge badge-amber" style={{ fontSize: '0.62rem', padding: '2px 7px', fontWeight: 700 }}>
                     STAFF ID
                   </span>

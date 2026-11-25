@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import {
   X, Eye, EyeOff, Shield, User, Lock, AlertCircle, CheckCircle,
-  Camera, UploadCloud, Image, Trash2, ZoomIn, CreditCard, Check, Sparkles
+  Camera, UploadCloud, Image, Trash2, ZoomIn, CreditCard, Check, Sparkles, Printer
 } from 'lucide-react';
 import useStore from '../store/useStore';
 import RealtimeCameraModal from './RealtimeCameraModal';
@@ -119,40 +119,46 @@ export default function AddStaffUserModal({ onClose, onSuccess }) {
     }
   };
 
+  const [createdData, setCreatedData] = useState(null);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
 
+    const trimmedFirstName = form.first_name.trim();
+    const trimmedLastName = form.last_name.trim();
+    if (!trimmedFirstName || !trimmedLastName) {
+      setError('Complete name is required (both First Name and Last Name).');
+      return;
+    }
+
     const trimmedUsername = form.username.trim();
-    if (!trimmedUsername) {
-      setError('Username is required.');
+    if (trimmedUsername && trimmedUsername.length < 3) {
+      setError('Username must be at least 3 characters long if specified.');
       return;
     }
-    if (trimmedUsername.length < 3) {
-      setError('Username must be at least 3 characters long.');
-      return;
-    }
-    if (!form.password) {
-      setError('Password is required. Please type the password directly.');
-      return;
-    }
-    if (form.password.length < 8) {
-      setError('Password must be at least 8 characters long.');
-      return;
-    }
-    if (form.password !== form.password_confirm) {
-      setError('Passwords do not match. Please verify both fields.');
-      return;
+
+    if (form.password) {
+      if (form.password.length < 8) {
+        setError('Password must be at least 8 characters long.');
+        return;
+      }
+      if (form.password !== form.password_confirm) {
+        setError('Passwords do not match. Please verify both fields.');
+        return;
+      }
     }
 
     setLoading(true);
 
     const formData = new FormData();
-    formData.append('first_name', form.first_name.trim());
-    formData.append('last_name', form.last_name.trim());
-    formData.append('username', trimmedUsername);
-    formData.append('password', form.password);
-    formData.append('password_confirm', form.password_confirm);
+    formData.append('first_name', trimmedFirstName);
+    formData.append('last_name', trimmedLastName);
+    if (trimmedUsername) formData.append('username', trimmedUsername);
+    if (form.password) {
+      formData.append('password', form.password);
+      formData.append('password_confirm', form.password_confirm);
+    }
     formData.append('role', form.role);
     formData.append('specialization', form.specialization.trim());
     formData.append('phone', form.phone.trim());
@@ -173,7 +179,12 @@ export default function AddStaffUserModal({ onClose, onSuccess }) {
     setLoading(false);
 
     if (res.success) {
-      if (onSuccess) onSuccess(res.data);
+      if (res.data?.activation_code) {
+        setCreatedData(res.data);
+      } else {
+        if (onSuccess) onSuccess(res.data);
+        onClose();
+      }
     } else {
       setError(res.error || 'Failed to create user account. Please check your inputs.');
     }
@@ -197,6 +208,164 @@ export default function AddStaffUserModal({ onClose, onSuccess }) {
             </button>
           </div>
 
+          {createdData ? (
+            <div style={{ padding: 24, textAlign: 'center' }}>
+              <div
+                style={{
+                  width: 56,
+                  height: 56,
+                  borderRadius: '50%',
+                  background: '#dcfce7',
+                  color: '#16a34a',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  margin: '0 auto 14px',
+                }}
+              >
+                <Check size={32} />
+              </div>
+              <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--teal-900)', margin: '0 0 4px' }}>
+                Staff Member Created (Trainee Stage)
+              </h2>
+              <p style={{ fontSize: '0.82rem', color: 'var(--status-grey)', margin: '0 0 16px' }}>
+                Account created with an unusable password. Staff member must activate using the one-time code below.
+              </p>
+
+              {/* Warning Banner */}
+              <div
+                style={{
+                  background: '#fef3c7',
+                  border: '1.5px solid #fde68a',
+                  borderRadius: 8,
+                  padding: '10px 14px',
+                  marginBottom: 16,
+                  textAlign: 'left',
+                  fontSize: '0.8rem',
+                  color: '#92400e',
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: 10,
+                }}
+              >
+                <AlertCircle size={18} style={{ flexShrink: 0, marginTop: 1 }} />
+                <div>
+                  <strong>WARNING: ONE-TIME ACTIVATION CODE</strong>
+                  <div style={{ marginTop: 2 }}>
+                    This activation code is displayed only once and cannot be retrieved later. Write it down, print the slip, or share it securely with the staff member.
+                  </div>
+                </div>
+              </div>
+
+              {/* Printable Credentials Slip Box */}
+              <div
+                id="staff-credentials-slip"
+                style={{
+                  background: '#f8fafc',
+                  border: '2px dashed var(--teal-600)',
+                  borderRadius: 10,
+                  padding: 20,
+                  textAlign: 'left',
+                  marginBottom: 20,
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #e2e8f0', paddingBottom: 10, marginBottom: 12 }}>
+                  <div>
+                    <div style={{ fontWeight: 800, fontSize: '1rem', color: 'var(--teal-900)' }}>
+                      eHealth Hospital at Home
+                    </div>
+                    <div style={{ fontSize: '0.72rem', color: '#64748b' }}>Staff Login Credentials Slip</div>
+                  </div>
+                  <span className="badge badge-blue" style={{ fontSize: '0.72rem' }}>
+                    Stage: Trainee
+                  </span>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 16px', fontSize: '0.82rem', marginBottom: 16 }}>
+                  <div>
+                    <span style={{ color: '#64748b' }}>Staff Name:</span>{' '}
+                    <strong style={{ color: 'var(--teal-900)' }}>{createdData.full_name || `${form.first_name} ${form.last_name}`}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: '#64748b' }}>Employee ID:</span>{' '}
+                    <strong style={{ color: 'var(--teal-900)' }}>{createdData.employee_id}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: '#64748b' }}>Assigned Role:</span>{' '}
+                    <strong>{createdData.role_display || form.role}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: '#64748b' }}>Username:</span>{' '}
+                    <strong style={{ color: '#0f766e', fontFamily: 'monospace' }}>{createdData.username}</strong>
+                  </div>
+                </div>
+
+                {/* Activation Code Highlight Box */}
+                <div
+                  style={{
+                    background: '#ffffff',
+                    border: '1.5px solid #cbd5e1',
+                    borderRadius: 8,
+                    padding: '14px',
+                    textAlign: 'center',
+                    marginBottom: 14,
+                  }}
+                >
+                  <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                    One-Time Activation / Login Code
+                  </div>
+                  <div
+                    style={{
+                      fontFamily: 'monospace',
+                      fontSize: '1.9rem',
+                      fontWeight: 900,
+                      letterSpacing: '5px',
+                      color: 'var(--teal-800)',
+                      margin: '6px 0',
+                    }}
+                  >
+                    {createdData.activation_code}
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: '#64748b' }}>
+                    Expires on: {new Date(createdData.activation_expires_at).toLocaleDateString()} (7 days)
+                  </div>
+                </div>
+
+                {/* Activation Instructions */}
+                <div style={{ background: '#f1f5f9', padding: '10px 12px', borderRadius: 6, fontSize: '0.75rem', color: '#334155' }}>
+                  <strong>How to Activate:</strong>
+                  <ol style={{ margin: '4px 0 0 16px', padding: 0 }}>
+                    <li>Go to the activation portal at <code>/activate</code></li>
+                    <li>Enter your username (<code>{createdData.username}</code>) and the activation code above.</li>
+                    <li>Choose and confirm your personal secret password.</li>
+                  </ol>
+                </div>
+              </div>
+
+              {/* Slip Action Buttons */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => window.print()}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                >
+                  <Printer size={15} /> Print Credentials Slip
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => {
+                    if (onSuccess) onSuccess(createdData);
+                    onClose();
+                  }}
+                  style={{ minWidth: 120 }}
+                >
+                  Done & Close
+                </button>
+              </div>
+            </div>
+          ) : (
           <form onSubmit={handleSubmit}>
             <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               {error && (
@@ -694,38 +863,36 @@ export default function AddStaffUserModal({ onClose, onSuccess }) {
                     gap: 6,
                   }}
                 >
-                  <Lock size={15} /> Login Credentials (Admin-Set, No Auto-Generation)
+                  <Lock size={15} /> Login & Account Activation Setup
                 </div>
 
                 <div className="form-group" style={{ marginBottom: 12 }}>
-                  <label className="form-label">Username *</label>
+                  <label className="form-label">Username (Optional)</label>
                   <input
                     type="text"
                     className="form-input"
-                    required
                     autoCapitalize="none"
                     autoCorrect="off"
                     value={form.username}
                     onChange={(e) => setF('username', e.target.value)}
-                    placeholder="e.g. abdullah_fouzan"
+                    placeholder="Auto-generated from first & last name if blank"
                   />
                   <span style={{ fontSize: '0.72rem', color: 'var(--status-grey)' }}>
-                    Unique username used to log into Web Dashboard and/or Mobile App.
+                    Leave blank to auto-generate (e.g. firstname.lastname).
                   </span>
                 </div>
 
                 <div className="grid-2">
                   <div className="form-group">
-                    <label className="form-label">Password *</label>
+                    <label className="form-label">Initial Password (Optional)</label>
                     <div style={{ position: 'relative' }}>
                       <input
                         type={showPassword ? 'text' : 'password'}
                         className="form-input"
-                        required
                         style={{ paddingRight: 36 }}
                         value={form.password}
                         onChange={(e) => setF('password', e.target.value)}
-                        placeholder="Min 8 characters"
+                        placeholder="Leave blank to use activation code"
                       />
                       <button
                         type="button"
@@ -750,16 +917,15 @@ export default function AddStaffUserModal({ onClose, onSuccess }) {
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Confirm Password *</label>
+                    <label className="form-label">Confirm Password (Optional)</label>
                     <div style={{ position: 'relative' }}>
                       <input
                         type={showConfirmPassword ? 'text' : 'password'}
                         className="form-input"
-                        required
                         style={{ paddingRight: 36 }}
                         value={form.password_confirm}
                         onChange={(e) => setF('password_confirm', e.target.value)}
-                        placeholder="Re-type password"
+                        placeholder="Re-type password if setting"
                       />
                       <button
                         type="button"
@@ -782,6 +948,9 @@ export default function AddStaffUserModal({ onClose, onSuccess }) {
                       </button>
                     </div>
                   </div>
+                </div>
+                <div style={{ fontSize: '0.74rem', color: 'var(--teal-800)', marginTop: 8, background: 'var(--sage-50)', padding: '6px 10px', borderRadius: 4 }}>
+                  ℹ️ New staff are created in <strong>Trainee</strong> stage with an unusable password. A one-time activation code will be provided on the credentials slip.
                 </div>
               </div>
             </div>
@@ -808,6 +977,7 @@ export default function AddStaffUserModal({ onClose, onSuccess }) {
               </button>
             </div>
           </form>
+          )}
         </div>
       </div>
 

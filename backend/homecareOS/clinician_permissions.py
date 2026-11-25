@@ -129,6 +129,21 @@ def check_clinical_write_permission(user, action_key, discipline=None, patient=N
     if not user or not user.is_authenticated:
         return False, "Authentication required."
 
+    # Stage enforcement: Trainee cannot author clinical records (PROVISIONAL - needs HR sign-off)
+    from django.conf import settings
+    allowed_stages = getattr(settings, 'STAFF_STAGES_ALLOWED_CLINICAL', ('probation', 'active'))  # PROVISIONAL - needs HR sign-off
+    staff_member = getattr(user, 'staffmember', None) or getattr(user, 'staff_profile', None)
+    if staff_member is None:
+        try:
+            from staff.models import StaffMember
+            staff_member = StaffMember.objects.filter(user=user).first()
+        except Exception:
+            staff_member = None
+
+    if staff_member and staff_member.lifecycle_stage is not None:
+        if staff_member.lifecycle_stage not in allowed_stages:
+            return False, f"Staff member at '{staff_member.lifecycle_stage}' stage cannot author clinical records. Advance to Probation or Active stage."
+
     from homecareOS.permissions import get_user_role
     raw_role = get_user_role(user)
     role = normalize_clinical_role(raw_role)

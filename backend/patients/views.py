@@ -64,6 +64,10 @@ def _save_prescription_record(request, serializer, patient):
     if not patient:
         raise ValidationError({'patient': ['Patient is required.']})
 
+    staff = getattr(request.user, 'staffmember', None) or StaffMember.objects.filter(user=request.user).first()
+    if staff and getattr(staff, 'lifecycle_stage', None) == 'trainee':
+        raise PermissionDenied("Staff member in Trainee stage cannot create or transcribe prescriptions.")
+
     check_clinician_patient_access(request.user, patient)
 
     raw_role = get_user_role(request.user)
@@ -277,6 +281,9 @@ class PatientViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         qs = Patient.objects.select_related('assigned_care_manager').all().order_by('-created_at')
         user = self.request.user
+        staff = getattr(user, 'staffmember', None)
+        if staff and getattr(staff, 'lifecycle_stage', None) == 'trainee':
+            return qs.none()
         if is_family_user(user):
             qs = qs.filter(portal_user=user)
         else:
@@ -351,6 +358,8 @@ class PatientViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get', 'post'])
     def vitals(self, request, pk=None):
+        if request.method == 'POST':
+            enforce_clinical_write_permission(request.user, 'vitals')
         patient = self.get_object()
         check_clinician_patient_access(request.user, patient)
         if request.method == 'GET':
@@ -370,6 +379,8 @@ class PatientViewSet(viewsets.ModelViewSet):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     def _handle_notes(self, request):
+        if request.method == 'POST':
+            enforce_clinical_write_permission(request.user, 'nurse_notes')
         patient = self.get_object()
         check_clinician_patient_access(request.user, patient)
         if request.method == 'POST':
@@ -455,6 +466,8 @@ class PatientViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get', 'post'], url_path='doctor-notes')
     def doctor_notes(self, request, pk=None):
+        if request.method == 'POST':
+            enforce_clinical_write_permission(request.user, 'doctor_notes')
         patient = self.get_object()
         check_clinician_patient_access(request.user, patient)
         from staff_portal.serializers import DoctorNoteSerializer
@@ -590,6 +603,9 @@ class PatientViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get', 'post'], url_path='therapy-notes')
     def therapy_notes(self, request, pk=None):
+        if request.method == 'POST':
+            discipline = request.data.get('discipline')
+            enforce_clinical_write_permission(request.user, 'therapy_notes', discipline=discipline)
         patient = self.get_object()
         check_clinician_patient_access(request.user, patient)
         from staff_portal.serializers import TherapyNoteSerializer
@@ -1051,6 +1067,7 @@ class PatientViewSet(viewsets.ModelViewSet):
         """
         from staff.models import StaffMember
 
+        enforce_clinical_write_permission(request.user, 'mar_administer')
         patient = self.get_object()
         check_clinician_patient_access(request.user, patient)
         enforce_clinical_write_permission(request.user, 'mar_administer', patient=patient)
@@ -1158,6 +1175,9 @@ class PatientViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'], url_path=r'vitals/(?P<item_id>\d+)/mark-entered-in-error')
     def mark_patient_vital_entered_in_error(self, request, pk=None, item_id=None):
+        staff = getattr(request.user, 'staffmember', None)
+        if staff and getattr(staff, 'lifecycle_stage', None) == 'trainee':
+            return Response({'detail': 'Staff member in Trainee stage cannot mark clinical records as entered in error.'}, status=status.HTTP_403_FORBIDDEN)
         patient = self.get_object()
         check_clinician_patient_access(request.user, patient)
         vital = get_object_or_404(VitalSign, pk=item_id, patient=patient)

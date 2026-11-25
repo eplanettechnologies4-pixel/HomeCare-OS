@@ -135,6 +135,15 @@ class BookingDetailSerializer(serializers.ModelSerializer):
         model = Booking
         fields = '__all__'
 
+    def validate(self, attrs):
+        for field in ('assigned_staff', 'buddy_staff', 'backup_staff', 'supervisor'):
+            staff = attrs.get(field)
+            if staff and getattr(staff, 'lifecycle_stage', None) == 'trainee':
+                raise serializers.ValidationError({
+                    field: f"Staff member {staff.full_name} is currently a Trainee and cannot be assigned to bookings or duty."
+                })
+        return attrs
+
 
 class ServiceCatalogItemSerializer(serializers.ModelSerializer):
     category_display = serializers.SerializerMethodField()

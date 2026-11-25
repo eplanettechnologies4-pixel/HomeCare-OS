@@ -39,6 +39,10 @@ def can_mark_entered_in_error(user, patient, instance):
     if not user or not user.is_authenticated:
         return False, "Authentication required."
 
+    staff = getattr(user, 'staffmember', None)
+    if staff and getattr(staff, 'lifecycle_stage', None) == 'trainee':
+        return False, "Staff members in Trainee stage cannot mark records as entered in error."
+
     # Explicit rule: Admin, super_admin, care_manager, other staff: 403 Forbidden
     # Even superusers are not treating clinicians unless assigned
     author_user_id = get_record_author_user_id(instance)

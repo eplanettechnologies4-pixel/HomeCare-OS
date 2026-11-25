@@ -192,6 +192,14 @@ class PatientDetailSerializer(serializers.ModelSerializer):
             'allergy_status',
         ]
 
+    def validate(self, attrs):
+        cm = attrs.get('assigned_care_manager')
+        if cm and getattr(cm, 'lifecycle_stage', None) == 'trainee':
+            raise serializers.ValidationError({
+                'assigned_care_manager': f"Staff member {cm.full_name} is currently a Trainee and cannot be assigned as a care manager."
+            })
+        return attrs
+
     def create(self, validated_data):
         from django.utils import timezone
         for field in ('brief_history', 'care_plan', 'history_care_plan_edits', 'photo', 'allergy_status'):
