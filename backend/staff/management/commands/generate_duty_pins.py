@@ -1,6 +1,7 @@
 import datetime
 from django.core.management.base import BaseCommand
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from bookings.models import Booking, BookingStatus
@@ -53,6 +54,7 @@ class Command(BaseCommand):
         )
 
         ra_candidates = []
+        ra_already_covered = 0
         for ra in future_ras:
             has_active = DutyPIN.objects.filter(
                 roster_assignment=ra,
@@ -62,34 +64,51 @@ class Command(BaseCommand):
             ).exists()
             if not has_active:
                 ra_candidates.append(ra)
+            else:
+                ra_already_covered += 1
 
         today_start = timezone.make_aware(datetime.datetime.combine(today, datetime.time.min))
         future_bookings = (
             Booking.objects.filter(
-                scheduled_time__gte=today_start,
-                assigned_staff__isnull=False,
-                assigned_staff__role__in=FIELD_PIN_ROLES,
-                assigned_staff__is_active=True,
+                Q(scheduled_time__gte=today_start) | Q(shift_end_time__gte=now)
+            )
+            .filter(
+                Q(assigned_staff__role__in=FIELD_PIN_ROLES, assigned_staff__is_active=True)
+                | Q(buddy_staff__role__in=FIELD_PIN_ROLES, buddy_staff__is_active=True)
+                | Q(buddy__role__in=FIELD_PIN_ROLES, buddy__is_active=True)
             )
             .exclude(status__in=[BookingStatus.CANCELLED, BookingStatus.COMPLETED])
-            .select_related('assigned_staff', 'patient')
+            .select_related('assigned_staff', 'buddy_staff', 'buddy', 'patient')
             .order_by('scheduled_time')
         )
 
         booking_candidates = []
+        bk_already_covered = 0
         for bk in future_bookings:
-            w_start, w_end = compute_booking_window(bk)
-            if w_end < now:
-                continue
-            has_active = DutyPIN.objects.filter(
-                staff=bk.assigned_staff,
-                is_active=True,
-                revoked_at__isnull=True,
-                window_start=w_start,
-                window_end=w_end,
-            ).exists()
-            if not has_active:
+            members = [
+                m for m in (bk.assigned_staff, bk.buddy_staff, bk.buddy)
+                if m and m.is_active and m.role in FIELD_PIN_ROLES
+            ]
+            needs_pin = False
+            any_eligible = False
+            for member in members:
+                w_start, w_end = compute_booking_window(bk, member)
+                if w_end < now:
+                    continue
+                any_eligible = True
+                has_active = DutyPIN.objects.filter(
+                    staff=member,
+                    is_active=True,
+                    revoked_at__isnull=True,
+                    window_start=w_start,
+                    window_end=w_end,
+                ).exists()
+                if not has_active:
+                    needs_pin = True
+            if needs_pin:
                 booking_candidates.append(bk)
+            elif any_eligible:
+                bk_already_covered += 1
 
         if not confirm:
             self.stdout.write(self.style.WARNING(
@@ -99,7 +118,17 @@ class Command(BaseCommand):
             for ra in ra_candidates[:20]:
                 self.stdout.write(f"  - RosterAssignment #{ra.id}: {ra.staff.full_name} on {ra.date}")
             for bk in booking_candidates[:20]:
-                self.stdout.write(f"  - Booking #{bk.id} ({bk.reference_code}): {bk.assigned_staff.full_name} @ {bk.scheduled_time}")
+                staff_names = ', '.join(
+                    m.full_name for m in (bk.assigned_staff, bk.buddy_staff, bk.buddy)
+                    if m and m.role in FIELD_PIN_ROLES
+                )
+                self.stdout.write(f"  - Booking #{bk.id} ({bk.reference_code}): {staff_names} @ {bk.scheduled_time}")
+            self.stdout.write(
+                f"Summary: would_generate_duties={len(ra_candidates)}, "
+                f"would_generate_bookings={len(booking_candidates)}, "
+                f"already_covered_duties={ra_already_covered}, "
+                f"already_covered_bookings={bk_already_covered}."
+            )
             self.stdout.write(self.style.NOTICE("Run with --confirm to apply."))
             return
 

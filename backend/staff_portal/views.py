@@ -1331,6 +1331,9 @@ def _get_doctor_tier_groups(user, now=None):
     assigned_pids = get_assigned_patient_ids_for_clinician(user)
     pt_qs = Patient.objects.filter(is_active=True)
     if assigned_pids is not None:
+        if getattr(settings, 'PATIENT_FILE_PIN_REQUIRED', False):
+            from staff.pin_service import is_patient_unlocked_for_user
+            assigned_pids = {pid for pid in assigned_pids if is_patient_unlocked_for_user(user, pid, now=now)[0]}
         pt_qs = pt_qs.filter(id__in=assigned_pids)
 
     groups = {
@@ -1815,21 +1818,25 @@ class DoctorConsultationsListView(APIView):
 
         bookings = qs.select_related('patient').order_by('-scheduled_time')
         results = []
+        from staff.pin_service import is_patient_unlocked_for_user
         for b in bookings:
             p = b.patient
+            is_unlocked, _ = is_patient_unlocked_for_user(request.user, p.id, now=now) if p else (True, None)
+            is_file_locked = not is_unlocked
             results.append({
                 'id': b.id,
                 'patient_id': p.id if p else None,
                 'patient_name': p.full_name if p else '',
                 'patient_code': p.patient_code if p else f"PT-{b.patient_id}",
                 'mr_number': p.mr_number if p else '',
-                'age': p.age if p else None,
-                'gender': p.get_gender_display() if (p and hasattr(p, 'get_gender_display')) else (p.gender if p else ''),
-                'diagnosis': b.diagnosis or (p.primary_diagnosis if p else ''),
+                'age': p.age if (p and is_unlocked) else None,
+                'gender': (p.get_gender_display() if (p and hasattr(p, 'get_gender_display')) else (p.gender if p else '')) if is_unlocked else '',
+                'diagnosis': (b.diagnosis or (p.primary_diagnosis if p else '')) if is_unlocked else 'Locked — Enter Duty PIN',
                 'location': b.address or (p.address if p else ''),
                 'scheduled_time': b.scheduled_time.isoformat() if b.scheduled_time else None,
                 'status': b.status,
                 'service_type': b.service_type,
+                'is_file_locked': is_file_locked,
             })
 
         return Response({
@@ -1875,7 +1882,9 @@ class DoctorPendingRequestsListView(APIView):
         pending_referrals = []
         pending_consultations = []
         pending_procedures = []
+        from staff.pin_service import is_patient_unlocked_for_user
         for r in sr_qs.order_by('-created_at'):
+            is_unlocked, _ = is_patient_unlocked_for_user(request.user, r.patient_id) if r.patient_id else (True, None)
             item = {
                 'id': r.id,
                 'patient_id': r.patient_id,
@@ -1883,7 +1892,8 @@ class DoctorPendingRequestsListView(APIView):
                 'patient_code': r.patient.patient_code if r.patient else '',
                 'mr_number': r.patient.mr_number if r.patient else '',
                 'urgency': r.urgency,
-                'notes': r.notes,
+                'notes': r.notes if is_unlocked else 'Locked — Enter Duty PIN',
+                'is_file_locked': not is_unlocked,
                 'created_at': r.created_at.isoformat(),
                 'type': r.request_type,
             }
@@ -1903,6 +1913,8 @@ class DoctorPendingRequestsListView(APIView):
         if patient_id:
             rx_qs = rx_qs.filter(patient_id=patient_id)
         elif assigned_pids is not None:
+            if getattr(settings, 'PATIENT_FILE_PIN_REQUIRED', False):
+                assigned_pids = [pid for pid in assigned_pids if is_patient_unlocked_for_user(request.user, pid)[0]]
             rx_qs = rx_qs.filter(patient_id__in=assigned_pids)
 
         for rx in rx_qs.order_by('-created_at'):

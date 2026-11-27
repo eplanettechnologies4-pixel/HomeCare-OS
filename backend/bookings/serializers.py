@@ -92,6 +92,28 @@ class BookingListSerializer(serializers.ModelSerializer):
             'created_at',
         ]
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        return _mask_booking_clinical_fields(self.context.get('request'), instance, data)
+
+
+def _mask_booking_clinical_fields(request, instance, data):
+    user = getattr(request, 'user', None)
+    if not user or not user.is_authenticated or not getattr(instance, 'patient_id', None):
+        return data
+    from staff.pin_service import is_patient_unlocked_for_user
+    unlocked, _ = is_patient_unlocked_for_user(user, instance.patient_id)
+    data['is_file_locked'] = not unlocked
+    if not unlocked:
+        for field in ('diagnosis', 'allergies', 'clinical_requirements', 'notes', 'consultant_details'):
+            if field in data:
+                data[field] = 'Locked — Enter Duty PIN' if field in ('diagnosis', 'clinical_requirements') else ''
+        if isinstance(data.get('patient'), dict):
+            for p_field in ('primary_diagnosis', 'allergies'):
+                if p_field in data['patient']:
+                    data['patient'][p_field] = 'Locked — Enter Duty PIN' if p_field == 'primary_diagnosis' else ''
+    return data
+
 
 class BookingDetailSerializer(serializers.ModelSerializer):
     patient = PatientSummarySerializer(read_only=True)
@@ -143,6 +165,10 @@ class BookingDetailSerializer(serializers.ModelSerializer):
                     field: f"Staff member {staff.full_name} is currently a Trainee and cannot be assigned to bookings or duty."
                 })
         return attrs
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        return _mask_booking_clinical_fields(self.context.get('request'), instance, data)
 
 
 class ServiceCatalogItemSerializer(serializers.ModelSerializer):

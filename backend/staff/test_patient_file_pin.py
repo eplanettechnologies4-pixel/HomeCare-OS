@@ -425,3 +425,259 @@ def test_generate_duty_pins_command_dry_run_and_confirm():
     call_command('generate_duty_pins', '--confirm')
     assert DutyPIN.objects.filter(roster_assignment=future_ra).count() == 1
     assert DutyPIN.objects.filter(roster_assignment__date=past_date).count() == 0
+
+
+@pytest.mark.django_db
+@override_settings(PATIENT_FILE_PIN_REQUIRED=False)
+def test_switch_off_my_roster_and_my_patients_unmasked():
+    from zoneinfo import ZoneInfo
+    admin_user, _ = _make_staff('pin_sw_admin', StaffRole.ADMIN, is_staff=True)
+    nurse_user, nurse = _make_staff('pin_sw_nurse', StaffRole.NURSE)
+    patient = _make_patient('sw')
+    today = timezone.now().astimezone(ZoneInfo('Asia/Karachi')).date()
+
+    schedule_staff_duty(
+        actor=admin_user,
+        staff=nurse,
+        patients=[patient],
+        date=today,
+        start_time='08:00',
+        end_time='16:00',
+        is_published=True,
+    )
+
+    client = APIClient()
+    client.force_authenticate(user=nurse_user)
+
+    home_res = client.get('/api/staff-portal/home/')
+    assert home_res.status_code == 200
+    home_data = home_res.json()
+    today_duty_patients = home_data.get('roster_summary', {}).get('today_duty', {}).get('patients', [])
+    assert len(today_duty_patients) >= 1
+    assert all(p.get('is_file_locked') is False for p in today_duty_patients)
+
+    pts_res = client.get('/api/staff-portal/patients/')
+    assert pts_res.status_code == 200
+    pts = pts_res.json().get('results', [])
+    assert len(pts) == 1
+    assert pts[0]['is_file_locked'] is False
+    assert pts[0]['diagnosis'] == 'Post-op care'
+
+
+@pytest.mark.django_db
+@override_settings(PATIENT_FILE_PIN_REQUIRED=True)
+def test_locked_doctor_and_physio_patient_file_bookings_and_patients_list():
+    doc_user, doc = _make_staff('pin_gap_doc', StaffRole.DOCTOR)
+    physio_user, physio = _make_staff('pin_gap_physio', StaffRole.PHYSIO)
+    patient = _make_patient('gap_dp')
+    now = timezone.now()
+
+    doc_bk = Booking.objects.create(
+        patient=patient,
+        assigned_staff=doc,
+        service_type=ServiceType.DOCTOR_CONSULTATION,
+        status=BookingStatus.ASSIGNED,
+        scheduled_time=now,
+        shift_duration=ShiftDuration.FOUR_HOURS,
+        diagnosis='Cardiac monitoring',
+        allergies='Penicillin',
+        address='Addr',
+        amount=Decimal('0.00'),
+    )
+    physio_bk = Booking.objects.create(
+        patient=patient,
+        assigned_staff=physio,
+        service_type=ServiceType.PHYSIOTHERAPY,
+        status=BookingStatus.ASSIGNED,
+        scheduled_time=now + datetime.timedelta(hours=1),
+        shift_duration=ShiftDuration.FOUR_HOURS,
+        diagnosis='Knee rehab',
+        allergies='Latex',
+        address='Addr',
+        amount=Decimal('0.00'),
+    )
+
+    client = APIClient()
+    for user, bk in ((doc_user, doc_bk), (physio_user, physio_bk)):
+        client.force_authenticate(user=user)
+        pf = client.get(f'/api/patients/{patient.id}/patient-file/')
+        assert pf.status_code == 403
+        assert pf.json()['code'] == 'patient_file_locked'
+
+        bk_list = client.get('/api/bookings/')
+        assert bk_list.status_code == 200
+        rows = bk_list.json().get('results', bk_list.json())
+        assert any(r['id'] == bk.id for r in rows)
+        row = next(r for r in rows if r['id'] == bk.id)
+        assert row['is_file_locked'] is True
+        assert row['diagnosis'] == 'Locked — Enter Duty PIN'
+        assert row['allergies'] == ''
+
+        bk_det = client.get(f'/api/bookings/{bk.id}/')
+        assert bk_det.status_code == 200
+        assert bk_det.json()['is_file_locked'] is True
+        assert bk_det.json()['diagnosis'] == 'Locked — Enter Duty PIN'
+
+        pt_list = client.get('/api/patients/')
+        assert pt_list.status_code == 200
+        pt_rows = pt_list.json().get('results', pt_list.json())
+        pt_row = next(r for r in pt_rows if r['id'] == patient.id)
+        assert pt_row['is_file_locked'] is True
+        assert pt_row['primary_diagnosis'] == 'Locked — Enter Duty PIN'
+
+
+@pytest.mark.django_db
+@override_settings(PATIENT_FILE_PIN_REQUIRED=True)
+def test_locked_nurse_and_doctor_portal_lists_and_unlock_restores():
+    from lab.models import LabOrder, LabOrderStatus, LabTest
+    from staff_portal.models import StaffRequest
+
+    nurse_user, nurse = _make_staff('pin_gap_nurse', StaffRole.NURSE)
+    doc_user, doc = _make_staff('pin_gap_doc2', StaffRole.DOCTOR)
+    patient = _make_patient('gap_nd')
+    now = timezone.now()
+
+    bk_nurse = Booking.objects.create(
+        patient=patient,
+        assigned_staff=nurse,
+        service_type=ServiceType.NURSING,
+        status=BookingStatus.ASSIGNED,
+        scheduled_time=now,
+        shift_duration=ShiftDuration.EIGHT_HOURS,
+        diagnosis='Post-op wound care',
+        allergies='Sulfa',
+        address='Addr',
+        amount=Decimal('0.00'),
+    )
+    Booking.objects.create(
+        patient=patient,
+        assigned_staff=doc,
+        service_type=ServiceType.DOCTOR_CONSULTATION,
+        status=BookingStatus.ASSIGNED,
+        scheduled_time=now,
+        shift_duration=ShiftDuration.FOUR_HOURS,
+        diagnosis='Post-op review',
+        address='Addr',
+        amount=Decimal('0.00'),
+    )
+    StaffRequest.objects.create(
+        patient=patient,
+        staff=doc,
+        request_type='referral',
+        notes='Confidential cardiology referral',
+        status='pending',
+    )
+    lab_test = LabTest.objects.create(name='CBC', price=Decimal('1000.00'))
+    lab_order = LabOrder.objects.create(
+        patient=patient,
+        scheduled_collection_time=now,
+        collection_address='Addr',
+        status=LabOrderStatus.REQUESTED,
+    )
+    lab_order.tests.add(lab_test)
+
+    pin_nurse, _ = ensure_pin_for_duty(nurse, now - datetime.timedelta(hours=1), now + datetime.timedelta(hours=7))
+    pin_doc, _ = ensure_pin_for_duty(doc, now - datetime.timedelta(hours=1), now + datetime.timedelta(hours=3))
+
+    client = APIClient()
+    client.force_authenticate(user=nurse_user)
+
+    # Locked nurse: patients list masked, bookings masked, lab orders hidden
+    pt_rows = client.get('/api/patients/').json().get('results', [])
+    assert pt_rows[0]['is_file_locked'] is True
+    assert pt_rows[0]['primary_diagnosis'] == 'Locked — Enter Duty PIN'
+
+    bk_rows = client.get('/api/bookings/').json().get('results', [])
+    assert bk_rows[0]['is_file_locked'] is True
+    assert bk_rows[0]['diagnosis'] == 'Locked — Enter Duty PIN'
+
+    lab_rows = client.get('/api/lab/orders/').json()
+    lab_list = lab_rows.get('results', lab_rows) if isinstance(lab_rows, dict) else lab_rows
+    assert len(lab_list) == 0
+    assert client.get(f'/api/lab/orders/{lab_order.id}/').status_code in (403, 404)
+
+    # Locked doctor: doctor-portal lists masked
+    client.force_authenticate(user=doc_user)
+    cons_res = client.get('/api/staff-portal/consultations-list/?filter=today')
+    assert cons_res.status_code == 200
+    assert cons_res.json()['results'][0]['is_file_locked'] is True
+    assert cons_res.json()['results'][0]['diagnosis'] == 'Locked — Enter Duty PIN'
+
+    req_res = client.get('/api/staff-portal/pending-requests-list/')
+    assert req_res.status_code == 200
+    assert req_res.json()['results'][0]['is_file_locked'] is True
+    assert req_res.json()['results'][0]['notes'] == 'Locked — Enter Duty PIN'
+
+    # Unlock nurse -> patients, bookings, lab orders restored
+    client.force_authenticate(user=nurse_user)
+    assert client.post(f'/api/patients/{patient.id}/unlock/', {'pin': decrypt_pin(pin_nurse.pin_encrypted)}, format='json').status_code == 200
+    pt_rows_u = client.get('/api/patients/').json().get('results', [])
+    assert pt_rows_u[0]['is_file_locked'] is False
+    assert pt_rows_u[0]['primary_diagnosis'] == 'Post-op care'
+
+    bk_rows_u = client.get('/api/bookings/').json().get('results', [])
+    assert bk_rows_u[0]['is_file_locked'] is False
+    assert bk_rows_u[0]['diagnosis'] == 'Post-op wound care'
+
+    lab_rows_u = client.get('/api/lab/orders/').json()
+    lab_list_u = lab_rows_u.get('results', lab_rows_u) if isinstance(lab_rows_u, dict) else lab_rows_u
+    assert any(r['id'] == lab_order.id for r in lab_list_u)
+
+    # Unlock doctor -> doctor-portal lists restored
+    client.force_authenticate(user=doc_user)
+    assert client.post(f'/api/patients/{patient.id}/unlock/', {'pin': decrypt_pin(pin_doc.pin_encrypted)}, format='json').status_code == 200
+    cons_u = client.get('/api/staff-portal/consultations-list/?filter=today').json()
+    assert cons_u['results'][0]['is_file_locked'] is False
+    assert cons_u['results'][0]['diagnosis'] == 'Post-op review'
+
+
+@pytest.mark.django_db
+@override_settings(PATIENT_FILE_PIN_REQUIRED=True)
+def test_lab_tech_keeps_lab_orders_access():
+    from lab.models import LabOrder, LabOrderStatus, LabTest
+
+    lab_user, lab_staff = _make_staff('pin_gap_labtech', StaffRole.LAB_TECH)
+    patient = _make_patient('gap_lt')
+    now = timezone.now()
+    lab_test = LabTest.objects.create(name='LFT', price=Decimal('1200.00'))
+    lab_order = LabOrder.objects.create(
+        patient=patient,
+        collection_staff=lab_staff,
+        scheduled_collection_time=now,
+        collection_address='Addr',
+        status=LabOrderStatus.REQUESTED,
+    )
+    lab_order.tests.add(lab_test)
+
+    client = APIClient()
+    client.force_authenticate(user=lab_user)
+    res = client.get('/api/lab/orders/')
+    assert res.status_code == 200
+    data = res.json()
+    rows = data.get('results', data) if isinstance(data, dict) else data
+    assert any(r['id'] == lab_order.id for r in rows)
+
+
+@pytest.mark.django_db
+def test_generate_duty_pins_includes_buddy_bookings():
+    _, buddy_nurse = _make_staff('pin_cmd_buddy', StaffRole.NURSE)
+    patient = _make_patient('cmd_buddy')
+    future_time = timezone.now() + datetime.timedelta(days=2)
+
+    bk = Booking.objects.create(
+        patient=patient,
+        assigned_staff=None,
+        buddy_staff=buddy_nurse,
+        service_type=ServiceType.NURSING,
+        status=BookingStatus.ASSIGNED,
+        scheduled_time=future_time,
+        shift_duration=ShiftDuration.EIGHT_HOURS,
+        address='Addr',
+        amount=Decimal('0.00'),
+    )
+
+    call_command('generate_duty_pins')
+    assert DutyPIN.objects.filter(staff=buddy_nurse).count() == 0
+
+    call_command('generate_duty_pins', '--confirm')
+    assert DutyPIN.objects.filter(staff=buddy_nurse, booking=bk).count() == 1

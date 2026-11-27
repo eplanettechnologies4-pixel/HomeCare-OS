@@ -48,6 +48,27 @@ class DocumentViewSet(viewsets.ModelViewSet):
             return [permissions.AllowAny()]
         return super().get_permissions()
 
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+        from django.conf import settings
+        if getattr(settings, 'PATIENT_FILE_PIN_REQUIRED', False) and user and user.is_authenticated and not user.is_superuser:
+            from homecareOS.permissions import get_user_role
+            from staff.pin_service import FIELD_PIN_ROLES, is_patient_unlocked_for_user
+            if get_user_role(user) in FIELD_PIN_ROLES:
+                pids = set(qs.exclude(patient_id__isnull=True).values_list('patient_id', flat=True))
+                locked_pids = {pid for pid in pids if not is_patient_unlocked_for_user(user, pid)[0]}
+                if locked_pids:
+                    qs = qs.exclude(patient_id__in=locked_pids)
+        return qs
+
+    def get_object(self):
+        obj = super().get_object()
+        if self.action != 'download' and obj.patient_id:
+            from staff.pin_service import require_patient_file_unlock
+            require_patient_file_unlock(self.request.user, obj.patient_id)
+        return obj
+
     @action(detail=True, methods=['get'])
     def download(self, request, pk=None):
         document = self.get_object()
@@ -59,6 +80,9 @@ class DocumentViewSet(viewsets.ModelViewSet):
                 {'detail': 'Authentication credentials were not provided or token is invalid.'},
                 status=status.HTTP_401_UNAUTHORIZED
             )
+        if document.patient_id:
+            from staff.pin_service import require_patient_file_unlock
+            require_patient_file_unlock(user, document.patient_id)
 
         if not document.file or not document.file.storage.exists(document.file.name):
             raise Http404("Document file does not exist on storage.")

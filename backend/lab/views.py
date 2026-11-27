@@ -100,7 +100,29 @@ class LabOrderViewSet(viewsets.ModelViewSet):
             qs = qs.filter(status=status_param)
         if patient_id:
             qs = qs.filter(patient_id=patient_id)
+
+        from django.conf import settings
+        if getattr(settings, 'PATIENT_FILE_PIN_REQUIRED', False) and not user.is_superuser:
+            role = get_user_role(user)
+            staff = getattr(user, 'staffmember', None)
+            is_lab_tech_spec = bool(staff and getattr(staff, 'specialization', '') == 'Lab Technician')
+            from staff.pin_service import FIELD_PIN_ROLES, is_patient_unlocked_for_user
+            if role in FIELD_PIN_ROLES and role != 'lab_tech' and not is_lab_tech_spec:
+                pids = set(qs.values_list('patient_id', flat=True))
+                unlocked_pids = {pid for pid in pids if pid and is_patient_unlocked_for_user(user, pid)[0]}
+                qs = qs.filter(patient_id__in=unlocked_pids)
         return qs
+
+    def get_object(self):
+        order = super().get_object()
+        user = self.request.user
+        role = get_user_role(user)
+        staff = getattr(user, 'staffmember', None)
+        is_lab_tech_spec = bool(staff and getattr(staff, 'specialization', '') == 'Lab Technician')
+        from staff.pin_service import FIELD_PIN_ROLES, require_patient_file_unlock
+        if not user.is_superuser and order.patient_id and role in FIELD_PIN_ROLES and role != 'lab_tech' and not is_lab_tech_spec:
+            require_patient_file_unlock(user, order.patient_id)
+        return order
 
     @transaction.atomic
     def create(self, request, *args, **kwargs):

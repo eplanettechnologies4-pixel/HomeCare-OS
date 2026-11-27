@@ -23,6 +23,8 @@ class PatientSummarySerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         ret = super().to_representation(instance)
+        if ret.get('is_file_locked'):
+            ret['primary_diagnosis'] = 'Locked — Enter Duty PIN'
         request = self.context.get('request')
         user = getattr(request, 'user', None) if request else None
         if not user or not user.is_authenticated:
@@ -87,6 +89,7 @@ class PatientListSerializer(serializers.ModelSerializer):
     portal_username = serializers.SerializerMethodField()
     source_display = serializers.CharField(source='get_source_display', read_only=True)
     photo = serializers.SerializerMethodField()
+    is_file_locked = serializers.SerializerMethodField()
 
     class Meta:
         model = Patient
@@ -97,7 +100,17 @@ class PatientListSerializer(serializers.ModelSerializer):
             'address', 'latitude', 'longitude', 'is_active',
             'source', 'source_display',
             'has_portal_account', 'portal_username',
+            'is_file_locked',
         ]
+
+    def get_is_file_locked(self, obj):
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        if not user or not user.is_authenticated:
+            return False
+        from staff.pin_service import is_patient_unlocked_for_user
+        unlocked, _ = is_patient_unlocked_for_user(user, obj.id)
+        return not unlocked
 
     def get_photo(self, obj):
         if obj.photo:
@@ -112,6 +125,8 @@ class PatientListSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         ret = super().to_representation(instance)
+        if ret.get('is_file_locked'):
+            ret['primary_diagnosis'] = 'Locked — Enter Duty PIN'
         request = self.context.get('request')
         user = getattr(request, 'user', None) if request else None
         if not user or not user.is_authenticated:
@@ -241,6 +256,8 @@ class PatientDetailSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         ret = super().to_representation(instance)
+        if ret.get('is_file_locked'):
+            ret['primary_diagnosis'] = 'Locked — Enter Duty PIN'
         request = self.context.get('request')
         user = getattr(request, 'user', None) if request else None
         if not user or not user.is_authenticated:

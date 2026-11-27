@@ -211,8 +211,19 @@ class BookingViewSet(viewsets.ModelViewSet):
         user = self.request.user
         if is_family_user(user):
             return qs.filter(patient__portal_user=user)
-        from patients.scoping import filter_queryset_for_nurse
-        return filter_queryset_for_nurse(qs, user, patient_field='patient')
+        from homecareOS.permissions import get_user_role
+        from patients.scoping import get_assigned_patient_ids_for_user, staff_booking_q
+        from staff.pin_service import FIELD_PIN_ROLES
+        role = get_user_role(user)
+        staff = getattr(user, 'staffmember', None)
+        if not user.is_superuser and role in FIELD_PIN_ROLES:
+            if role == 'nurse':
+                assigned_ids = get_assigned_patient_ids_for_user(user)
+                if assigned_ids is not None:
+                    return qs.filter(patient_id__in=assigned_ids)
+            elif staff:
+                return qs.filter(staff_booking_q(staff))
+        return qs
 
     def get_object(self):
         user = self.request.user
@@ -225,9 +236,14 @@ class BookingViewSet(viewsets.ModelViewSet):
                     from rest_framework.exceptions import PermissionDenied
                     raise PermissionDenied("You do not have permission to access this booking.")
         obj = super().get_object()
-        from patients.scoping import check_nurse_patient_access
-        if obj.patient:
-            check_nurse_patient_access(user, obj.patient)
+        from homecareOS.permissions import get_user_role
+        from patients.scoping import get_assigned_patient_ids_for_user
+        from django.http import Http404
+        role = get_user_role(user)
+        if not user.is_superuser and role == 'nurse' and obj.patient_id:
+            assigned_ids = get_assigned_patient_ids_for_user(user)
+            if assigned_ids is not None and obj.patient_id not in assigned_ids:
+                raise Http404("Patient not found.")
         return obj
 
     def get_serializer_class(self):
