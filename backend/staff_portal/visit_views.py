@@ -25,7 +25,7 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 
 from .models import NurseVisit
-from patients.scoping import get_assigned_patient_ids_for_user, is_field_nurse_user
+from patients.scoping import get_assigned_patient_ids_for_user, is_field_nurse_user, staff_booking_q
 from staff.models import StaffMember, RosterAssignment
 from homecareOS.permissions import get_user_role
 from tracking.views import _haversine_distance_meters as haversine_distance_meters
@@ -169,7 +169,7 @@ def resolve_nurse_booking_for_visit(nurse_staff, patient_id, requested_booking_i
         Booking.objects.filter(
             patient_id=patient_id
         ).filter(
-            Q(assigned_staff=nurse_staff) | Q(buddy=nurse_staff) | Q(buddy_staff=nurse_staff)
+            staff_booking_q(nurse_staff)
         ).exclude(
             status__in=[BookingStatus.CANCELLED, BookingStatus.COMPLETED]
         )

@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import useStore from '../store/useStore';
 import LocationPicker from './LocationPicker';
+import ScheduleDutyModal from './ScheduleDutyModal';
 import { SERVICE_CATEGORIES, getItemsByCategory, findCatalogItem, PHARMACY_REQUIREMENTS_NOTE } from '../data/serviceCatalog';
 
 // ── Utility: generate a slug username from a full name ────────────────────
@@ -97,6 +98,7 @@ export default function AddPatientModal({ onClose }) {
   const [validationError, setValidationError]         = useState('');
   const [duplicateWarning, setDuplicateWarning]       = useState('');
   const [isSubmitting, setIsSubmitting]               = useState(false);
+  const [showScheduleDuty, setShowScheduleDuty]       = useState(false);
 
   // ── Portal Credentials State ───────────────────────────────────────────────
   const [portalForm, setPortalForm] = useState({
@@ -456,6 +458,8 @@ export default function AddPatientModal({ onClose }) {
           password: portalForm.portal_password,
           patientName: form.patient_name,
         });
+      } else if (e?.scheduleAfterSave) {
+        setShowScheduleDuty(true);
       } else {
         if (onClose) onClose();
         setSelectedPatient(createdPatient);
@@ -523,7 +527,17 @@ export default function AddPatientModal({ onClose }) {
               These credentials are shown <strong>only once</strong>. Please save or share them now. The password can be reset from the Patient 360 profile.
             </div>
           </div>
-          <div className="modal-footer">
+          <div className="modal-footer" style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+            <button
+              type="button"
+              className="btn btn-outline"
+              onClick={() => {
+                setCreatedPortalCreds(null);
+                setShowScheduleDuty(true);
+              }}
+            >
+              Schedule Duty Now
+            </button>
             <button
               className="btn btn-primary"
               onClick={() => {
@@ -1267,13 +1281,33 @@ export default function AddPatientModal({ onClose }) {
         </div>
 
         {/* Modal Footer */}
-        <div className="modal-footer" style={{ borderTop: '1px solid #e5e7eb', padding: '14px 24px' }}>
+        <div className="modal-footer" style={{ borderTop: '1px solid #e5e7eb', padding: '14px 24px', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <button type="button" className="btn btn-ghost" onClick={onClose} disabled={isSubmitting}>Cancel</button>
+          <button
+            type="button"
+            className="btn btn-outline"
+            onClick={() => handleSubmit({ scheduleAfterSave: true })}
+            disabled={isSubmitting}
+            style={{ padding: '8px 16px', fontWeight: 700, borderColor: '#0f766e', color: '#0f766e' }}
+          >
+            {isSubmitting ? 'Saving…' : 'Save & Schedule Duty'}
+          </button>
           <button type="button" className="btn btn-primary" onClick={handleSubmit} disabled={isSubmitting} style={{ padding: '8px 24px', fontWeight: 800 }}>
             {isSubmitting ? 'Registering Patient…' : 'Register & Onboard Patient →'}
           </button>
         </div>
       </div>
+      <ScheduleDutyModal
+        isOpen={showScheduleDuty}
+        initialPatientId={createdPatientForNav?.id}
+        onClose={() => {
+          setShowScheduleDuty(false);
+          if (onClose) onClose();
+        }}
+        onSuccess={() => {
+          if (fetchPatients) fetchPatients();
+        }}
+      />
     </div>
   );
 }

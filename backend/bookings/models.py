@@ -122,6 +122,11 @@ class Booking(models.Model):
         verbose_name='Duty Driver Staff'
     )
     driver_pickup_time = models.TimeField(null=True, blank=True, verbose_name='Driver Pickup Time')
+    roster_assignment = models.ForeignKey(
+        'staff.RosterAssignment', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='bookings',
+        verbose_name='Linked Roster Duty',
+    )
     driver_name = models.CharField(max_length=150, blank=True, default='')
     driver_phone = models.CharField(max_length=50, blank=True, default='')
     pickup_time = models.DateTimeField(null=True, blank=True)

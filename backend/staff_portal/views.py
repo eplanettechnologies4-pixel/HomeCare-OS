@@ -29,7 +29,7 @@ from notifications.views import create_notification
 from patients.models import DoctorNote, Patient, PhysioNote, VitalSign, ShiftHandoverNote, Prescription, MARAdministration, PatientActiveComplaint
 from patients.serializers import ShiftHandoverNoteSerializer
 from patients.record_integrity import handle_mark_entered_in_error
-from patients.scoping import is_field_nurse_user, check_nurse_patient_access, get_assigned_patient_ids_for_user
+from patients.scoping import is_field_nurse_user, check_nurse_patient_access, get_assigned_patient_ids_for_user, staff_booking_q
 from staff_portal.duty_countdown import (
     calculate_duty_countdown,
     derive_shift_name,
@@ -427,8 +427,10 @@ class StaffPortalHomeView(APIView):
 
         # 5. Alerts derivation
         alerts_raw = []
+        from patients.scoping import staff_booking_q
         assigned_patient_ids = list(
-            Booking.objects.filter(Q(assigned_staff=staff) | Q(buddy=staff))
+            Booking.objects.filter(staff_booking_q(staff))
+            .exclude(status=BookingStatus.CANCELLED)
             .values_list('patient_id', flat=True)
             .distinct()
         )
@@ -569,7 +571,7 @@ class StaffPortalHomeView(APIView):
                     tier = 'unclassified'
 
                 has_booking_today = Booking.objects.filter(
-                    Q(assigned_staff=staff) | Q(buddy=staff) | Q(buddy_staff=staff),
+                    staff_booking_q(staff),
                     patient=p,
                     scheduled_time__range=[today_start, today_end],
                 ).exclude(status=BookingStatus.CANCELLED).exists()
@@ -1163,6 +1165,7 @@ def compute_roster_summary(staff, local_now=None, local_tz=None, user=None):
             'is_overnight': is_ov,
             'countdown': countdown_info,
             'patients': pats_list,
+            'empty_patients_label': '' if pats_list else 'Shift only, no patient assigned yet',
             'supervisor': {
                 'name': sup_obj.full_name,
                 'phone': (sup_obj.phone if can_view_staff_phones else None),
@@ -2148,7 +2151,7 @@ class NurseTodayWorkListView(APIView):
                     continue
                 latest_v = VitalSign.objects.filter(patient=p, is_entered_in_error=False).order_by('-recorded_at').first()
                 has_booking_today = Booking.objects.filter(
-                    Q(assigned_staff=staff) | Q(buddy=staff) | Q(buddy_staff=staff),
+                    staff_booking_q(staff),
                     patient=p,
                     scheduled_time__range=[today_start, today_end],
                 ).exclude(status=BookingStatus.CANCELLED).exists()

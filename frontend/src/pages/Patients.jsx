@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Search, X, AlertCircle, CheckCircle, TrendingUp, Pill, Activity, FileText, FlaskConical, DollarSign, Clock, Plus, Eye, Edit3, Trash2, Shield, RefreshCw, Copy, KeyRound, UserCheck } from 'lucide-react';
+import { Search, X, AlertCircle, CheckCircle, TrendingUp, Pill, Activity, FileText, FlaskConical, DollarSign, Clock, Plus, Eye, Edit3, Trash2, Shield, RefreshCw, Copy, KeyRound, UserCheck, Calendar } from 'lucide-react';
 import useStore from '../store/useStore';
 import AddPatientModal from '../components/AddPatientModal';
 import EditPatientModal from '../components/EditPatientModal';
+import ScheduleDutyModal from '../components/ScheduleDutyModal';
 import PatientSourceBadge from '../components/PatientSourceBadge';
 import PermanentPatientModal from '../components/PermanentPatientModal';
 import UniversalPrintButton from '../components/UniversalPrintButton';
@@ -23,6 +24,7 @@ export default function Patients() {
 
   const [selected, setSelected]             = useState(null);
   const [editingPatient, setEditingPatient] = useState(null);
+  const [dutyPatient, setDutyPatient] = useState(null);
   const [search, setSearch]                 = useState('');
   const [showAddModal, setShowAddModal]     = useState(false);
   const [portalResetResult, setPortalResetResult] = useState(null); // { patientName, username, password }
@@ -229,6 +231,16 @@ export default function Patients() {
                           {canEditPatient && (
                             <button
                               className="btn btn-ghost btn-sm"
+                              title="Schedule Duty for Patient"
+                              onClick={() => setDutyPatient(p)}
+                              style={{ padding: '4px 8px', fontSize: '0.75rem', gap: 4, color: '#0f766e', borderColor: '#ccfbf1' }}
+                            >
+                              <Calendar size={13} /> Schedule Duty
+                            </button>
+                          )}
+                          {canEditPatient && (
+                            <button
+                              className="btn btn-ghost btn-sm"
                               title="Edit Patient Record"
                               onClick={() => setEditingPatient(p)}
                               style={{ padding: '4px 8px', fontSize: '0.75rem', gap: 4, color: '#b87320', borderColor: '#fef3c7' }}
@@ -261,6 +273,12 @@ export default function Patients() {
       {selected && <PatientDetail patient={selected} bookings={bookings} onClose={() => setSelected(null)} />}
       {showAddModal && <AddPatientModal onClose={() => setShowAddModal(false)} />}
       {editingPatient && <EditPatientModal patient={editingPatient} onClose={() => setEditingPatient(null)} />}
+      <ScheduleDutyModal
+        isOpen={Boolean(dutyPatient)}
+        initialPatientId={dutyPatient?.id}
+        onClose={() => setDutyPatient(null)}
+        onSuccess={() => fetchPatients()}
+      />
 
       {/* ── Permanent Patient / Portal Credentials Result Modal ──────────── */}
       {portalResetResult && (

@@ -9,6 +9,9 @@ export default function AssignPatientModal({ staff, isOpen, onClose, onSuccess }
   const [patientList, setPatientList] = useState([]);
   const [selectedPatient, setSelectedPatient] = useState(null);
   const [assignmentType, setAssignmentType] = useState('primary'); // 'primary' | 'buddy'
+  const [shiftDate, setShiftDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [startTime, setStartTime] = useState('08:00');
+  const [endTime, setEndTime] = useState('16:00');
   const [notes, setNotes] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -58,6 +61,7 @@ export default function AssignPatientModal({ staff, isOpen, onClose, onSuccess }
         patient_id: selectedPatient.id,
         assignment_type: assignmentType,
         notes: notes.trim(),
+        ...(isNurseOrTherapist ? { date: shiftDate, start_time: startTime, end_time: endTime } : {}),
       };
 
       const res = await apiFetch(`/staff/members/${staff.id}/assign-patient/`, {
@@ -253,34 +257,52 @@ export default function AssignPatientModal({ staff, isOpen, onClose, onSuccess }
               </div>
             )}
 
-            {/* Nurse/Therapist assignment slot choice */}
+            {/* Nurse/Therapist assignment slot choice & duty window */}
             {isNurseOrTherapist && (
-              <div>
-                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--teal-900)', marginBottom: 6 }}>
-                  Assignment Type
-                </label>
-                <div style={{ display: 'flex', gap: 12 }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', cursor: 'pointer' }}>
-                    <input
-                      type="radio"
-                      name="assignmentType"
-                      value="primary"
-                      checked={assignmentType === 'primary'}
-                      onChange={() => setAssignmentType('primary')}
-                    />
-                    Primary Clinician (Lead)
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--teal-900)', marginBottom: 6 }}>
+                    Assignment Type
                   </label>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', cursor: 'pointer' }}>
-                    <input
-                      type="radio"
-                      name="assignmentType"
-                      value="buddy"
-                      checked={assignmentType === 'buddy'}
-                      onChange={() => setAssignmentType('buddy')}
-                    />
-                    Buddy / Shadowing Clinician
-                  </label>
+                  <div style={{ display: 'flex', gap: 12 }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', cursor: 'pointer' }}>
+                      <input
+                        type="radio"
+                        name="assignmentType"
+                        value="primary"
+                        checked={assignmentType === 'primary'}
+                        onChange={() => setAssignmentType('primary')}
+                      />
+                      Primary Clinician (Lead)
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', cursor: 'pointer' }}>
+                      <input
+                        type="radio"
+                        name="assignmentType"
+                        value="buddy"
+                        checked={assignmentType === 'buddy'}
+                        onChange={() => setAssignmentType('buddy')}
+                      />
+                      Buddy Staff
+                    </label>
+                  </div>
                 </div>
+                {assignmentType === 'primary' && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr', gap: 8 }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.76rem', fontWeight: 600, color: 'var(--teal-900)', marginBottom: 3 }}>Date</label>
+                      <input type="date" className="form-input" value={shiftDate} onChange={(e) => setShiftDate(e.target.value)} required />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.76rem', fontWeight: 600, color: 'var(--teal-900)', marginBottom: 3 }}>Start</label>
+                      <input type="time" className="form-input" value={startTime} onChange={(e) => setStartTime(e.target.value)} required />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.76rem', fontWeight: 600, color: 'var(--teal-900)', marginBottom: 3 }}>End</label>
+                      <input type="time" className="form-input" value={endTime} onChange={(e) => setEndTime(e.target.value)} required />
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 

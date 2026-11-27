@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import apiFetch from '../services/api';
 import useStore from '../store/useStore';
+import ScheduleDutyModal from './ScheduleDutyModal';
 
 function formatKarachiDate(dateStr) {
   if (!dateStr) return '';
@@ -37,6 +38,7 @@ export default function StaffRosterTab() {
 
   // Modals & Drawers
   const [cellEditModal, setCellEditModal] = useState({ open: false, staff: null, date: null, currentShift: null });
+  const [addPatientsModal, setAddPatientsModal] = useState({ open: false, staff: null, date: null, startTime: null, endTime: null });
   const [templatesModal, setTemplatesModal] = useState(false);
   const [historyModal, setHistoryModal] = useState(false);
   const [historyLogs, setHistoryLogs] = useState([]);
@@ -815,6 +817,30 @@ export default function StaffRosterTab() {
                                 {shift.transport_driver_name && ` • Van: ${shift.transport_driver_name.split(' ')[0]}`}
                               </div>
                             )}
+                            {(shift.is_shift_only || shift.patients_count === 0) && (
+                              <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                                <span style={{ fontSize: '0.65rem', fontWeight: 700, color: '#92400E', background: '#FEF3C7', padding: '1px 5px', borderRadius: 4, display: 'inline-block', width: 'fit-content' }}>
+                                  Shift only
+                                </span>
+                                <button
+                                  type="button"
+                                  className="btn btn-ghost btn-sm"
+                                  style={{ padding: '2px 6px', fontSize: '0.65rem', color: '#6D28D9', border: '1px solid #DDD6FE', background: '#fff' }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setAddPatientsModal({
+                                      open: true,
+                                      staff: st,
+                                      date: d.date,
+                                      startTime: shift.start_time || '08:00',
+                                      endTime: shift.end_time || '16:00',
+                                    });
+                                  }}
+                                >
+                                  + Add patients
+                                </button>
+                              </div>
+                            )}
                           </div>
                         ) : (
                           <div
@@ -1300,6 +1326,15 @@ export default function StaffRosterTab() {
         </div>
       )}
 
+      <ScheduleDutyModal
+        isOpen={addPatientsModal.open}
+        staff={addPatientsModal.staff}
+        initialDate={addPatientsModal.date}
+        initialStartTime={addPatientsModal.startTime}
+        initialEndTime={addPatientsModal.endTime}
+        onClose={() => setAddPatientsModal({ open: false, staff: null, date: null, startTime: null, endTime: null })}
+        onSuccess={() => fetchRoster()}
+      />
     </div>
   );
 }

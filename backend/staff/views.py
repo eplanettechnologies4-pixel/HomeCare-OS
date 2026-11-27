@@ -10,6 +10,7 @@ from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from homecareOS.permissions import IsStaffManagementAllowed, IsCareManagerOrAdmin, get_user_role
 from accounts.models import AuditLog, User
 from patients.models import Patient
+from patients.scoping import staff_booking_q, staff_ids_booking_q
 from bookings.models import Booking, BookingStatus
 from .models import StaffMember, LeaveRequest, AttendanceRecord, RosterAssignment, StaffStageEvent, StaffRequirement
 from .serializers import (
@@ -50,11 +51,12 @@ def _batch_enrich_staff_list(items):
     roster_map = {r.staff_id: r for r in rosters}
 
     # 2. Today's active / upcoming bookings
+    from patients.scoping import staff_ids_booking_q, staff_booking_q
     today_bookings = Booking.objects.filter(
-        Q(assigned_staff_id__in=staff_ids) | Q(buddy_id__in=staff_ids),
+        staff_ids_booking_q(staff_ids),
         scheduled_time__date=today,
     ).exclude(status__in=[BookingStatus.CANCELLED, BookingStatus.COMPLETED]).only(
-        'assigned_staff_id', 'buddy_id', 'status', 'scheduled_time', 'shift_end_time'
+        'assigned_staff_id', 'buddy_id', 'buddy_staff_id', 'status', 'scheduled_time', 'shift_end_time'
     )
     on_visit_staff_ids = set()
     booking_map = {}
@@ -63,10 +65,11 @@ def _batch_enrich_staff_list(items):
             booking_map.setdefault(b.assigned_staff_id, []).append(b)
             if b.status == BookingStatus.IN_PROGRESS or (b.scheduled_time <= now and (b.shift_end_time is None or b.shift_end_time >= now)):
                 on_visit_staff_ids.add(b.assigned_staff_id)
-        if b.buddy_id:
-            booking_map.setdefault(b.buddy_id, []).append(b)
-            if b.status == BookingStatus.IN_PROGRESS:
-                on_visit_staff_ids.add(b.buddy_id)
+        for bid in (b.buddy_id, b.buddy_staff_id):
+            if bid:
+                booking_map.setdefault(bid, []).append(b)
+                if b.status == BookingStatus.IN_PROGRESS:
+                    on_visit_staff_ids.add(bid)
 
     # 3. Assigned patients count
     cm_patient_counts = dict(
@@ -75,15 +78,16 @@ def _batch_enrich_staff_list(items):
         ).values('assigned_care_manager_id').annotate(c=Count('id')).values_list('assigned_care_manager_id', 'c')
     )
     booking_patient_records = Booking.objects.filter(
-        Q(assigned_staff_id__in=staff_ids) | Q(buddy_id__in=staff_ids)
-    ).exclude(status__in=[BookingStatus.CANCELLED, BookingStatus.COMPLETED]).values('assigned_staff_id', 'buddy_id', 'patient_id')
+        staff_ids_booking_q(staff_ids)
+    ).exclude(status__in=[BookingStatus.CANCELLED, BookingStatus.COMPLETED]).values(
+        'assigned_staff_id', 'buddy_id', 'buddy_staff_id', 'patient_id'
+    )
     patient_set_by_staff = {}
     for rec in booking_patient_records:
         pid = rec['patient_id']
-        if rec['assigned_staff_id']:
-            patient_set_by_staff.setdefault(rec['assigned_staff_id'], set()).add(pid)
-        if rec['buddy_id']:
-            patient_set_by_staff.setdefault(rec['buddy_id'], set()).add(pid)
+        for sid in (rec['assigned_staff_id'], rec['buddy_id'], rec['buddy_staff_id']):
+            if sid:
+                patient_set_by_staff.setdefault(sid, set()).add(pid)
 
     # 4. Docs progress
     reqs = StaffRequirement.objects.filter(
@@ -260,7 +264,7 @@ class StaffViewSet(viewsets.ModelViewSet):
         today = timezone.now().date()
         active_duties_count = staff.roster_assignments.filter(date__gte=today, is_published=True, is_off=False).count()
         active_bookings_count = Booking.objects.filter(
-            Q(assigned_staff=staff) | Q(buddy=staff),
+            staff_booking_q(staff),
             scheduled_time__gte=timezone.now(),
             status__in=[BookingStatus.ASSIGNED, BookingStatus.IN_PROGRESS, BookingStatus.PENDING]
         ).count()
@@ -417,18 +421,60 @@ class StaffViewSet(viewsets.ModelViewSet):
                 'booking_id': booking.id,
             })
 
-        # 3. Nurse & Therapists -> Booking assigned_staff or buddy
+        # 3. Nurse & Therapists -> route through shared duty service (unless buddy-only on existing booking)
+        from .duty_service import ROSTER_BASED_ROLES, schedule_staff_duty
+        from rest_framework.exceptions import ValidationError as DRFValidationError
+
+        if staff.role in ROSTER_BASED_ROLES and assignment_type != 'buddy':
+            now_local = timezone.now()
+            shift_date_str = request.data.get('date') or now_local.date().isoformat()
+            shift_start_str = start_time_str or now_local.strftime('%H:%M')
+            default_hrs = 8 if staff.role == 'nurse' else 2
+            shift_end_str = end_time_str or (now_local + timezone.timedelta(hours=default_hrs)).strftime('%H:%M')
+
+            target_b = Booking.objects.filter(pk=booking_id, patient=patient).first() if booking_id else None
+            sup = StaffMember.objects.filter(pk=request.data.get('supervisor_id')).first() if request.data.get('supervisor_id') else None
+            bud_id = request.data.get('buddy_staff_id') or request.data.get('buddy_id')
+            bud = StaffMember.objects.filter(pk=bud_id).first() if bud_id else None
+            drv = StaffMember.objects.filter(pk=request.data.get('driver_id')).first() if request.data.get('driver_id') else None
+
+            try:
+                res = schedule_staff_duty(
+                    actor=actor,
+                    staff=staff,
+                    patients=[patient],
+                    date=shift_date_str,
+                    start_time=shift_start_str,
+                    end_time=shift_end_str,
+                    supervisor=sup,
+                    buddy_staff=bud,
+                    driver=drv,
+                    driver_pickup_time=request.data.get('driver_pickup_time'),
+                    is_published=bool(request.data.get('is_published', True)),
+                    target_booking=target_b,
+                    notes=notes,
+                    check_permissions=False,
+                )
+            except DRFValidationError as e:
+                detail = e.detail if isinstance(e.detail, dict) else {'detail': str(e.detail)}
+                return Response(detail, status=status.HTTP_400_BAD_REQUEST)
+
+            booking = res['bookings'][0]
+            return Response({
+                'success': True,
+                'message': f"{staff.full_name} assigned and duty scheduled for {patient.full_name}.",
+                'model': 'Booking',
+                'booking_id': booking.id,
+                'assignment_id': res['assignment'].id,
+            })
+
+        # Buddy-only assignment
         if booking_id:
             try:
                 booking = Booking.objects.get(pk=booking_id, patient=patient)
-                if assignment_type == 'buddy':
-                    booking.buddy = staff
-                    booking.buddy_staff = staff
-                    booking.save(update_fields=['buddy', 'buddy_staff'])
-                else:
-                    booking.assigned_staff = staff
-                    booking.status = BookingStatus.ASSIGNED
-                    booking.save(update_fields=['assigned_staff', 'status'])
+                booking.buddy = staff
+                booking.buddy_staff = staff
+                booking.save(update_fields=['buddy', 'buddy_staff'])
             except Booking.DoesNotExist:
                 return Response({'error': 'booking_not_found', 'detail': 'Booking not found for this patient.'}, status=status.HTTP_404_NOT_FOUND)
         else:
@@ -436,9 +482,9 @@ class StaffViewSet(viewsets.ModelViewSet):
             hours = 8 if staff.role == 'nurse' else 2
             booking = Booking.objects.create(
                 patient=patient,
-                assigned_staff=staff if assignment_type != 'buddy' else None,
-                buddy=staff if assignment_type == 'buddy' else None,
-                buddy_staff=staff if assignment_type == 'buddy' else None,
+                assigned_staff=None,
+                buddy=staff,
+                buddy_staff=staff,
                 service_type=f"{staff.get_role_display()} Visit",
                 scheduled_time=now,
                 shift_end_time=now + timezone.timedelta(hours=hours),
@@ -484,18 +530,23 @@ class StaffViewSet(viewsets.ModelViewSet):
             patient.assigned_care_manager = None
             patient.save(update_fields=['assigned_care_manager'])
         else:
+            from patients.scoping import staff_booking_q
+            from .duty_service import sync_remove_patient_from_duty
             b_qs = Booking.objects.filter(patient=patient)
             if booking_id:
                 b_qs = b_qs.filter(id=booking_id)
             else:
-                b_qs = b_qs.filter(Q(assigned_staff=staff) | Q(buddy=staff))
+                b_qs = b_qs.filter(staff_booking_q(staff))
             for b in b_qs:
                 if b.assigned_staff_id == staff.id:
                     b.assigned_staff = None
                 if b.buddy_id == staff.id:
                     b.buddy = None
+                if b.buddy_staff_id == staff.id:
                     b.buddy_staff = None
                 b.save(update_fields=['assigned_staff', 'buddy', 'buddy_staff'])
+                sync_remove_patient_from_duty(patient, staff=staff, booking=b, actor=actor, reason='Unassigned')
+            sync_remove_patient_from_duty(patient, staff=staff, actor=actor, reason='Unassigned')
 
         log_staff_audit(actor, 'unassign_patient', staff, {'patient_id': patient.id, 'patient_name': patient.full_name}, request=request)
         return Response({'success': True, 'message': f'Unassigned {staff.full_name} from {patient.full_name}.'})
@@ -519,10 +570,11 @@ class StaffViewSet(viewsets.ModelViewSet):
         events_data = StaffStageEventSerializer(events, many=True).data
 
         # 2. Assigned patients
+        from patients.scoping import staff_booking_q
         managed_pts = Patient.objects.filter(assigned_care_manager=staff).values('id', 'first_name', 'last_name', 'mr_number', 'phone', 'is_active', 'primary_diagnosis')
         staff_bookings = Booking.objects.filter(
-            Q(assigned_staff=staff) | Q(buddy=staff)
-        ).select_related('patient').order_by('-scheduled_time')[:50]
+            staff_booking_q(staff)
+        ).exclude(status=BookingStatus.CANCELLED).select_related('patient').order_by('-scheduled_time')[:50]
 
         assigned_patients = []
         for mp in managed_pts:
@@ -599,7 +651,7 @@ class StaffViewSet(viewsets.ModelViewSet):
         today = timezone.now().date()
         active_duties_count = staff.roster_assignments.filter(date__gte=today, is_published=True, is_off=False).count()
         active_bookings_count = Booking.objects.filter(
-            Q(assigned_staff=staff) | Q(buddy=staff),
+            staff_booking_q(staff),
             scheduled_time__gte=timezone.now(),
             status__in=[BookingStatus.ASSIGNED, BookingStatus.IN_PROGRESS, BookingStatus.PENDING]
         ).count()

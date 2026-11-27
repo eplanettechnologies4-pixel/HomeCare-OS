@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import useStore from '../store/useStore';
 import NurseAssignPanel from '../components/NurseAssignPanel';
+import ScheduleDutyModal from '../components/ScheduleDutyModal';
 import PatientSourceBadge from '../components/PatientSourceBadge';
 import LocationPicker from '../components/LocationPicker';
 import UniversalPrintButton from '../components/UniversalPrintButton';
@@ -980,6 +981,8 @@ function BookingDrawer({ booking, onClose }) {
   const staff = useStore((s) => s.staff);
   const fetchStaff = useStore((s) => s.fetchStaff);
   const assignNurseToBooking = useStore((s) => s.assignNurseToBooking);
+  const fetchBookings = useStore((s) => s.fetchBookings);
+  const [showScheduleDuty, setShowScheduleDuty] = useState(false);
 
   useEffect(() => {
     if (booking) {
@@ -1183,16 +1186,41 @@ function BookingDrawer({ booking, onClose }) {
             </div>
           </div>
 
-          {/* 10 Required Assignment Fields via NurseAssignPanel */}
+          {/* 10 Required Assignment Fields via ScheduleDutyModal (nursing/roster) or NurseAssignPanel */}
           <div style={{ marginTop: 20 }}>
-            <NurseAssignPanel
-              booking={booking}
-              staffList={staff}
-              onConfirmAssignment={(data) => assignNurseToBooking(booking.id, data)}
-            />
+            {['nursing', 'short_service', 'long_term', 'nursing_short_term', 'nursing_long_term', 'physiotherapy', 'psychology', 'nutrition'].includes(booking.service_type) ? (
+              <div style={{ padding: 14, borderRadius: 10, background: '#f0fdfa', border: '1px solid #99f6e4', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: '0.88rem', color: '#0f766e' }}>Schedule Duty & Assign Nurse</div>
+                  <div style={{ fontSize: '0.76rem', color: '#115e59' }}>Links this booking to a published roster shift so it appears in My Roster, My Patients, Patient File & Start Visit.</div>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={() => setShowScheduleDuty(true)}
+                >
+                  Schedule Duty
+                </button>
+              </div>
+            ) : (
+              <NurseAssignPanel
+                booking={booking}
+                staffList={staff}
+                onConfirmAssignment={(data) => assignNurseToBooking(booking.id, data)}
+              />
+            )}
           </div>
         </div>
       </div>
+      <ScheduleDutyModal
+        isOpen={showScheduleDuty}
+        initialPatientId={booking.patient?.id || booking.patient_id}
+        initialDate={booking.scheduled_time ? new Date(booking.scheduled_time).toISOString().split('T')[0] : null}
+        onClose={() => setShowScheduleDuty(false)}
+        onSuccess={() => {
+          if (fetchBookings) fetchBookings();
+        }}
+      />
     </div>
   );
 }

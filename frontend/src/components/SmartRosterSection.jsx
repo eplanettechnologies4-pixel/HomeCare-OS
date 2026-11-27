@@ -460,7 +460,11 @@ export default function SmartRosterSection({
                   ))}
                 </div>
               </div>
-            ) : null}
+            ) : (
+              <div style={{ padding: '10px 14px', borderRadius: 10, background: '#F9FAFB', border: '1px dashed #D1D5DB', fontSize: '12.5px', color: '#6B7280', fontWeight: 600 }}>
+                {todayDuty?.empty_patients_label || 'Shift only, no patient assigned yet'}
+              </div>
+            )}
 
             {/* Sections c, d, e: Supervisor, Transportation, Buddy Staff (only if set, or "Independent duty") */}
             {!isIndependent ? (
@@ -529,7 +533,11 @@ export default function SmartRosterSection({
                   )}
                 </div>
               </div>
-            ) : null}
+            ) : (
+              <div style={{ padding: '10px 14px', borderRadius: 10, background: '#F9FAFB', border: '1px dashed #D1D5DB', fontSize: '12.5px', color: '#6B7280', fontWeight: 600 }}>
+                {todayDuty?.empty_patients_label || 'Shift only, no patient assigned yet'}
+              </div>
+            )}
 
             {/* f. "Time left for duty" in "H hrs M mins" */}
             <div

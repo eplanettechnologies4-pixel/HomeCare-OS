@@ -245,6 +245,36 @@ class BookingViewSet(viewsets.ModelViewSet):
             return [PublicBookingRateThrottle()]
         return super().get_throttles()
 
+    def perform_update(self, serializer):
+        old_status = serializer.instance.status
+        booking = serializer.save()
+        if booking.status == 'cancelled' and old_status != 'cancelled' and booking.patient:
+            from staff.duty_service import sync_remove_patient_from_duty
+            sync_remove_patient_from_duty(
+                booking.patient,
+                staff=booking.assigned_staff,
+                booking=booking,
+                actor=self.request.user,
+                reason='Booking cancelled',
+            )
+
+    @action(detail=True, methods=['post'])
+    def cancel(self, request, pk=None):
+        booking = self.get_object()
+        if booking.status != 'cancelled':
+            booking.status = 'cancelled'
+            booking.save(update_fields=['status'])
+            if booking.patient:
+                from staff.duty_service import sync_remove_patient_from_duty
+                sync_remove_patient_from_duty(
+                    booking.patient,
+                    staff=booking.assigned_staff,
+                    booking=booking,
+                    actor=request.user,
+                    reason='Booking cancelled',
+                )
+        return Response(BookingDetailSerializer(booking).data)
+
     @action(detail=False, methods=['get'])
     def today(self, request):
         """Return all bookings, deliveries, pickups, and lab collections scheduled for today."""
@@ -389,7 +419,57 @@ class BookingViewSet(viewsets.ModelViewSet):
 
         if getattr(staff, 'lifecycle_stage', None) == 'trainee':
             return Response({'error': f'Staff member {staff.full_name} is currently a Trainee and cannot be assigned to bookings.'}, status=status.HTTP_400_BAD_REQUEST)
-        
+
+        # Route nurse and roster-based therapists through shared duty service
+        from staff.duty_service import ROSTER_BASED_ROLES, schedule_staff_duty, _get_local_tz
+        from rest_framework.exceptions import PermissionDenied, ValidationError as DRFValidationError
+
+        if staff.role in ROSTER_BASED_ROLES:
+            local_tz = _get_local_tz()
+            sched_local = booking.scheduled_time.astimezone(local_tz) if booking.scheduled_time else timezone.now().astimezone(local_tz)
+            shift_date = request.data.get('date') or sched_local.date().isoformat()
+            start_time_str = request.data.get('start_time') or sched_local.strftime('%H:%M')
+            if request.data.get('end_time'):
+                end_time_str = request.data.get('end_time')
+            elif booking.shift_end_time:
+                end_time_str = booking.shift_end_time.astimezone(local_tz).strftime('%H:%M')
+            else:
+                default_hrs = 8 if staff.role == 'nurse' else 2
+                end_time_str = (sched_local + timezone.timedelta(hours=default_hrs)).strftime('%H:%M')
+
+            sup = StaffMember.objects.filter(pk=request.data.get('supervisor_id')).first() if request.data.get('supervisor_id') else booking.supervisor
+            bud_id = request.data.get('buddy_staff_id') or request.data.get('buddy_id')
+            bud = StaffMember.objects.filter(pk=bud_id).first() if bud_id else (booking.buddy_staff or booking.buddy)
+            drv = StaffMember.objects.filter(pk=request.data.get('driver_id')).first() if request.data.get('driver_id') else booking.driver
+
+            try:
+                res = schedule_staff_duty(
+                    actor=request.user,
+                    staff=staff,
+                    patients=[booking.patient] if booking.patient else [],
+                    date=shift_date,
+                    start_time=start_time_str,
+                    end_time=end_time_str,
+                    supervisor=sup,
+                    buddy_staff=bud,
+                    driver=drv,
+                    driver_pickup_time=request.data.get('driver_pickup_time') or booking.driver_pickup_time,
+                    is_published=bool(request.data.get('is_published', True)),
+                    repeat_days=request.data.get('recurring_days') or booking.recurring_days,
+                    repeat_until=request.data.get('recurrence_end_date') or booking.recurrence_end_date,
+                    target_booking=booking,
+                    notes=request.data.get('instructions', ''),
+                    check_permissions=False,
+                )
+            except PermissionDenied as e:
+                return Response({'detail': str(e)}, status=status.HTTP_403_FORBIDDEN)
+            except DRFValidationError as e:
+                detail = e.detail if isinstance(e.detail, dict) else {'error': str(e.detail)}
+                return Response(detail, status=status.HTTP_400_BAD_REQUEST)
+
+            booking.refresh_from_db()
+            return Response(BookingDetailSerializer(booking).data)
+
         booking.assigned_staff = staff
         booking.status = request.data.get('status', 'assigned')
         booking.assigned_on = timezone.now()

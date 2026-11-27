@@ -241,7 +241,7 @@ class RosterGridView(APIView):
         # Query existing assignments for this week (draft edits take precedence in admin grid)
         assignments = RosterAssignment.objects.filter(
             date__range=[monday_date, sunday_date]
-        ).select_related('shift_template', 'buddy_staff')
+        ).select_related('shift_template', 'buddy_staff').prefetch_related('patients')
         assign_map = {}
         for a in assignments:
             key = (a.staff_id, a.date.isoformat())
@@ -318,6 +318,8 @@ class RosterGridView(APIView):
                         'transport_driver_name': assign.transport_driver_name,
                         'transport_driver_phone': assign.transport_driver_phone,
                         'transport_pickup_time': assign.transport_pickup_time,
+                        'patients_count': assign.patients.count(),
+                        'is_shift_only': (not assign.is_off and assign.patients.count() == 0),
                     }
                 else:
                     shifts_by_date[d_str] = {
@@ -1074,11 +1076,8 @@ class ScheduleDutyView(APIView):
         except StaffMember.DoesNotExist:
             return Response({'error': 'Nurse not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        if getattr(nurse, 'lifecycle_stage', None) == 'trainee':
-            return Response(
-                {'error': f'Staff member {nurse.full_name} is currently a Trainee and cannot be scheduled for clinical duties.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        from .duty_service import schedule_staff_duty
+        from rest_framework.exceptions import PermissionDenied, ValidationError
 
         date_str = request.data.get('date')
         if not date_str:
@@ -1093,200 +1092,55 @@ class ScheduleDutyView(APIView):
         if not start_time_str or not end_time_str:
             return Response({'error': 'start_time and end_time are required.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        def _parse_time(t_val):
-            if isinstance(t_val, datetime.time):
-                return t_val
-            s = str(t_val).strip()
-            for fmt in ('%H:%M', '%H:%M:%S', '%I:%M %p', '%I:%M%p'):
-                try:
-                    return datetime.datetime.strptime(s, fmt).time()
-                except ValueError:
-                    pass
-            raise ValueError(f"Invalid time format: {t_val}")
+        supervisor = StaffMember.objects.filter(id=request.data.get('supervisor_id')).first() if request.data.get('supervisor_id') else None
+        buddy_id = request.data.get('buddy_staff_id') or request.data.get('buddy_id')
+        buddy = StaffMember.objects.filter(id=buddy_id).first() if buddy_id else None
+        driver = StaffMember.objects.filter(id=request.data.get('driver_id')).first() if request.data.get('driver_id') else None
 
-        try:
-            start_time = _parse_time(start_time_str)
-            end_time = _parse_time(end_time_str)
-        except ValueError as e:
-            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
-
-        if start_time == end_time:
-            return Response({'error': 'Shift end time cannot be identical to start time.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        local_tz = _get_karachi_tz()
-        is_overnight = (end_time <= start_time)
-        start_dt = timezone.make_aware(datetime.datetime.combine(shift_date, start_time), timezone=local_tz)
-        end_dt = timezone.make_aware(
-            datetime.datetime.combine(shift_date + (datetime.timedelta(days=1) if is_overnight else datetime.timedelta()), end_time),
-            timezone=local_tz
-        )
-
-        from bookings.models import Booking, BookingStatus
-        from patients.models import Patient
-
-        # 1. Overlap check against existing bookings
-        overlap_bookings = Booking.objects.filter(
-            assigned_staff=nurse
-        ).exclude(
-            status=BookingStatus.CANCELLED
-        ).filter(
-            scheduled_time__lt=end_dt,
-            shift_end_time__gt=start_dt
-        ).exists()
-
-        if overlap_bookings:
-            return Response(
-                {'error': f'Overlapping duty conflict: {nurse.full_name} already has an assigned shift during this time window.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # 2. Overlap check against existing roster assignments
-        existing_assigns = RosterAssignment.objects.filter(
-            staff=nurse,
-            is_off=False,
-            date__range=[shift_date - datetime.timedelta(days=1), shift_date + datetime.timedelta(days=1)]
-        )
-        for ea in existing_assigns:
-            if ea.start_time and ea.end_time:
-                ea_overnight = ea.end_time <= ea.start_time
-                ea_s = timezone.make_aware(datetime.datetime.combine(ea.date, ea.start_time), timezone=local_tz)
-                ea_e = timezone.make_aware(datetime.datetime.combine(ea.date + (datetime.timedelta(days=1) if ea_overnight else datetime.timedelta()), ea.end_time), timezone=local_tz)
-                if max(start_dt, ea_s) < min(end_dt, ea_e):
-                    return Response(
-                        {'error': f'Overlapping duty conflict: {nurse.full_name} already has roster assignment {ea.shift_name} on {ea.date}.'},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-
-        # 3. Weekly hours calculation
-        shift_hours = round((end_dt - start_dt).total_seconds() / 3600.0, 2)
-        monday_date = _normalize_monday(shift_date)
-        sunday_date = monday_date + datetime.timedelta(days=6)
-        week_assigns = RosterAssignment.objects.filter(staff=nurse, date__range=[monday_date, sunday_date], is_off=False)
-        current_week_hours = 0.0
-        for wa in week_assigns:
-            if wa.start_time and wa.end_time:
-                wa_hrs = (wa.end_time.hour * 60 + wa.end_time.minute) - (wa.start_time.hour * 60 + wa.start_time.minute)
-                if wa_hrs <= 0:
-                    wa_hrs += 24 * 60
-                current_week_hours += wa_hrs / 60.0
-        total_week_hours = round(current_week_hours + shift_hours, 2)
-        max_weekly_hours = getattr(settings, 'ROSTER_MAX_WEEKLY_HOURS', 60)
-        exceeds_max_hours = total_week_hours > max_weekly_hours
-        warning_msg = f'Scheduled weekly hours ({total_week_hours}h) exceed the weekly limit of {max_weekly_hours}h.' if exceeds_max_hours else None
-
-        # Optional fields
-        supervisor = None
-        supervisor_id = request.data.get('supervisor_id')
-        if supervisor_id:
-            supervisor = StaffMember.objects.filter(id=supervisor_id).first()
-
-        buddy = None
-        buddy_id = request.data.get('buddy_staff_id')
-        if buddy_id:
-            buddy = StaffMember.objects.filter(id=buddy_id).first()
-            if buddy and getattr(buddy, 'lifecycle_stage', None) == 'trainee':
-                return Response(
-                    {'error': f'Staff member {buddy.full_name} is currently a Trainee and cannot be assigned as buddy staff.'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
-        driver = None
-        driver_id = request.data.get('driver_id')
-        if driver_id:
-            driver = StaffMember.objects.filter(id=driver_id).first()
-
-        driver_pickup_time = None
-        dpt_val = request.data.get('driver_pickup_time')
-        if dpt_val:
-            try:
-                driver_pickup_time = _parse_time(dpt_val)
-            except ValueError:
-                pass
-
-        is_independent = not (supervisor or buddy or driver)
-
-        # Patients
         patient_ids = request.data.get('patient_ids')
         if patient_ids is None and request.data.get('patient_id'):
             patient_ids = [request.data.get('patient_id')]
-        patients = list(Patient.objects.filter(id__in=patient_ids)) if patient_ids else []
 
         is_published = bool(request.data.get('is_published', True))
+        repeat_days = request.data.get('repeat_days') or request.data.get('recurring_days')
+        repeat_until = request.data.get('repeat_until') or request.data.get('recurrence_end_date')
 
-        with transaction.atomic():
-            roster_week, _ = RosterWeek.objects.get_or_create(
-                week_start_date=monday_date,
-                defaults={'status': RosterWeek.Status.PUBLISHED if is_published else RosterWeek.Status.DRAFT, 'revision': 1}
-            )
-
-            shift_label = f"{start_time.strftime('%I:%M %p').lstrip('0')} - {end_time.strftime('%I:%M %p').lstrip('0')}"
-
-            assignment, _ = RosterAssignment.objects.update_or_create(
-                staff=nurse,
-                date=shift_date,
-                is_published=is_published,
-                defaults={
-                    'roster_week': roster_week,
-                    'shift_name': shift_label,
-                    'start_time': start_time,
-                    'end_time': end_time,
-                    'supervisor': supervisor,
-                    'buddy_staff': buddy,
-                    'driver': driver,
-                    'driver_pickup_time': driver_pickup_time,
-                    'transport_driver_name': driver.full_name if driver else '',
-                    'transport_driver_phone': driver.phone if driver else '',
-                    'transport_pickup_time': driver_pickup_time.strftime('%I:%M %p') if driver_pickup_time else '',
-                    'is_off': False,
-                    'location': patients[0].address if patients else 'Patient Home',
-                }
-            )
-            if patients:
-                assignment.patients.set(patients)
-
-            # Create Bookings for each patient so nurse has assigned patient access
-            for p in patients:
-                Booking.objects.create(
-                    patient=p,
-                    assigned_staff=nurse,
-                    supervisor=supervisor,
-                    buddy_staff=buddy,
-                    driver=driver,
-                    driver_pickup_time=driver_pickup_time,
-                    transport_driver_name=driver.full_name if driver else '',
-                    transport_driver_phone=driver.phone if driver else '',
-                    transport_pickup_time=driver_pickup_time.strftime('%I:%M %p') if driver_pickup_time else '',
-                    scheduled_time=start_dt,
-                    shift_end_time=end_dt,
-                    service_type='nursing',
-                    status=BookingStatus.ASSIGNED,
-                    address=p.address or 'Home',
-                    diagnosis=p.primary_diagnosis or '',
-                    assigned_on=timezone.now(),
-                )
-
-            AuditLog.objects.create(
+        try:
+            result = schedule_staff_duty(
                 actor=request.user,
-                actor_name=request.user.get_full_name() or request.user.username,
-                action='Duty Scheduled',
-                target_user=nurse.full_name,
-                details=(
-                    f"Scheduled duty for {nurse.full_name} on {shift_date} ({shift_label}). "
-                    f"Patients: {[p.id for p in patients]}. Independent: {is_independent}. "
-                    f"Published: {is_published}."
-                ),
+                staff=nurse,
+                patients=patient_ids or [],
+                date=shift_date,
+                start_time=start_time_str,
+                end_time=end_time_str,
+                supervisor=supervisor,
+                buddy_staff=buddy,
+                driver=driver,
+                driver_pickup_time=request.data.get('driver_pickup_time'),
+                is_published=is_published,
+                repeat_days=repeat_days,
+                repeat_until=repeat_until,
+                notes=request.data.get('notes', ''),
+                check_permissions=False,
             )
+        except PermissionDenied as e:
+            return Response({'detail': str(e)}, status=status.HTTP_403_FORBIDDEN)
+        except ValidationError as e:
+            detail = e.detail if isinstance(e.detail, dict) else {'error': str(e.detail[0] if isinstance(e.detail, list) else e.detail)}
+            return Response(detail, status=status.HTTP_400_BAD_REQUEST)
 
+        assignment = result['assignment']
+        patients_list = list(assignment.patients.all())
         resp_data = {
             'id': assignment.id,
             'assignment_id': assignment.id,
-            'date': shift_date.isoformat(),
-            'start_time': start_time.strftime('%H:%M'),
-            'end_time': end_time.strftime('%H:%M'),
-            'duty_time': shift_label,
-            'is_overnight': is_overnight,
-            'is_independent': is_independent,
-            'duty_type': 'Independent duty' if is_independent else 'Supported duty',
+            'date': assignment.date.isoformat(),
+            'start_time': assignment.start_time.strftime('%H:%M') if assignment.start_time else '',
+            'end_time': assignment.end_time.strftime('%H:%M') if assignment.end_time else '',
+            'duty_time': result['shift_label'],
+            'is_overnight': result['is_overnight'],
+            'is_independent': result['is_independent'],
+            'duty_type': 'Independent duty' if result['is_independent'] else 'Supported duty',
             'supervisor': {
                 'id': supervisor.id,
                 'name': supervisor.full_name,
@@ -1301,7 +1155,7 @@ class ScheduleDutyView(APIView):
                 'id': driver.id,
                 'name': driver.full_name,
                 'phone': driver.phone,
-                'pickup_time': driver_pickup_time.strftime('%H:%M') if driver_pickup_time else None,
+                'pickup_time': assignment.driver_pickup_time.strftime('%H:%M') if assignment.driver_pickup_time else None,
             } if driver else None,
             'patients': [
                 {
@@ -1310,13 +1164,15 @@ class ScheduleDutyView(APIView):
                     'age': p.age,
                     'diagnosis': p.primary_diagnosis or 'Not recorded',
                     'location': p.address or 'Not recorded',
-                } for p in patients
+                } for p in patients_list
             ],
+            'booking_ids': [b.id for b in result['bookings']],
             'is_published': is_published,
-            'shift_hours': shift_hours,
-            'total_week_hours': total_week_hours,
-            'exceeds_max_hours': exceeds_max_hours,
-            'warning': warning_msg,
+            'shift_hours': result['shift_hours'],
+            'total_week_hours': result['total_week_hours'],
+            'exceeds_max_hours': result['exceeds_max_hours'],
+            'warning': result['warning'],
+            'message': f"Duty scheduled for {nurse.full_name}. Appears in: My Roster, My Patients, Patient File, Start Visit.",
         }
         return Response(resp_data, status=status.HTTP_201_CREATED)
 

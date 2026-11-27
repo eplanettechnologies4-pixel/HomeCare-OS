@@ -12,14 +12,24 @@ const SHIFT_PRESETS = [
   { name: '12h Night Shift', start: '20:00', end: '08:00' },
 ];
 
-export default function ScheduleDutyModal({ staff, isOpen, onClose, onSuccess }) {
+export default function ScheduleDutyModal({
+  staff = null,
+  initialPatientId = null,
+  initialDate = null,
+  initialStartTime = null,
+  initialEndTime = null,
+  isOpen,
+  onClose,
+  onSuccess,
+}) {
   const todayStr = new Date().toISOString().split('T')[0];
 
-  const [date, setDate] = useState(todayStr);
+  const [selectedStaffId, setSelectedStaffId] = useState(staff?.id || '');
+  const [date, setDate] = useState(initialDate || todayStr);
   const [shiftName, setShiftName] = useState('Morning Shift');
-  const [startTime, setStartTime] = useState('08:00');
-  const [endTime, setEndTime] = useState('16:00');
-  const [selectedPatientIds, setSelectedPatientIds] = useState([]);
+  const [startTime, setStartTime] = useState(initialStartTime || '08:00');
+  const [endTime, setEndTime] = useState(initialEndTime || '16:00');
+  const [selectedPatientIds, setSelectedPatientIds] = useState(initialPatientId ? [Number(initialPatientId)] : []);
   const [supervisorId, setSupervisorId] = useState('');
   const [buddyId, setBuddyId] = useState('');
   const [driverId, setDriverId] = useState('');
@@ -29,30 +39,38 @@ export default function ScheduleDutyModal({ staff, isOpen, onClose, onSuccess })
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+  const [summaryData, setSummaryData] = useState(null);
 
   const patients = useStore((s) => s.patients) || [];
   const allStaff = useStore((s) => s.staff) || [];
   const fetchStaff = useStore((s) => s.fetchStaff);
+  const fetchPatients = useStore((s) => s.fetchPatients);
+  const fetchBookings = useStore((s) => s.fetchBookings);
 
-  const dutyCheck = canScheduleDuty(staff);
+  const activeStaff = staff || allStaff.find((s) => Number(s.id) === Number(selectedStaffId)) || null;
+  const dutyCheck = activeStaff ? canScheduleDuty(activeStaff) : { allowed: true };
 
   useEffect(() => {
     if (isOpen) {
-      setDate(new Date().toISOString().split('T')[0]);
+      if (fetchStaff && allStaff.length === 0) fetchStaff();
+      if (fetchPatients && patients.length === 0) fetchPatients();
+      setSelectedStaffId(staff?.id || '');
+      setDate(initialDate || new Date().toISOString().split('T')[0]);
       setShiftName('Morning Shift');
-      setStartTime('08:00');
-      setEndTime('16:00');
-      setSelectedPatientIds([]);
+      setStartTime(initialStartTime || '08:00');
+      setEndTime(initialEndTime || '16:00');
+      setSelectedPatientIds(initialPatientId ? [Number(initialPatientId)] : []);
       setSupervisorId('');
       setBuddyId('');
       setDriverId('');
       setDriverPickupTime('');
       setError('');
       setSuccessMsg('');
+      setSummaryData(null);
     }
-  }, [isOpen]);
+  }, [isOpen, staff?.id, initialPatientId, initialDate, initialStartTime, initialEndTime]);
 
-  if (!isOpen || !staff) return null;
+  if (!isOpen) return null;
 
   const handlePresetSelect = (preset) => {
     setShiftName(preset.name);
@@ -68,6 +86,10 @@ export default function ScheduleDutyModal({ staff, isOpen, onClose, onSuccess })
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!activeStaff) {
+      setError('Please select a nurse or clinical staff member.');
+      return;
+    }
     if (!dutyCheck.allowed) return;
 
     setLoading(true);
@@ -76,14 +98,14 @@ export default function ScheduleDutyModal({ staff, isOpen, onClose, onSuccess })
 
     try {
       const payload = {
-        nurse_id: staff.id,
+        nurse_id: activeStaff.id,
         date,
         shift_name: shiftName,
         start_time: startTime,
         end_time: endTime,
         patient_ids: selectedPatientIds,
         supervisor_id: supervisorId ? Number(supervisorId) : null,
-        buddy_id: buddyId ? Number(buddyId) : null,
+        buddy_staff_id: buddyId ? Number(buddyId) : null,
         driver_id: driverId ? Number(driverId) : null,
         driver_pickup_time: driverPickupTime || null,
         is_published: isPublished,
@@ -99,11 +121,10 @@ export default function ScheduleDutyModal({ staff, isOpen, onClose, onSuccess })
         setError(data.error || data.detail || 'Failed to schedule duty.');
       } else {
         setSuccessMsg(data.message || 'Duty scheduled and published successfully!');
+        setSummaryData(data);
         if (fetchStaff) fetchStaff();
-        setTimeout(() => {
-          if (onSuccess) onSuccess(data);
-          onClose();
-        }, 1200);
+        if (fetchBookings) fetchBookings();
+        if (onSuccess) onSuccess(data);
       }
     } catch (err) {
       setError(err.message || 'Network error while scheduling duty.');
@@ -133,10 +154,10 @@ export default function ScheduleDutyModal({ staff, isOpen, onClose, onSuccess })
             </div>
             <div>
               <h3 style={{ margin: 0, fontFamily: 'var(--font-heading)', color: 'var(--teal-900)' }}>
-                Schedule Duty — {staff.full_name || staff.username}
+                Schedule Duty {activeStaff ? `— ${activeStaff.full_name || activeStaff.username}` : ''}
               </h3>
               <div style={{ fontSize: '0.78rem', color: 'var(--status-grey)' }}>
-                {staff.role_display} · ID: {staff.employee_id}
+                {activeStaff ? `${activeStaff.role_display || activeStaff.role} · ID: ${activeStaff.employee_id}` : 'Select a nurse or clinical staff member'}
               </div>
             </div>
           </div>
@@ -147,6 +168,28 @@ export default function ScheduleDutyModal({ staff, isOpen, onClose, onSuccess })
 
         <form onSubmit={handleSubmit}>
           <div className="modal-body" style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {!staff && (
+              <div>
+                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--teal-900)', marginBottom: 4 }}>
+                  Nurse / Clinical Staff *
+                </label>
+                <select
+                  className="form-select"
+                  value={selectedStaffId}
+                  onChange={(e) => setSelectedStaffId(e.target.value)}
+                  required
+                >
+                  <option value="">Select Nurse / Therapist...</option>
+                  {allStaff
+                    .filter((s) => ['nurse', 'physio', 'speech', 'psychologist', 'dietician'].includes(s.role) && s.is_active && s.lifecycle_stage !== 'trainee')
+                    .map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.full_name} ({s.role_display || s.role})
+                      </option>
+                    ))}
+                </select>
+              </div>
+            )}
             {!dutyCheck.allowed && (
               <div
                 style={{
@@ -368,8 +411,17 @@ export default function ScheduleDutyModal({ staff, isOpen, onClose, onSuccess })
               </div>
             )}
             {successMsg && (
-              <div style={{ color: '#16a34a', fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: 6 }}>
-                <CheckCircle size={15} /> {successMsg}
+              <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: 10, padding: 12, color: '#065f46', fontSize: '0.82rem', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700 }}>
+                  <CheckCircle size={15} /> {successMsg}
+                </div>
+                {summaryData && (
+                  <div style={{ fontSize: '0.78rem', color: '#047857', marginLeft: 21 }}>
+                    <div><strong>Staff:</strong> {activeStaff?.full_name} · <strong>Date:</strong> {summaryData.date} · <strong>Shift:</strong> {summaryData.duty_time}</div>
+                    <div><strong>Patients:</strong> {(summaryData.patients || []).map((p) => p.name).join(', ') || 'Shift only'}</div>
+                    <div><strong>Appears in:</strong> My Roster, My Patients, Patient File, Start Visit</div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -378,16 +430,24 @@ export default function ScheduleDutyModal({ staff, isOpen, onClose, onSuccess })
             className="modal-footer"
             style={{ borderTop: '1px solid var(--sage-200)', padding: '12px 24px', display: 'flex', justifyContent: 'flex-end', gap: 8 }}
           >
-            <button type="button" className="btn btn-ghost" onClick={onClose} disabled={loading}>
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="btn btn-primary"
-              disabled={!dutyCheck.allowed || loading}
-            >
-              {loading ? 'Scheduling...' : 'Confirm Schedule Duty'}
-            </button>
+            {summaryData ? (
+              <button type="button" className="btn btn-primary" onClick={onClose}>
+                Done
+              </button>
+            ) : (
+              <>
+                <button type="button" className="btn btn-ghost" onClick={onClose} disabled={loading}>
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={!dutyCheck.allowed || loading}
+                >
+                  {loading ? 'Scheduling...' : 'Confirm Schedule Duty'}
+                </button>
+              </>
+            )}
           </div>
         </form>
       </div>

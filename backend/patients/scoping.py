@@ -39,6 +39,16 @@ def is_field_nurse_user(user):
     return False
 
 
+def staff_booking_q(staff):
+    """Canonical Q filter for bookings where staff is assigned_staff, buddy, or buddy_staff."""
+    return Q(assigned_staff=staff) | Q(buddy=staff) | Q(buddy_staff=staff)
+
+
+def staff_ids_booking_q(staff_ids):
+    """Canonical Q filter for bookings where any staff_id in staff_ids is assigned_staff, buddy, or buddy_staff."""
+    return Q(assigned_staff_id__in=staff_ids) | Q(buddy_id__in=staff_ids) | Q(buddy_staff_id__in=staff_ids)
+
+
 def get_assigned_patient_ids_for_user(user, now=None):
     """
     Returns a set of patient IDs assigned to the user via a non-cancelled Booking.
@@ -61,7 +71,7 @@ def get_assigned_patient_ids_for_user(user, now=None):
     from bookings.models import Booking, BookingStatus
 
     assigned_qs = Booking.objects.filter(
-        Q(assigned_staff=staff) | Q(buddy=staff) | Q(buddy_staff=staff)
+        staff_booking_q(staff)
     ).exclude(
         status=BookingStatus.CANCELLED
     ).filter(
@@ -176,7 +186,7 @@ def get_assigned_patient_ids_for_clinician(user, now=None):
     from bookings.models import Booking, BookingStatus
 
     assigned_qs = Booking.objects.filter(
-        Q(assigned_staff=staff) | Q(buddy=staff) | Q(buddy_staff=staff)
+        staff_booking_q(staff)
     ).exclude(
         status=BookingStatus.CANCELLED
     ).filter(
