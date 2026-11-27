@@ -389,6 +389,7 @@ class Command(BaseCommand):
             self.stdout.write(f"  {status_c} Patient: {patient_c.full_name} ({patient_c.mr_number})")
 
             # 5. Bookings for Patient A (Nurse, Doctor, Physio)
+            seeded_pins = []
             a_bookings = [
                 (staff_map['nurse'], ServiceType.NURSING, BookingStatus.IN_PROGRESS, now - datetime.timedelta(hours=1), ShiftDuration.EIGHT_HOURS, now + datetime.timedelta(hours=7)),
                 (staff_map['doctor'], ServiceType.DOCTOR_CONSULTATION, BookingStatus.ASSIGNED, now + datetime.timedelta(hours=2), ShiftDuration.FOUR_HOURS, None),
@@ -415,13 +416,18 @@ class Command(BaseCommand):
                     )
                     bk.full_clean(exclude=['patient'])
                     bk.save()
+                    target_bk = bk
                     self.stdout.write(f"  Created Booking: Patient A <-> {staff.full_name} ({s_type})")
                 else:
                     existing_bk.status = b_status
                     existing_bk.scheduled_time = sched_time
                     existing_bk.shift_end_time = end_time
                     existing_bk.save(update_fields=['status', 'scheduled_time', 'shift_end_time'])
+                    target_bk = existing_bk
                     self.stdout.write(f"  Existing Booking: Patient A <-> {staff.full_name} ({existing_bk.reference_code})")
+                from staff.pin_service import decrypt_pin, ensure_pin_for_booking
+                for pin_obj in (ensure_pin_for_booking(target_bk) or []):
+                    seeded_pins.append((pin_obj.staff.full_name, pin_obj.staff.role, patient_a.full_name, decrypt_pin(pin_obj.pin_encrypted)))
 
             # 6. Bookings for Patient B (Speech, Psych, Dietician)
             b_bookings = [
@@ -449,12 +455,22 @@ class Command(BaseCommand):
                     )
                     bk.full_clean(exclude=['patient'])
                     bk.save()
+                    target_bk = bk
                     self.stdout.write(f"  Created Booking: Patient B <-> {staff.full_name} ({s_type})")
                 else:
                     existing_bk.status = b_status
                     existing_bk.scheduled_time = sched_time
                     existing_bk.save(update_fields=['status', 'scheduled_time'])
+                    target_bk = existing_bk
                     self.stdout.write(f"  Existing Booking: Patient B <-> {staff.full_name} ({existing_bk.reference_code})")
+                from staff.pin_service import decrypt_pin, ensure_pin_for_booking
+                for pin_obj in (ensure_pin_for_booking(target_bk) or []):
+                    seeded_pins.append((pin_obj.staff.full_name, pin_obj.staff.role, patient_b.full_name, decrypt_pin(pin_obj.pin_encrypted)))
+
+            if seeded_pins:
+                self.stdout.write("\n  TEST Duty PINs (for QA unlock):")
+                for s_name, s_role, p_name, raw_pin in seeded_pins:
+                    self.stdout.write(f"    * {s_name} ({s_role}) -> {p_name}: PIN {raw_pin}")
 
             self.stdout.write(self.style.SUCCESS("  Assignments committed successfully. ZERO clinical records created.\n"))
 

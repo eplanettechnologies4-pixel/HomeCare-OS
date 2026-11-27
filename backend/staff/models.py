@@ -499,3 +499,99 @@ class StaffActivationCode(models.Model):
         return True
 
 
+
+
+# ==============================================================================
+# PATIENT FILE LOCK + DUTY PIN MODELS
+# ==============================================================================
+
+class DutyPIN(models.Model):
+    """
+    6-digit PIN issued per staff member per duty window (RosterAssignment or Booking).
+    Stores a Django password hash for constant-time verification and a Fernet-encrypted
+    copy so authorized admins can reveal it.
+    """
+    staff = models.ForeignKey(StaffMember, on_delete=models.CASCADE, related_name='duty_pins')
+    roster_assignment = models.ForeignKey(
+        RosterAssignment, on_delete=models.SET_NULL, null=True, blank=True, related_name='duty_pins'
+    )
+    booking = models.ForeignKey(
+        'bookings.Booking', on_delete=models.SET_NULL, null=True, blank=True, related_name='duty_pins'
+    )
+    window_start = models.DateTimeField()
+    window_end = models.DateTimeField()
+    pin_hash = models.CharField(max_length=255)
+    pin_encrypted = models.TextField()
+    generated_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name='generated_duty_pins'
+    )
+    generated_at = models.DateTimeField(auto_now_add=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    revoked_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name='revoked_duty_pins'
+    )
+    failed_attempts = models.PositiveIntegerField(default=0)
+    locked_until = models.DateTimeField(null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['-generated_at']
+
+    def __str__(self):
+        return f"DutyPIN #{self.pk} — {self.staff.full_name} ({self.window_start:%Y-%m-%d %H:%M})"
+
+
+class PatientFileUnlock(models.Model):
+    """
+    Tracks an unlocked session for (staff, patient) authorized by a DutyPIN.
+    Expires at PIN window_end + PATIENT_FILE_GRACE_MINUTES, or ends early on visit end / revoke.
+    """
+    staff = models.ForeignKey(StaffMember, on_delete=models.CASCADE, related_name='patient_unlocks')
+    patient = models.ForeignKey('patients.Patient', on_delete=models.CASCADE, related_name='file_unlocks')
+    duty_pin = models.ForeignKey(DutyPIN, on_delete=models.CASCADE, related_name='unlocks')
+    unlocked_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    ended_at = models.DateTimeField(null=True, blank=True)
+    ended_reason = models.CharField(max_length=100, blank=True, default='')
+
+    class Meta:
+        ordering = ['-unlocked_at']
+
+    def __str__(self):
+        return f"Unlock #{self.pk} — {self.staff.full_name} -> {self.patient.full_name}"
+
+
+class PatientFileAccessEvent(models.Model):
+    """Append-only audit log for DutyPIN lifecycle and patient file unlock/lock events."""
+    class EventType(models.TextChoices):
+        PIN_GENERATED = 'pin_generated', 'PIN Generated'
+        PIN_REGENERATED = 'pin_regenerated', 'PIN Regenerated'
+        PIN_REVEALED = 'pin_revealed', 'PIN Revealed'
+        PIN_REVOKED = 'pin_revoked', 'PIN Revoked'
+        UNLOCK_SUCCESS = 'unlock_success', 'Unlock Success'
+        UNLOCK_FAILURE = 'unlock_failure', 'Unlock Failure'
+        LOCKOUT = 'lockout', 'PIN Lockout'
+        SESSION_ENDED = 'session_ended', 'Unlock Session Ended'
+
+    event_type = models.CharField(max_length=30, choices=EventType.choices)
+    actor = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name='pin_access_events'
+    )
+    staff = models.ForeignKey(
+        StaffMember, on_delete=models.SET_NULL, null=True, blank=True, related_name='pin_access_events'
+    )
+    patient = models.ForeignKey(
+        'patients.Patient', on_delete=models.SET_NULL, null=True, blank=True, related_name='pin_access_events'
+    )
+    duty_pin = models.ForeignKey(
+        DutyPIN, on_delete=models.SET_NULL, null=True, blank=True, related_name='access_events'
+    )
+    reason = models.CharField(max_length=255, blank=True, default='')
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.event_type} ({self.created_at:%Y-%m-%d %H:%M})"

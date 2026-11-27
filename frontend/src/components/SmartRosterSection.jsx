@@ -388,9 +388,16 @@ export default function SmartRosterSection({
                     >
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: 6 }}>
                         <span style={{ fontSize: '15px', fontWeight: 800, color: '#1E1B4B' }}>{p.name}</span>
-                        {p.mr_number && (
-                          <span style={{ fontSize: '11px', color: '#6B7280', fontWeight: 600 }}>MRN: {p.mr_number}</span>
-                        )}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          {p.is_file_locked && (
+                            <span style={{ fontSize: '11px', fontWeight: 700, color: '#6D28D9', background: '#FAF5FF', border: '1px solid #DDD6FE', borderRadius: 6, padding: '2px 7px' }}>
+                              Patient file locked. Get the PIN from your admin or supervisor.
+                            </span>
+                          )}
+                          {p.mr_number && (
+                            <span style={{ fontSize: '11px', color: '#6B7280', fontWeight: 600 }}>MRN: {p.mr_number}</span>
+                          )}
+                        </div>
                       </div>
 
                       {/* Location with BOTH the written address and "Current location" Maps link */}

@@ -6,6 +6,12 @@ from .views import (
     PatientPrescriptionActionView,
 )
 from quality.views import PatientFeedbackView, PatientManagerChecklistView
+from staff.pin_views import (
+    PatientUnlockView,
+    PatientLockView,
+    PatientLockStatusView,
+    PatientAccessLogView,
+)
 from .patient_file_views import (
     PatientFileView,
     PatientEmergencyContactRevealView,
@@ -42,6 +48,12 @@ urlpatterns = [
     path('<int:pk>/records/<str:record_type>/', PatientRecordsTimelineView.as_view(), name='patient-records-timeline'),
     path('<int:pk>/records/<str:record_type>/<str:record_id>/', PatientSingleRecordDetailView.as_view(), name='patient-record-detail'),
     path('<int:pk>/records/<str:record_type>/<str:record_id>/addendum/', PatientRecordAddendumView.as_view(), name='patient-record-addendum'),
+
+    # Patient File Lock + Duty PIN
+    path('<int:pk>/unlock/', PatientUnlockView.as_view(), name='patient-unlock'),
+    path('<int:pk>/lock/', PatientLockView.as_view(), name='patient-lock'),
+    path('<int:pk>/lock-status/', PatientLockStatusView.as_view(), name='patient-lock-status'),
+    path('<int:pk>/access-log/', PatientAccessLogView.as_view(), name='patient-access-log'),
 
     # Nested prescription detail: /api/patients/{id}/prescriptions/{prescription_id}/
     path('<int:patient_pk>/prescriptions/<int:prescription_pk>/', PatientPrescriptionDetailView.as_view(), name='patient-prescription-detail'),

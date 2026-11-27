@@ -14,6 +14,7 @@ import StaffOnboardingDrawer from './StaffOnboardingDrawer';
 import EditStaffModal from './EditStaffModal';
 import { getStageBadge } from '../utils/staffLifecycleHelpers';
 import { getLiveStatusBadge, canAssignPatient, canScheduleDuty } from '../utils/staffDirectoryHelpers';
+import { getPinStatusMeta } from '../utils/pinHelpers';
 
 export default function StaffProfileView({ staffId, onBack, currentRole }) {
   const [profileData, setProfileData] = useState(null);
@@ -30,6 +31,9 @@ export default function StaffProfileView({ staffId, onBack, currentRole }) {
   const [showEditModal, setShowEditModal] = useState(false);
   const [unassigningPatientId, setUnassigningPatientId] = useState(null);
   const [actionNotice, setActionNotice] = useState('');
+  const [dutyPins, setDutyPins] = useState([]);
+  const [revealedPins, setRevealedPins] = useState({});
+  const [pinBusyId, setPinBusyId] = useState(null);
 
   const isAdminOrSuper = ['super_admin', 'admin'].includes(currentRole);
   const fetchStaff = useStore((s) => s.fetchStaff);
@@ -62,11 +66,74 @@ export default function StaffProfileView({ staffId, onBack, currentRole }) {
     }
   };
 
+  const loadDutyPins = async () => {
+    if (!isAdminOrSuper || !staffId) return;
+    try {
+      const res = await apiFetch(`/staff/duty-pins/?staff_id=${staffId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setDutyPins(data.results || []);
+      }
+    } catch (_) {
+      // ignore
+    }
+  };
+
   useEffect(() => {
     if (staffId) {
       loadProfile();
+      loadDutyPins();
     }
   }, [staffId]);
+
+  const handleRevealPin = async (pinObj) => {
+    setPinBusyId(pinObj.id);
+    try {
+      const res = await apiFetch(`/staff/duty-pins/${pinObj.id}/reveal/`);
+      if (res.ok) {
+        const data = await res.json();
+        setRevealedPins((prev) => ({ ...prev, [pinObj.id]: data.pin }));
+      }
+    } finally {
+      setPinBusyId(null);
+    }
+  };
+
+  const handleRegeneratePin = async (pinObj) => {
+    if (!window.confirm('Regenerate this Duty PIN? The old PIN and any active file unlock sessions for this duty will end immediately.')) {
+      return;
+    }
+    setPinBusyId(pinObj.id);
+    try {
+      const res = await apiFetch(`/staff/duty-pins/${pinObj.id}/regenerate/`, { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        setRevealedPins((prev) => ({ ...prev, [data.id]: data.pin }));
+        setActionNotice('Duty PIN regenerated.');
+        loadDutyPins();
+        setTimeout(() => setActionNotice(''), 3000);
+      }
+    } finally {
+      setPinBusyId(null);
+    }
+  };
+
+  const handleRevokePin = async (pinObj) => {
+    if (!window.confirm('Revoke this Duty PIN? Any active patient file unlock sessions for this duty will end immediately.')) {
+      return;
+    }
+    setPinBusyId(pinObj.id);
+    try {
+      const res = await apiFetch(`/staff/duty-pins/${pinObj.id}/revoke/`, { method: 'POST', body: JSON.stringify({ reason: 'admin_revoked' }) });
+      if (res.ok) {
+        setActionNotice('Duty PIN revoked.');
+        loadDutyPins();
+        setTimeout(() => setActionNotice(''), 3000);
+      }
+    } finally {
+      setPinBusyId(null);
+    }
+  };
 
   const handleUnassignPatient = async (p) => {
     if (!window.confirm(`Are you sure you want to unassign ${p.patient_name} from this staff member?`)) {
@@ -515,10 +582,15 @@ export default function StaffProfileView({ staffId, onBack, currentRole }) {
                     <th>Timing</th>
                     <th>Patients</th>
                     <th>Duty Type</th>
+                    {isAdminOrSuper && <th>Duty PIN</th>}
                   </tr>
                 </thead>
                 <tbody>
-                  {(profileData.duties || []).map((d) => (
+                  {(profileData.duties || []).map((d) => {
+                    const matchedPin = dutyPins.find((pinObj) => pinObj.roster_assignment_id === d.id) || null;
+                    const pinMeta = matchedPin ? getPinStatusMeta(matchedPin.status) : null;
+                    const revealed = matchedPin ? revealedPins[matchedPin.id] : null;
+                    return (
                     <tr key={d.id}>
                       <td style={{ fontWeight: 600 }}>{d.date}</td>
                       <td>{d.shift_name || 'Standard'}</td>
@@ -537,8 +609,40 @@ export default function StaffProfileView({ staffId, onBack, currentRole }) {
                           {d.is_off ? 'Off' : 'On Duty'}
                         </span>
                       </td>
+                      {isAdminOrSuper && (
+                        <td>
+                          {matchedPin ? (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: '0.72rem', fontWeight: 700, padding: '2px 7px', borderRadius: 6, background: pinMeta.bg, color: pinMeta.color }}>
+                                {pinMeta.label}
+                              </span>
+                              {revealed && (
+                                <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, color: '#6D28D9', fontSize: '0.82rem' }}>
+                                  {revealed}
+                                </span>
+                              )}
+                              {!matchedPin.is_revoked && (
+                                <>
+                                  <button type="button" className="btn btn-ghost btn-sm" style={{ fontSize: '0.7rem', padding: '2px 6px' }} disabled={pinBusyId === matchedPin.id} onClick={() => handleRevealPin(matchedPin)}>
+                                    Reveal
+                                  </button>
+                                  <button type="button" className="btn btn-ghost btn-sm" style={{ fontSize: '0.7rem', padding: '2px 6px' }} disabled={pinBusyId === matchedPin.id} onClick={() => handleRegeneratePin(matchedPin)}>
+                                    Regenerate
+                                  </button>
+                                  <button type="button" className="btn btn-ghost btn-sm" style={{ fontSize: '0.7rem', padding: '2px 6px', color: '#dc2626' }} disabled={pinBusyId === matchedPin.id} onClick={() => handleRevokePin(matchedPin)}>
+                                    Revoke
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          ) : (
+                            <span style={{ color: 'var(--status-grey)', fontSize: '0.75rem' }}>—</span>
+                          )}
+                        </td>
+                      )}
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

@@ -5,12 +5,14 @@ import {
   Stethoscope, FileCheck, FlaskConical, ClipboardCheck,
   ShieldCheck, ClipboardList, HeartHandshake, Pill, User,
   ChevronRight, ExternalLink, Filter, RefreshCw, ArrowLeft,
-  CheckCircle2, AlertOctagon, HelpCircle, Phone, Send, Users
+  CheckCircle2, AlertOctagon, HelpCircle, Phone, Send, Users, Lock, Unlock
 } from 'lucide-react';
 import useStore from '../store/useStore';
 import apiFetch from '../services/api';
 import PatientDetailsModal from '../components/PatientDetailsModal';
 import PrintPatientFileModal from '../components/PrintPatientFileModal';
+import PatientPinLockScreen from '../components/PatientPinLockScreen';
+import { getUnlockCountdown } from '../utils/pinHelpers';
 import ClinicianPatientChart from './ClinicianPatientChart';
 import NursePatientDetail from './NursePatientDetail';
 import VitalsRecordFormB from '../components/VitalsRecordFormB';
@@ -62,6 +64,12 @@ export default function PatientFile() {
   const [patientFileData, setPatientFileData] = useState(null);
   const [hubLoading, setHubLoading] = useState(false);
   const [hubError, setHubError] = useState(null);
+  const [hubLocked, setHubLocked] = useState(false);
+  const [lockReason, setLockReason] = useState('');
+  const [lockStatus, setLockStatus] = useState(null);
+  const [lockNowTick, setLockNowTick] = useState(Date.now());
+  const [accessLogEvents, setAccessLogEvents] = useState([]);
+  const [accessLogLoading, setAccessLogLoading] = useState(false);
 
   // Modals state
   const [showDetailsModal, setShowDetailsModal] = useState(false);
@@ -195,19 +203,41 @@ export default function PatientFile() {
   }, [selectedPatient]);
 
   // ── Fetch Patient File Hub Data ───────────────────────────────────────────
+  const loadLockStatus = useCallback(async (pid) => {
+    if (!pid) return;
+    try {
+      const lsRes = await apiFetch(`/patients/${pid}/lock-status/`);
+      if (lsRes.ok) {
+        const lsData = await lsRes.json();
+        setLockStatus(lsData);
+      }
+    } catch (_) {
+      // ignore non-critical lock status errors
+    }
+  }, []);
+
   const loadPatientFile = useCallback(async (pid) => {
     if (!pid) return;
     setHubLoading(true);
     setHubError(null);
+    loadLockStatus(pid);
     try {
       const res = await apiFetch(`/patients/${pid}/patient-file/`);
       if (res.ok) {
         const data = await res.json();
+        setHubLocked(false);
+        setLockReason('');
         setPatientFileData(data);
       } else if (res.status === 404) {
         setHubError('Patient record not found or not assigned to your clinical scope.');
       } else if (res.status === 403) {
-        setHubError('You do not have permission to access internal patient files.');
+        const errData = await res.json().catch(() => ({}));
+        if (errData.code === 'patient_file_locked') {
+          setHubLocked(true);
+          setLockReason(errData.detail || 'Patient file locked. Get the PIN from your admin or supervisor.');
+        } else {
+          setHubError('You do not have permission to access internal patient files.');
+        }
       } else {
         setHubError('Failed to load patient file data.');
       }
@@ -216,7 +246,52 @@ export default function PatientFile() {
     } finally {
       setHubLoading(false);
     }
-  }, []);
+  }, [loadLockStatus]);
+
+  useEffect(() => {
+    if (!lockStatus?.pin_required || !lockStatus?.unlocked || !lockStatus?.expires_at) return undefined;
+    const interval = setInterval(() => {
+      const nowMs = Date.now();
+      setLockNowTick(nowMs);
+      const cd = getUnlockCountdown(lockStatus.expires_at, nowMs);
+      if (cd.expired) {
+        setHubLocked(true);
+        setLockReason('Unlock session expired. Enter your Duty PIN to continue — any unsaved notes remain in memory.');
+      }
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [lockStatus]);
+
+  const handleLockNow = async () => {
+    if (!activePatientId) return;
+    try {
+      await apiFetch(`/patients/${activePatientId}/lock/`, { method: 'POST' });
+      setHubLocked(true);
+      setLockReason('File locked. Enter your Duty PIN to reopen.');
+      loadLockStatus(activePatientId);
+    } catch (_) {
+      // ignore
+    }
+  };
+
+  useEffect(() => {
+    if (!activePatientId || activeTile !== 'access_log') return;
+    if (!['admin', 'super_admin'].includes(currentRole)) return;
+    let cancelled = false;
+    setAccessLogLoading(true);
+    apiFetch(`/patients/${activePatientId}/access-log/`)
+      .then((r) => (r.ok ? r.json() : { results: [] }))
+      .then((d) => {
+        if (!cancelled) setAccessLogEvents(d.results || []);
+      })
+      .catch(() => {
+        if (!cancelled) setAccessLogEvents([]);
+      })
+      .finally(() => {
+        if (!cancelled) setAccessLogLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [activePatientId, activeTile, currentRole]);
 
   useEffect(() => {
     if (activePatientId) {
@@ -798,6 +873,30 @@ export default function PatientFile() {
   }
 
   // ──────────────────────────────────────────────────────────────────────────
+  // LOCK SCREEN FOR FIELD STAFF (when PATIENT_FILE_PIN_REQUIRED is enabled)
+  // ──────────────────────────────────────────────────────────────────────────
+  if (activePatientId && hubLocked) {
+    return (
+      <PatientPinLockScreen
+        patientId={activePatientId}
+        patientName={selectedPatient?.full_name || patientFileData?.patient?.full_name}
+        lockReason={lockReason}
+        onUnlocked={() => {
+          setHubLocked(false);
+          setLockReason('');
+          loadPatientFile(activePatientId);
+        }}
+        onBack={() => {
+          setActivePatientId(null);
+          setPatientFileData(null);
+          setHubLocked(false);
+          setLockReason('');
+        }}
+      />
+    );
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
   // VIEW 1: PATIENT LIST TABLE (A1)
   // ──────────────────────────────────────────────────────────────────────────
   if (!activePatientId || !patientFileData) {
@@ -1023,9 +1122,59 @@ export default function PatientFile() {
 
   const pFullName = p.full_name || `${p.first_name || ''} ${p.last_name || ''}`.trim() || 'Patient';
   const pInitials = pFullName.split(' ').map(n => n[0]).filter(Boolean).slice(0, 2).join('').toUpperCase() || 'PT';
+  const unlockCountdown = lockStatus?.pin_required && lockStatus?.unlocked && lockStatus?.expires_at && !['admin', 'super_admin'].includes(currentRole)
+    ? getUnlockCountdown(lockStatus.expires_at, lockNowTick)
+    : null;
 
   return (
     <div className="patient-file-hub" style={{ padding: '24px', maxWidth: '1440px', margin: '0 auto', fontFamily: 'var(--font-body, Inter, sans-serif)', color: '#0F172A' }}>
+      {unlockCountdown && !unlockCountdown.expired && (
+        <div
+          style={{
+            marginBottom: '14px',
+            padding: '10px 16px',
+            borderRadius: '12px',
+            background: unlockCountdown.showWarning ? '#FEF3C7' : '#ECFDF5',
+            border: `1px solid ${unlockCountdown.showWarning ? '#F59E0B' : '#A7F3D0'}`,
+            color: unlockCountdown.showWarning ? '#92400E' : '#065F46',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '10px',
+            fontSize: '13px',
+            fontWeight: 700,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Unlock size={16} />
+            <span>
+              File unlocked until {unlockCountdown.timeLabel}
+              {unlockCountdown.showWarning ? ` (expires in ${unlockCountdown.remainingMinutes} min — save your notes)` : ''}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={handleLockNow}
+            style={{
+              background: '#FFFFFF',
+              color: '#6D28D9',
+              border: '1px solid #DDD6FE',
+              borderRadius: '8px',
+              padding: '5px 12px',
+              fontSize: '12px',
+              fontWeight: 700,
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '5px',
+            }}
+          >
+            <Lock size={13} />
+            <span>Lock now</span>
+          </button>
+        </div>
+      )}
       
       {/* ── TOP NAV BAR / RETURN ───────────────────────────────────────────── */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
@@ -1625,19 +1774,97 @@ export default function PatientFile() {
               </div>
             );
           })}
+          {['admin', 'super_admin'].includes(currentRole) && (
+            <div
+              onClick={() => setActiveTile('access_log')}
+              style={{
+                background: activeTile === 'access_log' ? '#F5F3FF' : '#FFFFFF',
+                border: activeTile === 'access_log' ? '2px solid #6D28D9' : '1px solid #E2E8F0',
+                borderRadius: '14px',
+                padding: '12px 16px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <div
+                style={{
+                  width: '36px',
+                  height: '36px',
+                  borderRadius: '10px',
+                  background: activeTile === 'access_log' ? '#6D28D9' : '#F3E8FF',
+                  color: activeTile === 'access_log' ? '#FFFFFF' : '#6D28D9',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <ShieldCheck size={18} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: '13px', fontWeight: activeTile === 'access_log' ? 800 : 600, color: activeTile === 'access_log' ? '#6D28D9' : '#1E293B' }}>
+                  Access log
+                </div>
+              </div>
+              <ChevronRight size={16} color={activeTile === 'access_log' ? '#6D28D9' : '#94A3B8'} />
+            </div>
+          )}
         </div>
 
         {/* Right Column: Timeline Viewer (C2) */}
         <div style={{ background: '#FFFFFF', borderRadius: '18px', padding: '20px 24px', border: '1px solid #E2E8F0', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-          
+          {activeTile === 'access_log' ? (
+            <div>
+              <h3 style={{ margin: '0 0 12px', fontSize: '16px', fontWeight: 800, color: '#1E1B4B' }}>
+                Patient File Access Log
+              </h3>
+              {accessLogLoading ? (
+                <div style={{ padding: '24px', color: '#64748B', fontSize: '13px' }}>Loading access log...</div>
+              ) : accessLogEvents.length === 0 ? (
+                <div style={{ padding: '24px', color: '#64748B', fontSize: '13px' }}>No PIN or unlock events recorded for this patient yet.</div>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px', textAlign: 'left' }}>
+                    <thead>
+                      <tr style={{ background: '#F8FAFC', borderBottom: '1px solid #E2E8F0', color: '#64748B' }}>
+                        <th style={{ padding: '8px 10px' }}>Time</th>
+                        <th style={{ padding: '8px 10px' }}>Event</th>
+                        <th style={{ padding: '8px 10px' }}>Staff</th>
+                        <th style={{ padding: '8px 10px' }}>Actor</th>
+                        <th style={{ padding: '8px 10px' }}>Detail</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {accessLogEvents.map((ev) => (
+                        <tr key={ev.id} style={{ borderBottom: '1px solid #F1F5F9' }}>
+                          <td style={{ padding: '8px 10px', whiteSpace: 'nowrap', color: '#475569' }}>
+                            {new Date(ev.created_at).toLocaleString()}
+                          </td>
+                          <td style={{ padding: '8px 10px', fontWeight: 700, color: '#1E1B4B' }}>
+                            {ev.event_type_display || ev.event_type}
+                          </td>
+                          <td style={{ padding: '8px 10px' }}>{ev.staff_name || '—'}</td>
+                          <td style={{ padding: '8px 10px' }}>{ev.actor_name || '—'}</td>
+                          <td style={{ padding: '8px 10px', color: '#64748B' }}>{ev.detail || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          ) : (
+          <>
           {/* Timeline Header & Controls */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
             <div>
               <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 800, color: '#1E1B4B' }}>
-                {clinicalTiles.find(t => t.id === activeTile)?.label}
+                {activeTile === 'access_log' ? 'Patient File Access Log' : clinicalTiles.find(t => t.id === activeTile)?.label}
               </h3>
               <span style={{ fontSize: '12px', color: '#6B7280' }}>
-                {timelinePagination.count} record(s) found
+                {activeTile === 'access_log' ? `${accessLogEvents.length} access event(s)` : `${timelinePagination.count} record(s) found`}
               </span>
             </div>
 
@@ -2037,6 +2264,8 @@ export default function PatientFile() {
           )}
         </>
       )}
+          </>
+          )}
 
         </div>
 

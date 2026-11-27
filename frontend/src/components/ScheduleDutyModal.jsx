@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { X, Calendar, Clock, User, CheckCircle, AlertCircle, Shield, Car } from 'lucide-react';
+import { X, Calendar, Clock, User, CheckCircle, AlertCircle, Shield, Car, Copy, KeyRound } from 'lucide-react';
 import { apiFetch } from '../services/api';
 import useStore from '../store/useStore';
 import { canScheduleDuty } from '../utils/staffDirectoryHelpers';
+import { buildDutyPinShareMessage } from '../utils/pinHelpers';
 
 const SHIFT_PRESETS = [
   { name: 'Morning Shift', start: '08:00', end: '16:00' },
@@ -40,6 +41,10 @@ export default function ScheduleDutyModal({
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [summaryData, setSummaryData] = useState(null);
+  const [revealedPin, setRevealedPin] = useState(null);
+  const [pinCopyState, setPinCopyState] = useState('');
+  const currentUser = useStore((s) => s.currentUser);
+  const currentRole = currentUser?.role || '';
 
   const patients = useStore((s) => s.patients) || [];
   const allStaff = useStore((s) => s.staff) || [];
@@ -122,6 +127,19 @@ export default function ScheduleDutyModal({
       } else {
         setSuccessMsg(data.message || 'Duty scheduled and published successfully!');
         setSummaryData(data);
+        setRevealedPin(null);
+        setPinCopyState('');
+        if (data.duty_pin_id && ['admin', 'super_admin'].includes(currentRole)) {
+          try {
+            const pinRes = await apiFetch(`/staff/duty-pins/${data.duty_pin_id}/reveal/`);
+            if (pinRes.ok) {
+              const pinData = await pinRes.json();
+              setRevealedPin(pinData);
+            }
+          } catch (_) {
+            // ignore reveal error
+          }
+        }
         if (fetchStaff) fetchStaff();
         if (fetchBookings) fetchBookings();
         if (onSuccess) onSuccess(data);
@@ -420,6 +438,50 @@ export default function ScheduleDutyModal({
                     <div><strong>Staff:</strong> {activeStaff?.full_name} · <strong>Date:</strong> {summaryData.date} · <strong>Shift:</strong> {summaryData.duty_time}</div>
                     <div><strong>Patients:</strong> {(summaryData.patients || []).map((p) => p.name).join(', ') || 'Shift only'}</div>
                     <div><strong>Appears in:</strong> My Roster, My Patients, Patient File, Start Visit</div>
+                    {revealedPin?.pin && (
+                      <div style={{ marginTop: 10, padding: '10px 12px', background: '#FFFFFF', border: '1.5px solid #6D28D9', borderRadius: 8, color: '#1E1B4B' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <KeyRound size={15} color="#6D28D9" />
+                            <span style={{ fontWeight: 700 }}>Duty File Unlock PIN:</span>
+                            <span style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: '1.1rem', fontWeight: 800, letterSpacing: '0.18em', color: '#6D28D9' }}>
+                              {revealedPin.pin}
+                            </span>
+                          </div>
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              style={{ fontSize: '0.72rem', padding: '3px 8px', borderColor: '#DDD6FE', color: '#6D28D9' }}
+                              onClick={() => {
+                                navigator.clipboard?.writeText(revealedPin.pin);
+                                setPinCopyState('pin');
+                              }}
+                            >
+                              <Copy size={12} style={{ marginRight: 4 }} />
+                              {pinCopyState === 'pin' ? 'Copied PIN' : 'Copy'}
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              style={{ fontSize: '0.72rem', padding: '3px 8px', borderColor: '#DDD6FE', color: '#6D28D9' }}
+                              onClick={() => {
+                                const msg = buildDutyPinShareMessage({
+                                  date: summaryData.date,
+                                  shiftLabel: shiftName,
+                                  pin: revealedPin.pin,
+                                });
+                                navigator.clipboard?.writeText(msg);
+                                setPinCopyState('msg');
+                              }}
+                            >
+                              <Copy size={12} style={{ marginRight: 4 }} />
+                              {pinCopyState === 'msg' ? 'Copied message' : 'Copy message'}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

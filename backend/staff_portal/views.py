@@ -556,18 +556,21 @@ class StaffPortalHomeView(APIView):
         patients_today_list = []
 
         if assigned_patient_ids:
+            from staff.pin_service import is_patient_unlocked_for_user
             assigned_patients_qs = Patient.objects.filter(
                 id__in=assigned_patient_ids, is_active=True
             ).select_related('assigned_care_manager')
 
             for p in assigned_patients_qs:
+                is_unlocked, _ = is_patient_unlocked_for_user(request.user, p.id, now=now)
+                is_file_locked = not is_unlocked
                 latest_v = VitalSign.objects.filter(
                     patient=p, is_entered_in_error=False
-                ).order_by('-recorded_at').first()
+                ).order_by('-recorded_at').first() if is_unlocked else None
 
-                tier_res = _classify_patient_vitals(latest_v, now)
+                tier_res = _classify_patient_vitals(latest_v, now) if is_unlocked else 'locked'
                 tier = tier_res[0] if isinstance(tier_res, (tuple, list)) else tier_res
-                if tier in ('no_recent_vitals', None, ''):
+                if is_unlocked and tier in ('no_recent_vitals', None, ''):
                     tier = 'unclassified'
 
                 has_booking_today = Booking.objects.filter(
@@ -576,7 +579,7 @@ class StaffPortalHomeView(APIView):
                     scheduled_time__range=[today_start, today_end],
                 ).exclude(status=BookingStatus.CANCELLED).exists()
 
-                if has_booking_today:
+                if has_booking_today and not is_file_locked:
                     patients_today_list.append({
                         'id': p.id,
                         'patient_id': p.id,
@@ -649,18 +652,19 @@ class StaffPortalHomeView(APIView):
                     'patient_id': p.id,
                     'name': p.full_name,
                     'mr_number': p.mr_number,
-                    'age': p.age,
-                    'gender': p.gender,
-                    'gender_display': p.get_gender_display(),
-                    'allergy_status': getattr(p, 'allergy_status', 'not_recorded'),
-                    'allergy_status_display': p.get_allergy_status_display() if hasattr(p, 'get_allergy_status_display') else 'Allergies not recorded',
-                    'allergies': p.allergies or '',
-                    'primary_diagnosis': p.primary_diagnosis or 'Under clinical observation',
+                    'age': p.age if not is_file_locked else None,
+                    'gender': p.gender if not is_file_locked else '',
+                    'gender_display': p.get_gender_display() if not is_file_locked else '',
+                    'is_file_locked': is_file_locked,
+                    'allergy_status': getattr(p, 'allergy_status', 'not_recorded') if not is_file_locked else 'locked',
+                    'allergy_status_display': (p.get_allergy_status_display() if hasattr(p, 'get_allergy_status_display') else 'Allergies not recorded') if not is_file_locked else 'Locked — Enter Duty PIN',
+                    'allergies': (p.allergies or '') if not is_file_locked else '',
+                    'primary_diagnosis': (p.primary_diagnosis or 'Under clinical observation') if not is_file_locked else 'Locked — Enter Duty PIN',
                     'latest_tier': tier,
-                    'last_vitals_time': latest_v.recorded_at.isoformat() if latest_v else None,
-                    'last_vitals_text': last_v_text,
-                    'has_active_complaint': bool(active_comp),
-                    'active_complaint_text': active_comp.complaint_text if active_comp else '',
+                    'last_vitals_time': latest_v.recorded_at.isoformat() if (latest_v and not is_file_locked) else None,
+                    'last_vitals_text': last_v_text if not is_file_locked else None,
+                    'has_active_complaint': bool(active_comp) if not is_file_locked else False,
+                    'active_complaint_text': (active_comp.complaint_text if active_comp else '') if not is_file_locked else '',
                     'address': p.address or 'Address not recorded',
                     'latitude': float(p.latitude) if p.latitude else None,
                     'longitude': float(p.longitude) if p.longitude else None,
@@ -670,7 +674,7 @@ class StaffPortalHomeView(APIView):
                         'author_name': latest_ho.author.get_full_name() or latest_ho.author.username if latest_ho.author else 'Staff Nurse',
                         'shift_label': latest_ho.shift_label,
                         'created_at': latest_ho.created_at.isoformat(),
-                    } if latest_ho else None,
+                    } if (latest_ho and not is_file_locked) else None,
                     'is_current_visit': is_current,
                     'is_active_today': has_booking_today,
                 })
@@ -694,9 +698,17 @@ class StaffPortalHomeView(APIView):
             'reminder': [a for a in deduped_alerts if a.get('severity') in ['low', 'reminder']],
         }
 
-        # Active verified medications across assigned patients
+        # Active verified medications across assigned unlocked patients
+        unlocked_patient_ids = assigned_patient_ids
+        if getattr(settings, 'PATIENT_FILE_PIN_REQUIRED', False) and assigned_patient_ids:
+            from staff.pin_service import is_patient_unlocked_for_user
+            unlocked_patient_ids = [
+                pid for pid in assigned_patient_ids
+                if is_patient_unlocked_for_user(request.user, pid, now=now)[0]
+            ]
+
         active_medications_qs = Prescription.objects.filter(
-            patient_id__in=assigned_patient_ids,
+            patient_id__in=unlocked_patient_ids,
             verification_status='verified',
         ).select_related('patient')
 
@@ -723,9 +735,9 @@ class StaffPortalHomeView(APIView):
             'active_alerts': len(deduped_alerts),
         }
 
-        # Latest handovers for assigned patients in last 24h
+        # Latest handovers for assigned unlocked patients in last 24h
         handovers_qs = ShiftHandoverNote.objects.filter(
-            patient_id__in=assigned_patient_ids,
+            patient_id__in=unlocked_patient_ids,
             created_at__gte=now - datetime.timedelta(hours=24),
             is_entered_in_error=False,
         ).select_related('patient', 'author').order_by('-created_at')
@@ -1124,7 +1136,9 @@ def compute_roster_summary(staff, local_now=None, local_tz=None, user=None):
         duty_in_window = (target_assign.date >= (today_date - datetime.timedelta(days=days_cutoff)))
 
         pats_list = []
+        from staff.pin_service import is_patient_unlocked_for_user
         for p in assigned_pats:
+            is_unlocked = is_patient_unlocked_for_user(user, p.id, now=local_now)[0] if user else True
             is_patient_in_window = (
                 is_authorized_nurse and
                 target_assign.is_published and
@@ -1146,10 +1160,11 @@ def compute_roster_summary(staff, local_now=None, local_tz=None, user=None):
                 'name': p.full_name,
                 'age': p.age,
                 'mr_number': getattr(p, 'mr_number', '') or '',
-                'diagnosis': p.primary_diagnosis or 'Not recorded',
+                'diagnosis': 'Locked — Enter Duty PIN' if (getattr(settings, 'PATIENT_FILE_PIN_REQUIRED', False) and user and not is_unlocked) else (p.primary_diagnosis or 'Not recorded'),
                 'location': loc_val,
                 'maps_link': m_link,
                 'contact_number': contact_num,
+                'is_file_locked': bool(getattr(settings, 'PATIENT_FILE_PIN_REQUIRED', False) and user and not is_unlocked),
             })
 
         # Staff phone numbers follow the exact same privacy rule
@@ -1521,6 +1536,12 @@ class ClinicianPortalHomeView(APIView):
                 verification_status='pending_verification'
             ).select_related('patient', 'entered_by', 'uploaded_by')
             if assigned_doc_pids is not None:
+                if getattr(settings, 'PATIENT_FILE_PIN_REQUIRED', False):
+                    from staff.pin_service import is_patient_unlocked_for_user
+                    assigned_doc_pids = [
+                        pid for pid in assigned_doc_pids
+                        if is_patient_unlocked_for_user(request.user, pid, now=now)[0]
+                    ]
                 rx_qs = rx_qs.filter(patient_id__in=assigned_doc_pids)
 
             for rx in rx_qs.order_by('-created_at'):
@@ -1986,6 +2007,13 @@ class NurseTodayWorkListView(APIView):
         if not assigned_pids:
             return Response({'detail': 'No assigned patients found.'}, status=status.HTTP_404_NOT_FOUND)
 
+        if getattr(settings, 'PATIENT_FILE_PIN_REQUIRED', False):
+            from staff.pin_service import is_patient_unlocked_for_user
+            assigned_pids = [
+                pid for pid in assigned_pids
+                if is_patient_unlocked_for_user(request.user, pid)[0]
+            ]
+
         type_param = request.query_params.get('type', 'patients_today').lower().strip()
         now = timezone.now()
         tz_name = getattr(settings, 'OFFICE_TIMEZONE', 'Asia/Karachi')
@@ -2238,6 +2266,9 @@ class ShiftHandoverNoteListView(APIView):
             qs = qs.filter(created_at__gte=now - datetime.timedelta(hours=24))
 
         if pids is not None:
+            if not is_admin_or_cm and getattr(settings, 'PATIENT_FILE_PIN_REQUIRED', False):
+                from staff.pin_service import is_patient_unlocked_for_user
+                pids = [pid for pid in pids if is_patient_unlocked_for_user(user, pid, now=now)[0]]
             qs = qs.filter(patient_id__in=pids)
 
         qs = qs.select_related('patient', 'author').order_by('-created_at')
@@ -2326,6 +2357,8 @@ class ShiftHandoverNoteDetailView(APIView):
     def patch(self, request, pk):
         note = self.get_object(pk)
         user = request.user
+        from patients.scoping import check_nurse_patient_access
+        check_nurse_patient_access(user, note.patient_id)
 
         if note.author_id != user.id:
             return Response({'detail': 'Only the author nurse may edit this handover note.'}, status=status.HTTP_403_FORBIDDEN)
@@ -2377,6 +2410,8 @@ class ShiftHandoverNoteMarkErrorView(APIView):
 
     def post(self, request, pk):
         note = get_object_or_404(ShiftHandoverNote, pk=pk)
+        from patients.scoping import check_clinician_patient_access
+        check_clinician_patient_access(request.user, note.patient)
         return handle_mark_entered_in_error(request, note.patient, note, 'handover')
 
 
@@ -2714,7 +2749,10 @@ class StaffPortalPatientsListView(APIView):
 
         results = []
         now = timezone.now()
+        from staff.pin_service import is_patient_unlocked_for_user
         for p in page_items:
+            is_unlocked, _ = is_patient_unlocked_for_user(request.user, p.id, now=now)
+            is_file_locked = not is_unlocked
             next_booking = (
                 p.bookings.filter(
                     scheduled_time__gte=now - datetime.timedelta(hours=2)
@@ -2722,20 +2760,22 @@ class StaffPortalPatientsListView(APIView):
                     status=BookingStatus.CANCELLED
                 ).order_by('scheduled_time').first()
             )
-            latest_v = VitalSign.objects.filter(patient=p, is_entered_in_error=False).order_by('-recorded_at').first()
-            tier, _ = _classify_patient_vitals(latest_v, now)
-            has_complaint = p.active_complaints.filter(resolved_at__isnull=True).exists() if hasattr(p, 'active_complaints') else False
+            latest_v = VitalSign.objects.filter(patient=p, is_entered_in_error=False).order_by('-recorded_at').first() if is_unlocked else None
+            tier_res = _classify_patient_vitals(latest_v, now) if is_unlocked else ('locked', None)
+            tier = tier_res[0] if isinstance(tier_res, (tuple, list)) else tier_res
+            has_complaint = (p.active_complaints.filter(resolved_at__isnull=True).exists() if hasattr(p, 'active_complaints') else False) if is_unlocked else False
 
             results.append({
                 'id': p.id,
                 'name': p.full_name,
                 'mr_number': p.mr_number,
                 'patient_code': p.patient_code or f"PT-{p.id}",
-                'age': p.age,
-                'gender': p.get_gender_display() if hasattr(p, 'get_gender_display') else p.gender,
-                'diagnosis': p.primary_diagnosis or 'Under clinical observation',
+                'age': p.age if is_unlocked else None,
+                'gender': (p.get_gender_display() if hasattr(p, 'get_gender_display') else p.gender) if is_unlocked else '',
+                'diagnosis': (p.primary_diagnosis or 'Under clinical observation') if is_unlocked else 'Locked — Enter Duty PIN',
                 'location': p.address,
                 'is_active': p.is_active,
+                'is_file_locked': is_file_locked,
                 'has_active_complaint': has_complaint,
                 'latest_tier': tier,
                 'next_visit': next_booking.scheduled_time.isoformat() if next_booking else None,

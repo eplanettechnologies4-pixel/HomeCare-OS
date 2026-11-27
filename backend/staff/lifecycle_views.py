@@ -381,6 +381,10 @@ class StaffStageReturnView(APIView):
         staff.lifecycle_stage = target_stage
         staff.save(update_fields=['lifecycle_stage'])
 
+        if target_stage == 'trainee':
+            from .pin_service import invalidate_pins_for_staff
+            invalidate_pins_for_staff(staff, actor=request.user, reason='returned_to_trainee')
+
         # Record append-only stage event
         StaffStageEvent.objects.create(
             staff=staff,

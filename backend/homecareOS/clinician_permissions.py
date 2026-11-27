@@ -204,10 +204,13 @@ def check_clinical_write_permission(user, action_key, discipline=None, patient=N
 
 
 def enforce_clinical_write_permission(user, action_key, discipline=None, patient=None):
-    """Raises PermissionDenied if check_clinical_write_permission is False."""
+    """Raises PermissionDenied if check_clinical_write_permission is False or patient file is locked."""
     allowed, msg = check_clinical_write_permission(user, action_key, discipline=discipline, patient=patient)
     if not allowed:
         raise PermissionDenied(msg)
+    if patient is not None:
+        from staff.pin_service import require_patient_file_unlock
+        require_patient_file_unlock(user, patient)
 
 
 # Target rights matrix per user requirements

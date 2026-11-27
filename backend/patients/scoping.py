@@ -108,6 +108,9 @@ def check_nurse_patient_access(user, patient_id_or_obj, now=None):
     if pid not in assigned_ids:
         raise Http404("Patient not found.")
 
+    from staff.pin_service import require_patient_file_unlock
+    require_patient_file_unlock(user, pid, now=now)
+
     return True
 
 
@@ -122,6 +125,10 @@ def filter_queryset_for_nurse(qs, user, patient_field='patient', now=None):
 
     if not patient_field:
         return qs.filter(id__in=assigned_ids)
+
+    if getattr(settings, 'PATIENT_FILE_PIN_REQUIRED', False):
+        from staff.pin_service import is_patient_unlocked_for_user
+        assigned_ids = {pid for pid in assigned_ids if is_patient_unlocked_for_user(user, pid, now=now)[0]}
 
     return qs.filter(**{f"{patient_field}_id__in": assigned_ids})
 
@@ -229,6 +236,9 @@ def check_clinician_patient_access(user, patient_id_or_obj, now=None):
     if pid not in assigned_ids:
         raise Http404("Patient not found.")
 
+    from staff.pin_service import require_patient_file_unlock
+    require_patient_file_unlock(user, pid, now=now)
+
     return True
 
 
@@ -242,6 +252,10 @@ def filter_queryset_for_clinician(qs, user, patient_field='patient', now=None):
 
     if not patient_field:
         return qs.filter(id__in=assigned_ids)
+
+    if getattr(settings, 'PATIENT_FILE_PIN_REQUIRED', False):
+        from staff.pin_service import is_patient_unlocked_for_user
+        assigned_ids = {pid for pid in assigned_ids if is_patient_unlocked_for_user(user, pid, now=now)[0]}
 
     return qs.filter(**{f"{patient_field}_id__in": assigned_ids})
 

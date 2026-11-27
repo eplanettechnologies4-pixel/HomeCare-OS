@@ -1167,6 +1167,7 @@ class ScheduleDutyView(APIView):
                 } for p in patients_list
             ],
             'booking_ids': [b.id for b in result['bookings']],
+            'duty_pin_id': result['duty_pin'].id if result.get('duty_pin') else None,
             'is_published': is_published,
             'shift_hours': result['shift_hours'],
             'total_week_hours': result['total_week_hours'],

@@ -250,6 +250,10 @@ class BookingViewSet(viewsets.ModelViewSet):
         booking = serializer.save()
         if booking.status == 'cancelled' and old_status != 'cancelled' and booking.patient:
             from staff.duty_service import sync_remove_patient_from_duty
+            from staff.models import DutyPIN
+            from staff.pin_service import revoke_pin
+            for dp in DutyPIN.objects.filter(booking=booking, is_active=True, revoked_at__isnull=True):
+                revoke_pin(dp, actor=self.request.user, reason='booking_cancelled')
             sync_remove_patient_from_duty(
                 booking.patient,
                 staff=booking.assigned_staff,
@@ -266,6 +270,10 @@ class BookingViewSet(viewsets.ModelViewSet):
             booking.save(update_fields=['status'])
             if booking.patient:
                 from staff.duty_service import sync_remove_patient_from_duty
+                from staff.models import DutyPIN
+                from staff.pin_service import revoke_pin
+                for dp in DutyPIN.objects.filter(booking=booking, is_active=True, revoked_at__isnull=True):
+                    revoke_pin(dp, actor=request.user, reason='booking_cancelled')
                 sync_remove_patient_from_duty(
                     booking.patient,
                     staff=booking.assigned_staff,
@@ -526,6 +534,10 @@ class BookingViewSet(viewsets.ModelViewSet):
             booking.recurrence_end_date = request.data.get('recurrence_end_date') or None
 
         booking.save()
+
+        # Generate/reuse DutyPIN for non-roster booking assignment (e.g. doctor, buddy_staff)
+        from staff.pin_service import ensure_pin_for_booking
+        ensure_pin_for_booking(booking, actor=request.user)
 
         # Generate recurring bookings if recurrence specified
         from .services import generate_recurring_bookings
@@ -959,6 +971,10 @@ class BookingViewSet(viewsets.ModelViewSet):
             if prescription_file:
                 booking.prescription_attachment = prescription_file
             booking.save()
+
+            # Generate/reuse DutyPIN for non-roster booking assignment (e.g. doctor, buddy_staff)
+            from staff.pin_service import ensure_pin_for_booking
+            ensure_pin_for_booking(booking, actor=request.user)
 
             if not booking.reference_code:
                 booking.refresh_from_db(fields=['reference_code'])

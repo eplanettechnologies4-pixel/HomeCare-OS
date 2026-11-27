@@ -451,6 +451,14 @@ NURSE_VITALS_DUE_HOURS = 4  # PROVISIONAL - needs clinical sign-off
 
 VISIT_GEOFENCE_METERS = 300  # Radius within which portal check-in is verified
 
+# ── Patient File Lock & Duty PIN Configuration ──────────────────────────────
+PATIENT_FILE_PIN_REQUIRED = config('PATIENT_FILE_PIN_REQUIRED', default=False, cast=bool)
+DUTY_PIN_ENCRYPTION_KEY = config('DUTY_PIN_ENCRYPTION_KEY', default='')
+PIN_VALID_BEFORE_MINUTES = 30    # PROVISIONAL - travel time before duty start
+PATIENT_FILE_GRACE_MINUTES = 30  # PROVISIONAL - grace period after duty end
+PIN_MAX_ATTEMPTS = 5             # PROVISIONAL - wrong attempts before lockout
+PIN_LOCKOUT_MINUTES = 15         # PROVISIONAL - lockout duration in minutes
+
 # ── Staff Lifecycle Configuration ───────────────────────────────────────────
 # Thresholds and defaults (PROVISIONAL - needs HR sign-off)
 STAFF_MIN_MANAGEMENT_FEEDBACK = 1       # PROVISIONAL - needs HR sign-off

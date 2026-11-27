@@ -505,6 +505,10 @@ class NurseVisitEndView(APIView):
         # Single source of truth for booking status change
         transition_booking_to_completed(visit.booking, now)
 
+        # End patient file unlock session immediately on visit end
+        from staff.pin_service import end_patient_unlock_sessions
+        end_patient_unlock_sessions(staff, visit.patient, reason='visit_ended', actor=request.user)
+
         return Response({
             'visit': _visit_to_dict(visit, include_coords=_can_see_coords(request.user)),
             'summary': {

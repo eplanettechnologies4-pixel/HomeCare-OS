@@ -18,6 +18,13 @@ from .lifecycle_views import (
     StaffRequirementAssessmentView, StaffRequirementFeedbackView,
     StaffDocumentDownloadView,
 )
+from .pin_views import (
+    DutyPINListView,
+    DutyPINRevealView,
+    DutyPINRegenerateView,
+    DutyPINRevokeView,
+    StaffAccessLogView,
+)
 
 router = DefaultRouter()
 router.register(r'members', StaffViewSet, basename='staff-member')
@@ -52,6 +59,13 @@ urlpatterns = [
     path('roster/schedule-duty/', ScheduleDutyView.as_view(), name='staff-roster-schedule-duty'),
     path('roster/shift-change-request/', ShiftChangeRequestView.as_view(), name='staff-shift-change-request'),
     path('roster/shift-change-request/<int:pk>/<str:action>/', ShiftChangeRequestApprovalView.as_view(), name='staff-shift-change-approval'),
+
+    # Patient File Lock + Duty PIN (Admin / Super Admin)
+    path('duty-pins/', DutyPINListView.as_view(), name='duty-pin-list'),
+    path('duty-pins/<int:pk>/reveal/', DutyPINRevealView.as_view(), name='duty-pin-reveal'),
+    path('duty-pins/<int:pk>/regenerate/', DutyPINRegenerateView.as_view(), name='duty-pin-regenerate'),
+    path('duty-pins/<int:pk>/revoke/', DutyPINRevokeView.as_view(), name='duty-pin-revoke'),
+    path('members/<int:pk>/access-log/', StaffAccessLogView.as_view(), name='staff-access-log'),
 
     path('verify/<str:token>/', PublicStaffVerifyView.as_view(), name='staff-public-verify'),
     path('', include(router.urls)),

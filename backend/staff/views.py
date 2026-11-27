@@ -292,6 +292,9 @@ class StaffViewSet(viewsets.ModelViewSet):
             target_user.is_active = False
             target_user.save(update_fields=['is_active'])
 
+        from .pin_service import invalidate_pins_for_staff
+        invalidate_pins_for_staff(staff, actor=actor, reason='staff_deactivated')
+
         log_staff_audit(actor, 'staff_deactivated', staff, {
             'reason': reason,
             'active_duties_count': active_duties_count,
@@ -414,6 +417,8 @@ class StaffViewSet(viewsets.ModelViewSet):
                 'booking_id': booking.id,
                 'service_type': 'Doctor Consultation',
             }, request=request)
+            from .pin_service import ensure_pin_for_booking
+            ensure_pin_for_booking(booking, actor=actor)
             return Response({
                 'success': True,
                 'message': f"Dr. {staff.full_name} assigned to {patient.full_name}.",
@@ -492,6 +497,9 @@ class StaffViewSet(viewsets.ModelViewSet):
                 notes=notes or f"Assigned {assignment_type}: {staff.full_name}"
             )
 
+        from .pin_service import ensure_pin_for_booking
+        ensure_pin_for_booking(booking, actor=actor)
+
         log_staff_audit(actor, 'assign_patient', staff, {
             'patient_id': patient.id,
             'patient_name': patient.full_name,
@@ -546,7 +554,13 @@ class StaffViewSet(viewsets.ModelViewSet):
                     b.buddy_staff = None
                 b.save(update_fields=['assigned_staff', 'buddy', 'buddy_staff'])
                 sync_remove_patient_from_duty(patient, staff=staff, booking=b, actor=actor, reason='Unassigned')
+                from .models import DutyPIN
+                from .pin_service import revoke_pin
+                for pin_obj in DutyPIN.objects.filter(staff=staff, booking=b, is_active=True, revoked_at__isnull=True):
+                    revoke_pin(pin_obj, actor=actor, reason='unassigned')
             sync_remove_patient_from_duty(patient, staff=staff, actor=actor, reason='Unassigned')
+            from .pin_service import invalidate_patient_access_on_unassign
+            invalidate_patient_access_on_unassign(staff, patient, actor=actor)
 
         log_staff_audit(actor, 'unassign_patient', staff, {'patient_id': patient.id, 'patient_name': patient.full_name}, request=request)
         return Response({'success': True, 'message': f'Unassigned {staff.full_name} from {patient.full_name}.'})

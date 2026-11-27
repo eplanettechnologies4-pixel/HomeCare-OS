@@ -361,6 +361,20 @@ def schedule_staff_duty(
                 booking.save()
                 linked_bookings.append(booking)
 
+            # Generate or reuse DutyPIN for (staff, window)
+            from staff.pin_service import FIELD_PIN_ROLES, ensure_pin_for_duty
+            if staff.role in FIELD_PIN_ROLES:
+                pin_obj, _ = ensure_pin_for_duty(
+                    staff,
+                    start_dt,
+                    end_dt,
+                    roster_assignment=assignment,
+                    booking=linked_bookings[-1] if linked_bookings else None,
+                    actor=actor,
+                )
+            else:
+                pin_obj = None
+
             created_assignments.append(assignment)
 
         # Audit entry
@@ -399,6 +413,7 @@ def schedule_staff_duty(
         'assignment': created_assignments[0],
         'assignments': created_assignments,
         'bookings': linked_bookings,
+        'duty_pin': pin_obj if 'pin_obj' in locals() else None,
         'shift_hours': shift_hours,
         'total_week_hours': total_week_hours,
         'exceeds_max_hours': exceeds_max_hours,
@@ -441,6 +456,13 @@ def sync_remove_patient_from_duty(patient, *, staff=None, booking=None, actor=No
                 affected_assignments.add(ra)
 
     for ra in affected_assignments:
+        if ra.staff:
+            from staff.pin_service import end_patient_unlock_sessions, revoke_pin
+            from staff.models import DutyPIN
+            end_patient_unlock_sessions(ra.staff, patient, reason=reason, actor=actor)
+            if ra.patients.count() == 0:
+                for dp in DutyPIN.objects.filter(roster_assignment=ra, is_active=True, revoked_at__isnull=True):
+                    revoke_pin(dp, actor=actor, reason=reason)
         if ra.staff and ra.staff.user:
             _notify_duty_members([(
                 ra.staff.user,

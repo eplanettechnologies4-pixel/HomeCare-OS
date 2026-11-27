@@ -592,6 +592,11 @@ class CheckOutView(APIView):
         from bookings.services import transition_booking_to_completed
         transition_booking_to_completed(booking, now)
 
+        # End patient file unlock session immediately on mobile checkout
+        if booking.patient_id:
+            from staff.pin_service import end_patient_unlock_sessions
+            end_patient_unlock_sessions(staff, booking.patient, reason='visit_ended', actor=request.user)
+
         # Sync and close active NurseVisit if present
         from staff_portal.models import NurseVisit
         from patients.models import VitalSign, NurseNote, MARAdministration
