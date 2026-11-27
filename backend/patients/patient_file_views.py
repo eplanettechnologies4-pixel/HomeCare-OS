@@ -1200,6 +1200,8 @@ class PatientRecordsTimelineView(APIView):
                     'details': {
                         'note': nn.note,
                         'is_flagged': nn.is_flagged,
+                        'shift': getattr(nn, 'shift', 'morning'),
+                        'is_event': getattr(nn, 'is_event', False),
                     }
                 })
 
@@ -1507,6 +1509,8 @@ class PatientSingleRecordDetailView(APIView):
                 'details': {
                     'note': nn.note,
                     'is_flagged': nn.is_flagged,
+                    'shift': getattr(nn, 'shift', 'morning'),
+                    'is_event': getattr(nn, 'is_event', False),
                 }
             })
 
@@ -1671,3 +1675,260 @@ class PatientRecordAddendumView(APIView):
             'addenda': record.addenda,
             'message': 'Addendum appended successfully.'
         }, status=status.HTTP_201_CREATED)
+
+
+# ── Paper-Style Medication Administration Record (MAR Sheet) View ─────────────
+
+class PatientMarSheetView(APIView):
+    """
+    GET /api/patients/{id}/mar-sheet/
+    Returns the complete paper-style Drug Administration Record (MAR sheet) data:
+    - Patient header: name, age, gender, MR number, room/address, consultant.
+    - 7-day calendar window (with pager for next/prev 7 days).
+    - Prescriptions:
+      - Brand name, generic name, dose, route, start date, d/c date, consultant, doctor signature line.
+      - Exact row count and default slot times according to frequency.
+      - Grid of cells for Day 1 to Day 7:
+        - state: 'future', 'due', 'given', 'late', 'not_given'
+        - administration info: initials + time given, status, reason.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        try:
+            patient = Patient.objects.get(pk=pk)
+        except Patient.DoesNotExist:
+            return Response({'detail': 'Patient not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Scoping check
+        from patients.scoping import check_nurse_patient_access
+        check_nurse_patient_access(request.user, patient)
+
+        staff = getattr(request.user, 'staffmember', None)
+        if staff and getattr(staff, 'lifecycle_stage', None) == 'trainee':
+            return Response({'detail': 'Trainees cannot access patient clinical records.'}, status=status.HTTP_403_FORBIDDEN)
+
+        tz_name = getattr(settings, 'OFFICE_TIMEZONE', 'Asia/Karachi')
+        try:
+            local_tz = ZoneInfo(tz_name)
+        except Exception:
+            local_tz = timezone.get_current_timezone()
+        local_now = timezone.now().astimezone(local_tz)
+        today_date = local_now.date()
+
+        start_date_param = request.query_params.get('start_date')
+        if start_date_param:
+            try:
+                start_date = datetime.date.fromisoformat(start_date_param)
+            except ValueError:
+                return Response({'detail': 'Invalid start_date format.'}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            days_since_monday = today_date.weekday()
+            start_date = today_date - datetime.timedelta(days=days_since_monday)
+
+        end_date = start_date + datetime.timedelta(days=6)
+        day_names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+        dates_list = []
+        for i in range(7):
+            d = start_date + datetime.timedelta(days=i)
+            dates_list.append({
+                'day_index': i + 1,
+                'day_number': d.weekday(),
+                'day_label': f"Day {i + 1}",
+                'day_name': day_names[d.weekday()],
+                'date': d.isoformat(),
+                'date_str': d.strftime('%d %b'),
+                'is_today': (d == today_date),
+                'is_past': (d < today_date),
+                'is_future': (d > today_date),
+            })
+
+        pager = {
+            'start_date': start_date.isoformat(),
+            'end_date': end_date.isoformat(),
+            'prev_start_date': (start_date - datetime.timedelta(days=7)).isoformat(),
+            'next_start_date': (start_date + datetime.timedelta(days=7)).isoformat(),
+        }
+
+        # Patient header
+        consultant = 'Dr. Raza Khan (Consultant)'
+        if hasattr(patient, 'assigned_doctor') and patient.assigned_doctor:
+            consultant = patient.assigned_doctor.full_name
+        elif getattr(patient, 'care_manager_name', None):
+            consultant = patient.care_manager_name
+
+        patient_header = {
+            'id': patient.id,
+            'full_name': patient.full_name,
+            'first_name': patient.first_name,
+            'last_name': patient.last_name,
+            'age': patient.age,
+            'gender': patient.get_gender_display() if hasattr(patient, 'get_gender_display') else (patient.gender or 'Unspecified'),
+            'mr_number': patient.mr_number,
+            'address': patient.address or 'Home Care Bed #1',
+            'room': 'Home Care Bed #1',
+            'consultant': consultant,
+            'allergy_status': getattr(patient, 'allergy_status', 'not_recorded'),
+            'allergies': getattr(patient, 'allergies', ''),
+        }
+
+        from patients.mar_helpers import get_frequency_slots
+        late_minutes = getattr(settings, 'MAR_LATE_MINUTES', 60)
+
+        # Query active/relevant prescriptions
+        rx_qs = patient.prescriptions.exclude(
+            verification_status__in=[Prescription.VerificationStatus.CANCELLED, Prescription.VerificationStatus.REJECTED]
+        ).select_related('verified_by', 'entered_by', 'ordering_doctor').order_by('-date', '-created_at')
+
+        prescriptions_data = []
+
+        # Query administrations in date range
+        all_admins = MARAdministration.objects.filter(
+            prescription__in=rx_qs,
+            administered_at__date__range=[start_date, end_date],
+            is_entered_in_error=False,
+        ).select_related('administered_by')
+
+        # Map: (prescription_id, date_str, slot_time_clean) -> list of admins
+        admin_map = {}
+        for adm in all_admins:
+            adm_dt = adm.administered_at.astimezone(local_tz)
+            d_key = adm_dt.date().isoformat()
+            s_key = (adm.slot_time or '').strip()
+            key = (adm.prescription_id, d_key, s_key)
+            if key not in admin_map:
+                admin_map[key] = []
+            admin_map[key].append(adm)
+            day_key = (adm.prescription_id, d_key, 'ANY')
+            if day_key not in admin_map:
+                admin_map[day_key] = []
+            admin_map[day_key].append(adm)
+
+        for rx in rx_qs:
+            slot_config = get_frequency_slots(rx.frequency)
+            slots_list = slot_config['slot_times']
+            is_prn_sos = slot_config['is_prn_sos']
+            is_stat = slot_config['is_stat']
+
+            # Doctor signature / verification line
+            if rx.verified_at and rx.verified_by:
+                doc_sig_line = f"Verified by Dr. {rx.verified_by.get_full_name() or rx.verified_by.username} ({rx.verified_at.astimezone(local_tz).strftime('%d/%m/%Y %H:%M')})"
+            elif rx.entry_mode == Prescription.EntryMode.TRANSCRIBED:
+                entered_name = rx.entered_by.get_full_name() if rx.entered_by else 'Nurse'
+                doc_sig_line = f"Transcribed by {entered_name} — pending verification"
+            else:
+                doc_sig_line = f"Prescribed by {rx.prescribed_by or 'Physician'} — pending verification"
+
+            dc_date = None
+            if rx.duration_days and rx.date:
+                dc_date = (rx.date + datetime.timedelta(days=rx.duration_days)).isoformat()
+
+            # Build rows per slot
+            slot_rows = []
+            for slot_idx, slot_label in enumerate(slots_list):
+                day_cells = []
+                for d_info in dates_list:
+                    d_obj = datetime.date.fromisoformat(d_info['date'])
+                    d_str = d_info['date']
+
+                    adms = admin_map.get((rx.id, d_str, slot_label.strip()))
+                    if not adms and slot_config['row_count'] == 1:
+                        adms = admin_map.get((rx.id, d_str, 'ANY'))
+
+                    adm = adms[0] if adms else None
+
+                    cell_state = 'future'
+                    admin_info = None
+
+                    if adm:
+                        if adm.status in ('held', 'refused'):
+                            cell_state = 'not_given'
+                        else:
+                            cell_state = 'given'
+                        initials = ''
+                        if adm.administered_by:
+                            p_parts = [p[0].upper() for p in (adm.administered_by.full_name or '').split() if p]
+                            initials = ''.join(p_parts[:3]) or 'RN'
+                        adm_time_str = adm.administered_at.astimezone(local_tz).strftime('%H:%M')
+                        admin_info = {
+                            'id': adm.id,
+                            'initials': initials,
+                            'time_given': adm_time_str,
+                            'administered_at': adm.administered_at.isoformat(),
+                            'status': adm.status,
+                            'reason': adm.reason,
+                            'dose_given': adm.dose_given or rx.dosage,
+                            'route': adm.route or rx.route,
+                            'nurse_name': adm.administered_by.full_name if adm.administered_by else 'Nurse',
+                        }
+                    else:
+                        if d_obj > today_date:
+                            cell_state = 'future'
+                        elif d_obj < today_date:
+                            cell_state = 'late' if not (is_prn_sos or is_stat) else 'future'
+                        else:
+                            if is_prn_sos or is_stat:
+                                cell_state = 'due'
+                            else:
+                                try:
+                                    slot_t = datetime.datetime.strptime(slot_label.strip(), '%H:%M').time()
+                                    slot_dt = timezone.make_aware(datetime.datetime.combine(today_date, slot_t), timezone=local_tz)
+                                    mins_diff = (local_now - slot_dt).total_seconds() / 60.0
+                                    if mins_diff > late_minutes:
+                                        cell_state = 'late'
+                                    elif -120 <= mins_diff <= late_minutes:
+                                        cell_state = 'due'
+                                    elif mins_diff < -120:
+                                        cell_state = 'future'
+                                    else:
+                                        cell_state = 'due'
+                                except Exception:
+                                    cell_state = 'due'
+
+                    day_cells.append({
+                        'date': d_str,
+                        'day_number': d_info['day_number'],
+                        'day_index': d_info['day_index'],
+                        'slot_time': slot_label,
+                        'state': cell_state,
+                        'administration': admin_info,
+                    })
+
+                slot_rows.append({
+                    'slot_index': slot_idx,
+                    'slot_time': slot_label,
+                    'cells': day_cells,
+                })
+
+            prescriptions_data.append({
+                'id': rx.id,
+                'brand_name': rx.medication,
+                'generic_name': rx.medication,
+                'dosage': rx.dosage,
+                'route': rx.route or 'PO (Oral)',
+                'frequency': rx.frequency,
+                'frequency_canonical': slot_config['canonical_frequency'],
+                'is_unmapped_frequency': slot_config['is_unmapped'],
+                'is_prn_sos': is_prn_sos,
+                'is_stat': is_stat,
+                'start_date': rx.date.isoformat() if rx.date else None,
+                'dc_date': dc_date,
+                'duration_days': rx.duration_days,
+                'treating_consultant': rx.prescribed_by or consultant,
+                'doctor_signature_line': doc_sig_line,
+                'verification_status': rx.verification_status,
+                'is_verified': rx.verification_status == Prescription.VerificationStatus.VERIFIED,
+                'verified_by': rx.verified_by.get_full_name() if rx.verified_by else None,
+                'verified_at': rx.verified_at.isoformat() if rx.verified_at else None,
+                'row_count': slot_config['row_count'],
+                'slots': slot_rows,
+            })
+
+        return Response({
+            'patient': patient_header,
+            'date_range': dates_list,
+            'pager': pager,
+            'late_minutes': late_minutes,
+            'prescriptions': prescriptions_data,
+        })
+

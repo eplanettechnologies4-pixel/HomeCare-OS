@@ -182,3 +182,39 @@ def generate_recurring_bookings(booking, recurring_days=None, end_date=None, occ
             current_date += timedelta(days=step_days)
 
     return created_bookings
+
+
+def transition_booking_to_in_progress(booking, timestamp=None):
+    """
+    Single source of truth for transitioning a Booking to IN_PROGRESS upon visit check-in.
+    Updates status and actual_start_time.
+    """
+    now = timestamp or timezone.now()
+    if booking.status not in (BookingStatus.COMPLETED, BookingStatus.CANCELLED):
+        if not booking.actual_start_time:
+            booking.actual_start_time = now
+        booking.status = BookingStatus.IN_PROGRESS
+        booking.save(update_fields=['status', 'actual_start_time'])
+    return booking
+
+
+def transition_booking_to_completed(booking, timestamp=None):
+    """
+    Single source of truth for transitioning a Booking to COMPLETED upon visit check-out.
+    Updates status, actual_end_time, and auto-generates invoice.
+    """
+    now = timestamp or timezone.now()
+    if booking.status != BookingStatus.COMPLETED:
+        booking.status = BookingStatus.COMPLETED
+        booking.actual_end_time = now
+        booking.save(update_fields=['status', 'actual_end_time'])
+        try:
+            from billing.services import generate_invoice_for_booking
+            generate_invoice_for_booking(booking)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(
+                f"Could not auto-generate invoice for booking {booking.id}: {e}"
+            )
+    return booking
+

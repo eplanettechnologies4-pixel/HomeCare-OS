@@ -449,6 +449,8 @@ CLINICAL_RECORD_EDIT_WINDOW_MINUTES = 15  # PROVISIONAL - needs clinical policy 
 # Nurse Portal: Hours before vitals are marked overdue for patients on active duty
 NURSE_VITALS_DUE_HOURS = 4  # PROVISIONAL - needs clinical sign-off
 
+VISIT_GEOFENCE_METERS = 300  # Radius within which portal check-in is verified
+
 # ── Staff Lifecycle Configuration ───────────────────────────────────────────
 # Thresholds and defaults (PROVISIONAL - needs HR sign-off)
 STAFF_MIN_MANAGEMENT_FEEDBACK = 1       # PROVISIONAL - needs HR sign-off
@@ -457,6 +459,35 @@ STAFF_PROBATION_DEFAULT_DAYS = 90       # PROVISIONAL - needs HR sign-off
 STAFF_ACTIVATION_CODE_DAYS = 7          # PROVISIONAL - needs HR sign-off
 STAFF_DOCUMENT_MAX_MB = 10              # PROVISIONAL - needs HR sign-off
 STAFF_STAGES_ALLOWED_CLINICAL = ('probation', 'active')  # PROVISIONAL - needs HR sign-off
+
+# ── Medication Administration Record (MAR) Configuration ───────────────────
+# PROVISIONAL - need clinical sign-off
+MAR_LATE_MINUTES = 60  # Default 60 minutes after slot before marked Late
+
+MAR_ROW_COUNTS = {
+    'OD': 1,
+    'BD': 2,
+    'TDS': 3,
+    'QID': 4,
+    'PRN': 4,
+    'SOS': 4,
+    'STAT': 1,
+    '4 Hourly': 6,
+    'HS': 1,
+}
+
+MAR_DEFAULT_SLOTS = {
+    'TDS': ['06:00', '14:00', '22:00'],
+    'QID': ['06:00', '12:00', '18:00', '00:00'],
+    '4 Hourly': ['00:00', '04:00', '08:00', '12:00', '16:00', '20:00'],
+    'OD': ['09:00'],
+    'BD': ['08:00', '20:00'],
+    'HS': ['22:00'],
+    'STAT': ['STAT'],
+    'PRN': ['PRN 1', 'PRN 2', 'PRN 3', 'PRN 4'],
+    'SOS': ['SOS 1', 'SOS 2', 'SOS 3', 'SOS 4'],
+}
+
 
 # Private storage path for confidential staff documentation
 PRIVATE_MEDIA_ROOT = os.path.join(str(BASE_DIR), 'private_media')

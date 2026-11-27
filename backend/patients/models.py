@@ -362,6 +362,10 @@ class VitalSign(EnteredInErrorMixin, models.Model):
     intake_ml = models.IntegerField(null=True, blank=True)
     output_ml = models.IntegerField(null=True, blank=True)
     notes = models.TextField(blank=True)
+    recorded_outside_visit = models.BooleanField(
+        default=False,
+        help_text='True when recorded while no active NurseVisit existed for this patient.',
+    )
 
     class Meta:
         ordering = ['-recorded_at']
@@ -372,8 +376,14 @@ class NurseNote(EnteredInErrorMixin, models.Model):
     recorded_by = models.ForeignKey('staff.StaffMember', on_delete=models.SET_NULL, null=True, blank=True)
     booking = models.ForeignKey('bookings.Booking', on_delete=models.SET_NULL, null=True, blank=True)
     recorded_at = models.DateTimeField(auto_now_add=True)
+    shift = models.CharField(max_length=50, blank=True, default='morning')
+    is_event = models.BooleanField(default=False)
     note = models.TextField()
     is_flagged = models.BooleanField(default=False)
+    recorded_outside_visit = models.BooleanField(
+        default=False,
+        help_text='True when recorded while no active NurseVisit existed for this patient.',
+    )
 
     class Meta:
         ordering = ['-recorded_at']
@@ -486,6 +496,16 @@ class MARAdministration(EnteredInErrorMixin, models.Model):
         'staff.StaffMember', on_delete=models.SET_NULL, null=True, related_name='mar_administrations'
     )
     administered_at = models.DateTimeField()
+    slot_time = models.CharField(max_length=20, blank=True, default='', help_text='Slot time e.g. 08:00, 14:00, or PRN 1')
+    status = models.CharField(max_length=20, default='given', help_text='given, held, refused')
+    reason = models.TextField(blank=True, default='', help_text='Indication or reason if held/refused/PRN')
+    dose_given = models.CharField(max_length=100, blank=True, default='')
+    route = models.CharField(max_length=50, blank=True, default='')
+    notes = models.TextField(blank=True, default='')
+    recorded_outside_visit = models.BooleanField(
+        default=False,
+        help_text='True when recorded while no active NurseVisit existed for this patient.',
+    )
 
     class Meta:
         ordering = ['-administered_at']

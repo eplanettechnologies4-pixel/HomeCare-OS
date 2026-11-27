@@ -64,6 +64,11 @@ class StaffListSerializer(serializers.ModelSerializer):
     lifecycle_stage_display = serializers.SerializerMethodField()
     review_due = serializers.SerializerMethodField()
     docs_progress = serializers.SerializerMethodField()
+    live_status = serializers.SerializerMethodField()
+    live_status_display = serializers.SerializerMethodField()
+    today_duty = serializers.SerializerMethodField()
+    today_duty_name = serializers.SerializerMethodField()
+    assigned_patients_count = serializers.SerializerMethodField()
 
     class Meta:
         model = StaffMember
@@ -77,6 +82,8 @@ class StaffListSerializer(serializers.ModelSerializer):
             'employment_status', 'employment_status_display', 'probation_end_date',
             'lifecycle_stage', 'lifecycle_stage_display', 'trainee_started_at',
             'probation_started_at', 'active_since', 'review_due', 'docs_progress',
+            'live_status', 'live_status_display', 'today_duty', 'today_duty_name',
+            'assigned_patients_count',
         ]
 
     def to_representation(self, instance):
@@ -116,7 +123,47 @@ class StaffListSerializer(serializers.ModelSerializer):
             return days <= 14
         return False
 
+    def get_live_status(self, obj):
+        if hasattr(obj, '_precomputed_live_status'):
+            return obj._precomputed_live_status
+        if not obj.is_active:
+            return 'inactive'
+        if obj.status == 'on_visit':
+            return 'on_duty'
+        if obj.status == 'available':
+            return 'available'
+        return 'off_duty'
+
+    def get_live_status_display(self, obj):
+        if hasattr(obj, '_precomputed_live_status_display'):
+            return obj._precomputed_live_status_display
+        st = self.get_live_status(obj)
+        mapping = {
+            'available': 'Available',
+            'on_duty': 'On duty now',
+            'off_duty': 'Off duty',
+            'inactive': 'Inactive',
+        }
+        return mapping.get(st, 'Off duty')
+
+    def get_today_duty(self, obj):
+        if hasattr(obj, '_precomputed_today_duty'):
+            return obj._precomputed_today_duty
+        return 'None'
+
+    def get_today_duty_name(self, obj):
+        if hasattr(obj, '_precomputed_today_duty_name'):
+            return obj._precomputed_today_duty_name
+        return ''
+
+    def get_assigned_patients_count(self, obj):
+        if hasattr(obj, '_precomputed_assigned_count'):
+            return obj._precomputed_assigned_count
+        return 0
+
     def get_docs_progress(self, obj):
+        if hasattr(obj, '_precomputed_docs_progress'):
+            return obj._precomputed_docs_progress
         stage = getattr(obj, 'lifecycle_stage', None)
         if stage == 'trainee':
             gate = 'trainee_to_probation'
@@ -300,13 +347,17 @@ class RosterAssignmentSerializer(serializers.ModelSerializer):
     staff_name = serializers.CharField(source='staff.full_name', read_only=True)
     staff_role = serializers.CharField(source='staff.role', read_only=True)
     buddy_name = serializers.CharField(source='buddy_staff.full_name', read_only=True, default='')
+    supervisor_name = serializers.CharField(source='supervisor.full_name', read_only=True, default='')
+    driver_name = serializers.CharField(source='driver.full_name', read_only=True, default='')
 
     class Meta:
         model = RosterAssignment
         fields = [
             'id', 'roster_week', 'staff', 'staff_name', 'staff_role',
             'date', 'shift_template', 'shift_name', 'start_time', 'end_time',
-            'location', 'color', 'is_off', 'buddy_staff', 'buddy_name',
+            'location', 'color', 'is_off', 'supervisor', 'supervisor_name',
+            'buddy_staff', 'buddy_name', 'driver', 'driver_name',
+            'driver_pickup_time', 'patients',
             'transport_driver_name', 'transport_driver_phone', 'transport_pickup_time',
             'revision', 'is_published', 'created_at', 'updated_at'
         ]

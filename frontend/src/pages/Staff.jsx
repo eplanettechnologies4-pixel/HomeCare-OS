@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import {
   Search, Star, Phone, Mail, Calendar, Clock, X, Award, TrendingUp,
   UserCheck, AlertCircle, CheckCircle, Sliders, Download, Check, FileText, Plus,
-  GraduationCap, BookOpen, Play, ChevronRight, Video, FileCheck, Edit3, Trash2
+  GraduationCap, BookOpen, Play, ChevronRight, Video, FileCheck, Edit3, Trash2,
+  MoreVertical, ArrowUpDown, ChevronLeft, ShieldAlert, KeyRound, UserMinus, HeartPulse, Lock, Shield, User
 } from 'lucide-react';
 import useStore from '../store/useStore';
 import StaffIdCard from '../components/StaffIdCard';
@@ -14,6 +15,18 @@ import ManagerChecklistTab from '../components/ManagerChecklistTab';
 import FullHdImageViewerModal from '../components/FullHdImageViewerModal';
 import StaffRosterTab from '../components/StaffRosterTab';
 import StaffOnboardingDrawer from '../components/StaffOnboardingDrawer';
+import StaffProfileView from '../components/StaffProfileView';
+import AssignPatientModal from '../components/AssignPatientModal';
+import DeactivateStaffModal from '../components/DeactivateStaffModal';
+import ScheduleDutyModal from '../components/ScheduleDutyModal';
+import { apiFetch } from '../services/api';
+import {
+  getLiveStatusBadge,
+  canAssignPatient,
+  canScheduleDuty,
+  filterAndSortStaff,
+  paginateStaff,
+} from '../utils/staffDirectoryHelpers';
 import { getStageBadge } from '../utils/staffLifecycleHelpers';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay } from 'date-fns';
 
@@ -71,6 +84,7 @@ export default function Staff() {
   const downloadCertificateById = useStore((s) => s.downloadCertificateById);
 
   const isAdminOrCareMgr = ['super_admin', 'admin', 'branch_manager', 'care_manager'].includes(currentRole);
+  const isSuperOrAdmin   = ['super_admin', 'admin'].includes(currentRole);
 
   const [activeSubTab, setActiveSubTab] = useState('directory'); // 'directory' | 'daily-log' | 'calendar' | 'leave' | 'payroll'
   const [selectedStaff, setSelectedStaff] = useState(null);
@@ -84,9 +98,23 @@ export default function Staff() {
   const [assignSubmitting, setAssignSubmitting] = useState(false);
   const [assignToast, setAssignToast]           = useState('');
 
-  const [search, setSearch]               = useState('');
-  const [selectedRole, setSelectedRole]   = useState('');
-  const [selectedStage, setSelectedStage] = useState('');
+  const [search, setSearch]                         = useState('');
+  const [selectedRole, setSelectedRole]             = useState('');
+  const [selectedStage, setSelectedStage]           = useState('');
+  const [selectedLiveStatus, setSelectedLiveStatus] = useState('');
+  const [sortField, setSortField]                   = useState('full_name');
+  const [sortOrder, setSortOrder]                   = useState('asc');
+  const [currentPage, setCurrentPage]               = useState(1);
+  const [pageSize, setPageSize]                     = useState(15);
+
+  const [viewingStaffId, setViewingStaffId]         = useState(null);
+  const [patientAssignStaff, setPatientAssignStaff] = useState(null);
+  const [dutyScheduleStaff, setDutyScheduleStaff]   = useState(null);
+  const [deactivateTargetStaff, setDeactivateTargetStaff] = useState(null);
+  const [openKebabId, setOpenKebabId]               = useState(null);
+  const [toastNotice, setToastNotice]               = useState('');
+  const [regenCodeModal, setRegenCodeModal]         = useState(null);
+
   const [onboardingStaff, setOnboardingStaff] = useState(null);
   const [dirViewMode, setDirViewMode]     = useState('table'); // 'table' | 'cards'
   const [selectedNurseForCal, setSelectedNurseForCal] = useState(staff.find(s=>s.role==='nurse')?.id || 1);
@@ -99,15 +127,86 @@ export default function Staff() {
   const [createdStaffConfirmation, setCreatedStaffConfirmation] = useState(null);
   const [hdViewer, setHdViewer]                     = useState({ open: false, url: '', title: '', badge: '' });
 
-  const handleDeleteStaff = (s, e) => {
+  // URL Hash & History management for /staff/:id
+  useEffect(() => {
+    const handleHash = () => {
+      const hash = window.location.hash || '';
+      const match = hash.match(/#\/staff\/(\d+)/);
+      if (match) {
+        setViewingStaffId(Number(match[1]));
+      } else {
+        setViewingStaffId(null);
+      }
+    };
+    handleHash();
+    window.addEventListener('popstate', handleHash);
+    return () => window.removeEventListener('popstate', handleHash);
+  }, []);
+
+  const openStaffProfile = (staffMember) => {
+    setViewingStaffId(staffMember.id);
+    window.history.pushState({ staffId: staffMember.id }, '', `#/staff/${staffMember.id}`);
+  };
+
+  const closeStaffProfile = () => {
+    setViewingStaffId(null);
+    if (window.location.hash.includes('#/staff/')) {
+      window.history.pushState({}, '', window.location.pathname);
+    }
+  };
+
+  const handleDeactivateClick = (s, e) => {
     if (e) e.stopPropagation();
-    if (window.confirm(`Are you sure you want to delete staff member "${s.full_name || s.username || 'Staff'}" (${s.employee_id || ''})?\n\nThis will remove their profile and assignments.`)) {
-      deleteStaffMember(s.id);
-      if (selectedStaff?.id === s.id) {
-        setSelectedStaff(null);
+    setOpenKebabId(null);
+    setDeactivateTargetStaff(s);
+  };
+
+  const handleReactivateClick = async (s, e) => {
+    if (e) e.stopPropagation();
+    setOpenKebabId(null);
+    if (window.confirm(`Are you sure you want to reactivate ${s.full_name || s.username}?`)) {
+      const res = await useStore.getState().reactivateStaffMember(s.id);
+      if (res.success) {
+        setToastNotice(`✓ ${s.full_name || s.username} reactivated.`);
+        setTimeout(() => setToastNotice(''), 3000);
+      } else {
+        alert(res.error || 'Failed to reactivate staff member.');
       }
     }
   };
+
+  const handleRegenerateCode = async (s, e) => {
+    if (e) e.stopPropagation();
+    setOpenKebabId(null);
+    try {
+      const res = await apiFetch(`/staff/members/${s.id}/regenerate-code/`, { method: 'POST' });
+      const data = await res.json();
+      if (res.ok) {
+        setRegenCodeModal({
+          staff: s,
+          code: data.activation_code || data.code,
+          expires_at: data.expires_at,
+        });
+      } else {
+        alert(data.detail || data.error || 'Failed to regenerate activation code.');
+      }
+    } catch (err) {
+      alert(err.message || 'Error regenerating activation code.');
+    }
+  };
+
+  const handleSort = (field) => {
+    if (sortField === field) {
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortOrder('asc');
+    }
+  };
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, selectedRole, selectedStage, selectedLiveStatus]);
 
   useEffect(() => {
     fetchStaff();
@@ -146,25 +245,18 @@ export default function Staff() {
     }
   };
 
-  // Filter staff for directory
-  const filteredStaff = staff.filter(s => {
-    if (selectedRole && s.role !== selectedRole) return false;
-    if (selectedStage) {
-      if (selectedStage === 'null') {
-        if (s.lifecycle_stage !== null && s.lifecycle_stage !== undefined) return false;
-      } else if (s.lifecycle_stage !== selectedStage) {
-        return false;
-      }
-    }
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return (
-      (s.full_name && s.full_name.toLowerCase().includes(q)) ||
-      (s.specialization && s.specialization.toLowerCase().includes(q)) ||
-      (s.employee_id && s.employee_id.toLowerCase().includes(q)) ||
-      (s.username && s.username.toLowerCase().includes(q))
-    );
+  // Filter & sort staff using directory helpers
+  const filteredStaff = filterAndSortStaff(staff, {
+    search,
+    role: selectedRole,
+    stage: selectedStage,
+    status: selectedLiveStatus,
+    sortField,
+    sortOrder,
   });
+
+  const paginatedResult = paginateStaff(filteredStaff, currentPage, pageSize);
+  const pagedStaff = paginatedResult.items;
 
   // ── Derived Attendance Calculation Function ──────────────────────────────
   const getDerivedAttendanceForNurseAndDay = (nurseId, targetDateStr = '2026-08-28') => {
@@ -315,6 +407,16 @@ export default function Staff() {
     a.click();
   };
 
+  if (viewingStaffId) {
+    return (
+      <StaffProfileView
+        staffId={viewingStaffId}
+        onBack={closeStaffProfile}
+        currentRole={currentRole}
+      />
+    );
+  }
+
   return (
     <div>
       <div className="section-header">
@@ -363,17 +465,25 @@ export default function Staff() {
       {/* ── 1. STAFF DIRECTORY TAB ────────────────────────────────────────── */}
       {activeSubTab === 'directory' && (
         <div>
-          <div className="filter-bar">
-            <div className="search-input-wrap" style={{ flex: '0 1 240px' }}>
+          {/* Action toast notice */}
+          {toastNotice && (
+            <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', color: '#166534', padding: '8px 16px', borderRadius: 8, fontSize: '0.84rem', fontWeight: 600, marginBottom: 14 }}>
+              {toastNotice}
+            </div>
+          )}
+
+          <div className="filter-bar" style={{ flexWrap: 'wrap', gap: 10 }}>
+            <div className="search-input-wrap" style={{ flex: '1 1 200px', minWidth: 180 }}>
               <Search size={14} />
               <input
                 className="form-input search-input"
-                placeholder="Search staff name, skill…"
+                placeholder="Search staff name, ID, phone..."
                 value={search}
                 onChange={e => setSearch(e.target.value)}
               />
             </div>
-            <select className="form-select" style={{ flex: '0 1 150px' }} value={selectedRole} onChange={e => setSelectedRole(e.target.value)}>
+
+            <select className="form-select" style={{ flex: '0 1 140px' }} value={selectedRole} onChange={e => setSelectedRole(e.target.value)}>
               <option value="">All Roles</option>
               <option value="nurse">Nurse</option>
               <option value="doctor">Doctor</option>
@@ -386,7 +496,7 @@ export default function Staff() {
 
             <select
               className="form-select"
-              style={{ flex: '0 1 150px' }}
+              style={{ flex: '0 1 140px' }}
               value={selectedStage}
               onChange={e => setSelectedStage(e.target.value)}
               title="Filter by Staff Lifecycle Stage"
@@ -396,6 +506,20 @@ export default function Staff() {
               <option value="probation">Probation</option>
               <option value="active">Active</option>
               <option value="null">Not reviewed</option>
+            </select>
+
+            <select
+              className="form-select"
+              style={{ flex: '0 1 140px' }}
+              value={selectedLiveStatus}
+              onChange={e => setSelectedLiveStatus(e.target.value)}
+              title="Filter by Live Status"
+            >
+              <option value="">All Statuses</option>
+              <option value="available">Available</option>
+              <option value="on_duty_now">On duty now</option>
+              <option value="off_duty">Off duty</option>
+              <option value="inactive">Inactive</option>
             </select>
 
             <div style={{ display: 'inline-flex', background: 'var(--sage-100)', padding: 3, borderRadius: 6, gap: 2 }}>
@@ -435,7 +559,7 @@ export default function Staff() {
                 No Staff Members Found
               </div>
               <p style={{ fontSize: '0.85rem', margin: '0 auto 16px', maxWidth: 400 }}>
-                {search || selectedRole
+                {search || selectedRole || selectedStage || selectedLiveStatus
                   ? 'No staff members match your current search or filter criteria.'
                   : 'No staff members have been registered yet. Click "Add Staff Member" above to create an account.'}
               </p>
@@ -446,141 +570,366 @@ export default function Staff() {
               )}
             </div>
           ) : dirViewMode === 'table' ? (
-            <div className="data-table-wrap">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Employee</th>
-                    <th>Role & Spec</th>
-                    <th>Stage</th>
-                    <th>Onboarding / Docs</th>
-                    <th>Duty Status</th>
-                    <th style={{ textAlign: 'right' }}>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredStaff.map(s => {
-                    const sBadge = getStageBadge(s.lifecycle_stage);
-                    return (
-                      <tr key={s.id} onClick={() => setSelectedStaff(s)} style={{ cursor: 'pointer' }}>
-                        <td>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                            {s.photo ? (
-                              <img
-                                src={s.photo}
-                                alt={s.full_name}
-                                style={{ width: 36, height: 36, borderRadius: 6, objectFit: 'cover' }}
-                              />
-                            ) : (
-                              <div className="avatar avatar-sm" style={{ background: ROLE_COLORS[s.role] + '22', color: ROLE_COLORS[s.role] }}>
-                                {(s.full_name || s.username || 'S').split(' ').map(n=>n[0]).join('')}
-                              </div>
-                            )}
-                            <div>
-                              <div style={{ fontWeight: 700, color: 'var(--teal-900)', display: 'flex', alignItems: 'center', gap: 5 }}>
-                                <span>{s.full_name}</span>
-                                {(s.id_card_front || s.id_card_back) && (
-                                  <span className="badge badge-amber" style={{ fontSize: '0.6rem', padding: '1px 4px' }} title="CNIC Attached">
-                                    🪪 ID
-                                  </span>
-                                )}
-                              </div>
-                              <div style={{ fontSize: '0.72rem', color: 'var(--status-grey)' }}>
-                                {s.employee_id} {s.username && `• @${s.username}`}
+            <div>
+              <div className="data-table-wrap" style={{ overflowX: 'auto' }}>
+                <table className="data-table staff-table-responsive" style={{ width: '100%', minWidth: 900 }}>
+                  <thead>
+                    <tr>
+                      <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => handleSort('full_name')} title="Click to sort by Name">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <span>Avatar + Full Name</span>
+                          <ArrowUpDown size={12} color={sortField === 'full_name' ? 'var(--teal-700)' : '#94a3b8'} />
+                        </div>
+                      </th>
+                      <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => handleSort('role')} title="Click to sort by Role">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <span>Role</span>
+                          <ArrowUpDown size={12} color={sortField === 'role' ? 'var(--teal-700)' : '#94a3b8'} />
+                        </div>
+                      </th>
+                      <th>Lifecycle Stage</th>
+                      <th>Live Status</th>
+                      <th>Today's Duty</th>
+                      <th style={{ textAlign: 'center' }}>Assigned Pts</th>
+                      <th>Phone</th>
+                      <th>Employee ID</th>
+                      {isSuperOrAdmin && <th style={{ textAlign: 'right' }}>Actions</th>}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pagedStaff.map(s => {
+                      const sBadge = getStageBadge(s.lifecycle_stage);
+                      const liveBadge = getLiveStatusBadge(s.live_status, s.is_active);
+                      const assignCheck = canAssignPatient(s);
+                      const dutyCheck = canScheduleDuty(s);
+                      const isNotActivated = (!s.is_activated && s.lifecycle_stage === 'trainee') || s.user_is_active === false;
+
+                      return (
+                        <tr
+                          key={s.id}
+                          onClick={() => openStaffProfile(s)}
+                          style={{ cursor: 'pointer', opacity: s.is_active === false ? 0.75 : 1 }}
+                          title="Click row to view full profile"
+                        >
+                          {/* 1. Avatar + Full Name */}
+                          <td>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                              {s.photo ? (
+                                <img
+                                  src={s.photo}
+                                  alt={s.full_name}
+                                  style={{ width: 36, height: 36, borderRadius: 6, objectFit: 'cover', flexShrink: 0 }}
+                                />
+                              ) : (
+                                <div className="avatar avatar-sm" style={{ background: (ROLE_COLORS[s.role] || '#6D28D9') + '22', color: ROLE_COLORS[s.role] || '#6D28D9', flexShrink: 0 }}>
+                                  {(s.full_name || s.username || 'S').split(' ').map(n=>n[0]).join('')}
+                                </div>
+                              )}
+                              <div>
+                                <div style={{ fontWeight: 700, color: 'var(--teal-900)', display: 'flex', alignItems: 'center', gap: 5 }}>
+                                  <span>{s.full_name || s.username}</span>
+                                  {(s.id_card_front || s.id_card_back) && (
+                                    <span className="badge badge-amber" style={{ fontSize: '0.6rem', padding: '1px 4px' }} title="CNIC Attached">
+                                      🪪 ID
+                                    </span>
+                                  )}
+                                </div>
+                                <div style={{ fontSize: '0.72rem', color: 'var(--status-grey)' }}>
+                                  @{s.username || 'user'}
+                                </div>
                               </div>
                             </div>
-                          </div>
-                        </td>
-                        <td>
-                          <div style={{ fontWeight: 600 }}>{s.role_display}</div>
-                          <div style={{ fontSize: '0.72rem', color: '#64748b' }}>{s.specialization || 'General Care'}</div>
-                        </td>
-                        <td>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
-                            <span className={`badge ${sBadge.className}`} style={{ fontSize: '0.72rem', fontWeight: 700 }}>
-                              {sBadge.label}
+                          </td>
+
+                          {/* 2. Role */}
+                          <td>
+                            <div style={{ fontWeight: 600 }}>{s.role_display}</div>
+                            <div style={{ fontSize: '0.72rem', color: '#64748b' }}>{s.specialization || 'General Care'}</div>
+                          </td>
+
+                          {/* 3. Lifecycle Stage Chip */}
+                          <td>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'flex-start' }}>
+                              <span className={`badge ${sBadge.className}`} style={{ fontSize: '0.72rem', fontWeight: 700 }}>
+                                {sBadge.label}
+                              </span>
+                              {s.review_due && (
+                                <span className="badge badge-amber" style={{ fontSize: '0.62rem', fontWeight: 800 }}>
+                                  ⚠️ Review Due
+                                </span>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* 4. Live Status */}
+                          <td>
+                            <span className={`badge ${liveBadge.className}`} style={{ fontSize: '0.72rem' }}>
+                              {liveBadge.label}
                             </span>
-                            {s.review_due && (
-                              <span className="badge badge-amber" style={{ fontSize: '0.62rem', fontWeight: 800 }}>
-                                ⚠️ Review Due
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            {s.docs_progress ? (
-                              <span className="badge badge-teal" style={{ fontSize: '0.72rem' }}>
-                                {s.docs_progress}
-                              </span>
-                            ) : (
-                              <span style={{ fontSize: '0.72rem', color: '#94a3b8' }}>—</span>
-                            )}
-                            <button
-                              type="button"
-                              className="btn btn-ghost btn-sm"
-                              style={{ padding: '2px 8px', fontSize: '0.72rem', color: 'var(--teal-700)', borderColor: '#cbd5e1' }}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setOnboardingStaff(s);
+                          </td>
+
+                          {/* 5. Today's Duty */}
+                          <td>
+                            <div style={{ fontSize: '0.8rem', fontWeight: s.today_duty && s.today_duty !== 'None' ? 600 : 400, color: s.today_duty && s.today_duty !== 'None' ? 'var(--teal-900)' : '#94a3b8' }}>
+                              {s.today_duty || 'None'}
+                            </div>
+                          </td>
+
+                          {/* 6. Assigned Patients Count */}
+                          <td style={{ textAlign: 'center' }}>
+                            <span
+                              className="badge"
+                              style={{
+                                fontSize: '0.74rem',
+                                background: (s.assigned_patients_count || 0) > 0 ? 'var(--teal-50)' : '#f8fafc',
+                                color: (s.assigned_patients_count || 0) > 0 ? 'var(--teal-800)' : '#94a3b8',
+                                border: '1px solid ' + ((s.assigned_patients_count || 0) > 0 ? 'var(--teal-200)' : '#e2e8f0'),
+                                fontWeight: 700,
                               }}
                             >
-                              <FileText size={12} style={{ marginRight: 4 }} /> Checklist
-                            </button>
-                          </div>
-                        </td>
-                        <td>
-                          <span className={`badge ${STATUS_BADGE[s.status] || 'badge-green'}`}>
-                            {s.status_display || 'Available'}
-                          </span>
-                        </td>
-                        <td style={{ textAlign: 'right' }}>
-                          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 4 }} onClick={e => e.stopPropagation()}>
-                            <button
-                              type="button"
-                              className="btn btn-ghost btn-sm"
-                              style={{ padding: '3px 8px', fontSize: '0.72rem', color: 'var(--teal-700)', borderColor: '#cbd5e1' }}
-                              title="Onboarding Drawer"
-                              onClick={() => setOnboardingStaff(s)}
-                            >
-                              Onboarding
-                            </button>
-                            {isAdminOrCareMgr && (
-                              <>
+                              {s.assigned_patients_count || 0}
+                            </span>
+                          </td>
+
+                          {/* 7. Phone */}
+                          <td style={{ fontSize: '0.8rem', color: '#475569' }}>
+                            {s.phone || '—'}
+                          </td>
+
+                          {/* 8. Employee ID */}
+                          <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.78rem', color: 'var(--status-grey)' }}>
+                            {s.employee_id}
+                          </td>
+
+                          {/* 9. Actions Column (Admin & Super Admin ONLY) */}
+                          {isSuperOrAdmin && (
+                            <td style={{ textAlign: 'right' }} onClick={e => e.stopPropagation()}>
+                              <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                {/* Inline View Profile Button */}
                                 <button
                                   type="button"
                                   className="btn btn-ghost btn-sm"
-                                  style={{ padding: '3px 8px', fontSize: '0.72rem', color: '#b87320', borderColor: '#fef3c7' }}
-                                  title="Edit Staff Member"
-                                  onClick={() => setEditingStaff(s)}
+                                  style={{ padding: '2px 8px', fontSize: '0.72rem', color: 'var(--teal-700)' }}
+                                  title="Open Full Staff Profile"
+                                  onClick={() => openStaffProfile(s)}
                                 >
-                                  <Edit3 size={12} /> Edit
+                                  View Profile
                                 </button>
+
+                                {/* Kebab dropdown toggle */}
                                 <button
                                   type="button"
-                                  className="btn btn-danger btn-sm"
-                                  style={{ padding: '3px 8px', fontSize: '0.72rem' }}
-                                  title="Delete Staff Member"
-                                  onClick={(e) => handleDeleteStaff(s, e)}
+                                  className="btn btn-ghost btn-sm btn-icon"
+                                  style={{ padding: 4 }}
+                                  title="More actions"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setOpenKebabId(openKebabId === s.id ? null : s.id);
+                                  }}
                                 >
-                                  <Trash2 size={12} /> Delete
+                                  <MoreVertical size={14} />
                                 </button>
-                              </>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+
+                                {/* Dropdown menu */}
+                                {openKebabId === s.id && (
+                                  <div
+                                    style={{
+                                      position: 'absolute',
+                                      right: 0,
+                                      top: '100%',
+                                      marginTop: 4,
+                                      background: '#fff',
+                                      border: '1px solid var(--sage-200)',
+                                      borderRadius: 8,
+                                      boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+                                      zIndex: 100,
+                                      minWidth: 190,
+                                      padding: '6px 0',
+                                      textAlign: 'left',
+                                    }}
+                                    onClick={e => e.stopPropagation()}
+                                  >
+                                    <button
+                                      type="button"
+                                      className="dropdown-item"
+                                      style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '7px 12px', fontSize: '0.78rem', border: 'none', background: 'none', cursor: 'pointer', textAlign: 'left' }}
+                                      onClick={() => { setOpenKebabId(null); openStaffProfile(s); }}
+                                    >
+                                      <User size={13} color="var(--teal-700)" /> View Profile
+                                    </button>
+
+                                    {/* Assign Patient */}
+                                    <button
+                                      type="button"
+                                      className="dropdown-item"
+                                      style={{
+                                        display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '7px 12px', fontSize: '0.78rem', border: 'none', background: 'none', textAlign: 'left',
+                                        cursor: assignCheck.allowed ? 'pointer' : 'not-allowed',
+                                        opacity: assignCheck.allowed ? 1 : 0.5,
+                                      }}
+                                      disabled={!assignCheck.allowed}
+                                      title={assignCheck.reason || 'Assign Patient'}
+                                      onClick={() => {
+                                        if (assignCheck.allowed) {
+                                          setOpenKebabId(null);
+                                          setPatientAssignStaff(s);
+                                        }
+                                      }}
+                                    >
+                                      <HeartPulse size={13} color="#0d9488" /> Assign Patient
+                                    </button>
+
+                                    {/* Schedule Duty */}
+                                    {dutyCheck.allowed && (
+                                      <button
+                                        type="button"
+                                        className="dropdown-item"
+                                        style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '7px 12px', fontSize: '0.78rem', border: 'none', background: 'none', cursor: 'pointer', textAlign: 'left' }}
+                                        onClick={() => { setOpenKebabId(null); setDutyScheduleStaff(s); }}
+                                      >
+                                        <Calendar size={13} color="#6D28D9" /> Schedule Duty
+                                      </button>
+                                    )}
+
+                                    {/* Edit Profile */}
+                                    <button
+                                      type="button"
+                                      className="dropdown-item"
+                                      style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '7px 12px', fontSize: '0.78rem', border: 'none', background: 'none', cursor: 'pointer', textAlign: 'left' }}
+                                      onClick={() => { setOpenKebabId(null); setEditingStaff(s); }}
+                                    >
+                                      <Edit3 size={13} color="#b87320" /> Edit Profile
+                                    </button>
+
+                                    {/* Onboarding & Documents */}
+                                    <button
+                                      type="button"
+                                      className="dropdown-item"
+                                      style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '7px 12px', fontSize: '0.78rem', border: 'none', background: 'none', cursor: 'pointer', textAlign: 'left' }}
+                                      onClick={() => { setOpenKebabId(null); setOnboardingStaff(s); }}
+                                    >
+                                      <FileText size={13} color="var(--teal-700)" /> Onboarding &amp; Docs
+                                    </button>
+
+                                    {/* Regenerate Activation Code */}
+                                    {isNotActivated && (
+                                      <button
+                                        type="button"
+                                        className="dropdown-item"
+                                        style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '7px 12px', fontSize: '0.78rem', border: 'none', background: 'none', cursor: 'pointer', textAlign: 'left', color: '#b87320' }}
+                                        onClick={(e) => handleRegenerateCode(s, e)}
+                                      >
+                                        <KeyRound size={13} /> Regenerate Code
+                                      </button>
+                                    )}
+
+                                    <div style={{ height: 1, background: '#f1f5f9', margin: '4px 0' }} />
+
+                                    {/* Deactivate / Reactivate (No Delete!) */}
+                                    {s.is_active !== false ? (
+                                      <button
+                                        type="button"
+                                        className="dropdown-item"
+                                        style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '7px 12px', fontSize: '0.78rem', border: 'none', background: 'none', cursor: 'pointer', textAlign: 'left', color: '#dc2626' }}
+                                        onClick={(e) => handleDeactivateClick(s, e)}
+                                      >
+                                        <ShieldAlert size={13} /> Deactivate
+                                      </button>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        className="dropdown-item"
+                                        style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '7px 12px', fontSize: '0.78rem', border: 'none', background: 'none', cursor: 'pointer', textAlign: 'left', color: '#16a34a' }}
+                                        onClick={(e) => handleReactivateClick(s, e)}
+                                      >
+                                        <CheckCircle size={13} /> Reactivate
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Pagination Bar */}
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  marginTop: 16,
+                  padding: '10px 14px',
+                  background: '#f8fafc',
+                  borderRadius: 8,
+                  fontSize: '0.82rem',
+                  color: 'var(--status-grey)',
+                  flexWrap: 'wrap',
+                  gap: 10,
+                }}
+              >
+                <div>
+                  Showing {Math.min((currentPage - 1) * pageSize + 1, filteredStaff.length)} to {Math.min(currentPage * pageSize, filteredStaff.length)} of {filteredStaff.length} staff members
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <span>Rows per page:</span>
+                    <select
+                      className="form-select form-select-sm"
+                      style={{ width: 'auto', padding: '2px 6px', fontSize: '0.78rem' }}
+                      value={pageSize}
+                      onChange={(e) => {
+                        setPageSize(Number(e.target.value));
+                        setCurrentPage(1);
+                      }}
+                    >
+                      <option value="15">15</option>
+                      <option value="25">25</option>
+                      <option value="50">50</option>
+                      <option value="100">100</option>
+                    </select>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      style={{ padding: '3px 8px', fontSize: '0.75rem' }}
+                      disabled={currentPage <= 1}
+                      onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                    >
+                      Previous
+                    </button>
+                    <span style={{ padding: '4px 8px', fontWeight: 600, color: 'var(--teal-900)' }}>
+                      Page {currentPage} of {paginatedResult.totalPages}
+                    </span>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      style={{ padding: '3px 8px', fontSize: '0.75rem' }}
+                      disabled={currentPage >= paginatedResult.totalPages}
+                      onClick={() => setCurrentPage(prev => Math.min(paginatedResult.totalPages, prev + 1))}
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
-              {filteredStaff.map(s => {
+              {pagedStaff.map(s => {
                 const sBadge = getStageBadge(s.lifecycle_stage);
+                const liveBadge = getLiveStatusBadge(s.live_status, s.is_active);
+                const assignCheck = canAssignPatient(s);
                 return (
-                  <div key={s.id} className="card" style={{ padding: 18, cursor: 'pointer' }} onClick={() => setSelectedStaff(s)}>
+                  <div key={s.id} className="card" style={{ padding: 18, cursor: 'pointer', opacity: s.is_active === false ? 0.75 : 1 }} onClick={() => openStaffProfile(s)}>
                     <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', marginBottom: 12 }}>
                       {s.photo ? (
                         <div
@@ -608,7 +957,7 @@ export default function Staff() {
                           />
                         </div>
                       ) : (
-                        <div className="avatar avatar-lg" style={{ background: ROLE_COLORS[s.role] + '22', color: ROLE_COLORS[s.role], borderRadius: 8 }}>
+                        <div className="avatar avatar-lg" style={{ background: (ROLE_COLORS[s.role] || '#6D28D9') + '22', color: ROLE_COLORS[s.role] || '#6D28D9', borderRadius: 8 }}>
                           {(s.full_name || s.username || 'Staff').split(' ').map(n=>n[0]).join('')}
                         </div>
                       )}
@@ -629,55 +978,87 @@ export default function Staff() {
                       <span className={`badge ${sBadge.className}`} style={{ fontSize: '0.68rem', fontWeight: 700 }}>
                         {sBadge.label}
                       </span>
-                      {s.docs_progress && (
-                        <span className="badge badge-teal" style={{ fontSize: '0.68rem' }}>
-                          {s.docs_progress}
-                        </span>
-                      )}
+                      <span className={`badge ${liveBadge.className}`} style={{ fontSize: '0.68rem' }}>
+                        {liveBadge.label}
+                      </span>
                       {s.review_due && (
                         <span className="badge badge-amber" style={{ fontSize: '0.68rem', fontWeight: 800 }}>
                           ⚠️ Review Due
                         </span>
                       )}
                     </div>
-                    <div style={{ fontSize: '0.8rem', color: '#4b5563', marginBottom: 10 }}>
+                    <div style={{ fontSize: '0.8rem', color: '#4b5563', marginBottom: 6 }}>
                       <span style={{ fontWeight: 600 }}>Spec:</span> {s.specialization || 'General Care'}
                     </div>
+                    <div style={{ fontSize: '0.8rem', color: '#4b5563', marginBottom: 10 }}>
+                      <span style={{ fontWeight: 600 }}>Today's Duty:</span> {s.today_duty || 'None'}
+                    </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--sage-100)', paddingTop: 10 }}>
-                      <span className={`badge ${STATUS_BADGE[s.status] || 'badge-green'}`}>{s.status_display || 'Available'}</span>
+                      <span className="badge badge-teal" style={{ fontSize: '0.72rem' }}>
+                        Assigned: {s.assigned_patients_count || 0} pts
+                      </span>
                       <span className="ts" style={{ fontSize: '0.75rem', color: 'var(--status-grey)' }}>ID: {s.employee_id}</span>
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 10, paddingTop: 8, borderTop: '1px dashed #e5e7eb' }}>
+
+                    {/* Card Actions (Replaced Delete with Deactivate) */}
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 10, paddingTop: 8, borderTop: '1px dashed #e5e7eb', flexWrap: 'wrap' }} onClick={e => e.stopPropagation()}>
+                      {isSuperOrAdmin && assignCheck.allowed && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          style={{ padding: '3px 8px', fontSize: '0.72rem', color: '#0d9488', borderColor: '#ccfbf1' }}
+                          title="Assign Patient"
+                          onClick={() => setPatientAssignStaff(s)}
+                        >
+                          <HeartPulse size={12} style={{ marginRight: 3 }} /> Assign
+                        </button>
+                      )}
+
                       <button
                         type="button"
                         className="btn btn-ghost btn-sm"
-                        style={{ padding: '3px 8px', fontSize: '0.75rem', color: 'var(--teal-700)', borderColor: '#cbd5e1' }}
+                        style={{ padding: '3px 8px', fontSize: '0.72rem', color: 'var(--teal-700)', borderColor: '#cbd5e1' }}
                         title="View Onboarding Checklist"
-                        onClick={(e) => { e.stopPropagation(); setOnboardingStaff(s); }}
+                        onClick={() => setOnboardingStaff(s)}
                       >
-                        <FileText size={13} /> Onboarding
+                        <FileText size={12} /> Checklist
                       </button>
+
                       {isAdminOrCareMgr && (
-                        <>
-                          <button
-                            type="button"
-                            className="btn btn-ghost btn-sm"
-                            style={{ padding: '3px 8px', fontSize: '0.75rem', color: '#b87320', borderColor: '#fef3c7' }}
-                            title="Edit Staff Member"
-                            onClick={(e) => { e.stopPropagation(); setEditingStaff(s); }}
-                          >
-                            <Edit3 size={13} /> Edit
-                          </button>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          style={{ padding: '3px 8px', fontSize: '0.72rem', color: '#b87320', borderColor: '#fef3c7' }}
+                          title="Edit Staff Member"
+                          onClick={() => setEditingStaff(s)}
+                        >
+                          <Edit3 size={12} /> Edit
+                        </button>
+                      )}
+
+                      {/* Deactivate / Reactivate (No Delete!) */}
+                      {isSuperOrAdmin && (
+                        s.is_active !== false ? (
                           <button
                             type="button"
                             className="btn btn-danger btn-sm"
-                            style={{ padding: '3px 8px', fontSize: '0.75rem' }}
-                            title="Delete Staff Member"
-                            onClick={(e) => handleDeleteStaff(s, e)}
+                            style={{ padding: '3px 8px', fontSize: '0.72rem' }}
+                            title="Deactivate Staff Member"
+                            onClick={(e) => handleDeactivateClick(s, e)}
                           >
-                            <Trash2 size={13} /> Delete
+                            <ShieldAlert size={12} style={{ marginRight: 3 }} /> Deactivate
                           </button>
-                        </>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            style={{ padding: '3px 8px', fontSize: '0.72rem', color: '#16a34a', borderColor: '#bbf7d0' }}
+                            title="Reactivate Staff Member"
+                            onClick={(e) => handleReactivateClick(s, e)}
+                          >
+                            <CheckCircle size={12} style={{ marginRight: 3 }} /> Reactivate
+                          </button>
+                        )
                       )}
                     </div>
                   </div>
@@ -1051,14 +1432,27 @@ export default function Staff() {
                     >
                       <Edit3 size={13} /> Edit Profile
                     </button>
-                    <button
-                      type="button"
-                      className="btn btn-danger btn-sm"
-                      style={{ fontSize: '0.78rem', padding: '4px 10px' }}
-                      onClick={(e) => handleDeleteStaff(selectedStaff, e)}
-                    >
-                      <Trash2 size={13} /> Delete Staff
-                    </button>
+                    {isSuperOrAdmin && (
+                      selectedStaff.is_active !== false ? (
+                        <button
+                          type="button"
+                          className="btn btn-danger btn-sm"
+                          style={{ fontSize: '0.78rem', padding: '4px 10px' }}
+                          onClick={(e) => handleDeactivateClick(selectedStaff, e)}
+                        >
+                          <ShieldAlert size={13} style={{ marginRight: 4 }} /> Deactivate Staff
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          style={{ fontSize: '0.78rem', padding: '4px 10px', color: '#16a34a', borderColor: '#bbf7d0' }}
+                          onClick={(e) => handleReactivateClick(selectedStaff, e)}
+                        >
+                          <CheckCircle size={13} style={{ marginRight: 4 }} /> Reactivate Staff
+                        </button>
+                      )
+                    )}
                   </>
                 )}
                 <button className="btn btn-ghost btn-icon" onClick={() => setSelectedStaff(null)}><X size={14} /></button>
@@ -1267,6 +1661,87 @@ export default function Staff() {
         title={hdViewer.title}
         badgeText={hdViewer.badge}
       />
+
+      {/* Assign Patient Modal */}
+      {patientAssignStaff && (
+        <AssignPatientModal
+          staff={patientAssignStaff}
+          isOpen={!!patientAssignStaff}
+          onClose={() => setPatientAssignStaff(null)}
+          onSuccess={() => {
+            setPatientAssignStaff(null);
+            fetchStaff();
+            setToastNotice('✓ Patient successfully assigned.');
+            setTimeout(() => setToastNotice(''), 3000);
+          }}
+        />
+      )}
+
+      {/* Deactivate Staff Modal */}
+      {deactivateTargetStaff && (
+        <DeactivateStaffModal
+          staff={deactivateTargetStaff}
+          isOpen={!!deactivateTargetStaff}
+          onClose={() => setDeactivateTargetStaff(null)}
+          onSuccess={() => {
+            setDeactivateTargetStaff(null);
+            fetchStaff();
+            setToastNotice('✓ Staff account deactivated.');
+            setTimeout(() => setToastNotice(''), 3000);
+          }}
+        />
+      )}
+
+      {/* Schedule Duty Modal */}
+      {dutyScheduleStaff && (
+        <ScheduleDutyModal
+          staff={dutyScheduleStaff}
+          isOpen={!!dutyScheduleStaff}
+          onClose={() => setDutyScheduleStaff(null)}
+          onSuccess={() => {
+            setDutyScheduleStaff(null);
+            fetchStaff();
+            setToastNotice('✓ Duty scheduled and published.');
+            setTimeout(() => setToastNotice(''), 3000);
+          }}
+        />
+      )}
+
+      {/* Regenerate Activation Code Confirmation Modal */}
+      {regenCodeModal && (
+        <div className="modal-backdrop" onClick={() => setRegenCodeModal(null)}>
+          <div className="modal" style={{ width: 440 }}>
+            <div className="modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <KeyRound size={20} color="var(--teal-700)" />
+                <h3 style={{ margin: 0, fontFamily: 'var(--font-heading)', color: 'var(--teal-900)' }}>
+                  Activation Code Generated
+                </h3>
+              </div>
+              <button className="btn btn-ghost btn-icon" onClick={() => setRegenCodeModal(null)}><X size={14} /></button>
+            </div>
+            <div className="modal-body" style={{ padding: 20 }}>
+              <p style={{ margin: '0 0 12px', fontSize: '0.85rem', color: '#475569' }}>
+                New one-time login activation code for <strong>{regenCodeModal.staff.full_name}</strong>:
+              </p>
+              <div style={{ background: 'var(--sage-50)', border: '2px dashed var(--teal-600)', borderRadius: 8, padding: '14px', textAlign: 'center', margin: '0 0 12px' }}>
+                <div style={{ fontSize: '1.4rem', fontWeight: 800, fontFamily: 'var(--font-mono)', letterSpacing: 3, color: 'var(--teal-900)' }}>
+                  {regenCodeModal.code}
+                </div>
+                <div style={{ fontSize: '0.74rem', color: 'var(--status-grey)', marginTop: 4 }}>
+                  Expires: {new Date(regenCodeModal.expires_at).toLocaleString()}
+                </div>
+              </div>
+              <div style={{ fontSize: '0.78rem', color: 'var(--status-grey)' }}>
+                Share this activation code with the staff member. They can use it to set up their password and activate their account at <code>/activate</code>.
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-primary" onClick={() => setRegenCodeModal(null)}>Done</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

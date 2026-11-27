@@ -430,10 +430,24 @@ class VitalSignSerializer(serializers.ModelSerializer):
     recorded_by_name = serializers.CharField(source='recorded_by.full_name', read_only=True)
     entered_in_error_by_name = serializers.CharField(source='entered_in_error_by.get_full_name', read_only=True, default='')
     recorded_at = serializers.DateTimeField(required=False)
+    visit_highlighted = serializers.SerializerMethodField()
 
     class Meta:
         model = VitalSign
         fields = '__all__'
+
+    def get_visit_highlighted(self, obj):
+        if obj.recorded_outside_visit or not obj.recorded_by_id or not obj.patient_id or not obj.recorded_at:
+            return False
+        from django.db.models import Q
+        from staff_portal.models import NurseVisit
+        return NurseVisit.objects.filter(
+            nurse_id=obj.recorded_by_id,
+            patient_id=obj.patient_id,
+            checkin_time__lte=obj.recorded_at,
+        ).filter(
+            Q(checkout_time__isnull=True) | Q(checkout_time__gte=obj.recorded_at)
+        ).exists()
 
     def validate_recorded_at(self, value):
         if value and value > timezone.now():
@@ -484,6 +498,7 @@ class DailyReportSerializer(serializers.ModelSerializer):
 
 class MARAdministrationSerializer(serializers.ModelSerializer):
     administered_by_name = serializers.CharField(source='administered_by.full_name', read_only=True)
+    administered_by_initials = serializers.SerializerMethodField()
     medication_name = serializers.CharField(source='prescription.medication', read_only=True)
     entered_in_error_by_name = serializers.CharField(source='entered_in_error_by.get_full_name', read_only=True, default='')
     day_name = serializers.SerializerMethodField()
@@ -494,16 +509,24 @@ class MARAdministrationSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'prescription', 'medication_name',
             'day_number', 'day_name',
-            'administered_by', 'administered_by_name', 'administered_at',
+            'slot_time', 'status', 'reason', 'dose_given', 'route', 'notes',
+            'administered_by', 'administered_by_name', 'administered_by_initials', 'administered_at',
             'is_provisional',
             'is_entered_in_error', 'entered_in_error_by', 'entered_in_error_by_name',
             'entered_in_error_at', 'entered_in_error_reason',
         ]
         read_only_fields = [
-            'id', 'administered_by', 'administered_by_name', 'administered_at', 'is_provisional',
+            'id', 'administered_by', 'administered_by_name', 'administered_by_initials', 'administered_at', 'is_provisional',
             'is_entered_in_error', 'entered_in_error_by', 'entered_in_error_by_name',
             'entered_in_error_at', 'entered_in_error_reason',
         ]
+
+    def get_administered_by_initials(self, obj):
+        if not obj.administered_by:
+            return ''
+        name = obj.administered_by.full_name or ''
+        parts = [p[0].upper() for p in name.split() if p]
+        return ''.join(parts[:3]) or 'RN'
 
 
     def get_is_provisional(self, obj):

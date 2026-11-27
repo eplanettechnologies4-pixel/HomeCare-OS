@@ -366,6 +366,13 @@ class PatientViewSet(viewsets.ModelViewSet):
             return Response(VitalSignSerializer(patient.vitals.all(), many=True).data)
         enforce_clinical_write_permission(request.user, 'vitals', patient=patient)
         staff_member = getattr(request.user, 'staffmember', None) or getattr(request.user, 'staff_profile', None)
+        from patients.scoping import is_field_nurse_user
+        from staff_portal.models import NurseVisit
+        outside_visit = False
+        if staff_member and is_field_nurse_user(request.user):
+            outside_visit = not NurseVisit.objects.filter(
+                nurse=staff_member, patient=patient, is_ended=False
+            ).exists()
         data = request.data.copy() if hasattr(request.data, 'copy') else dict(request.data)
         data['patient'] = patient.id
         serializer = VitalSignSerializer(data=data)
@@ -373,7 +380,8 @@ class PatientViewSet(viewsets.ModelViewSet):
             v = serializer.save(
                 patient=patient,
                 recorded_by=staff_member,
-                recorded_at=serializer.validated_data.get('recorded_at') or timezone.now()
+                recorded_at=serializer.validated_data.get('recorded_at') or timezone.now(),
+                recorded_outside_visit=outside_visit,
             )
             return Response(VitalSignSerializer(v).data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -392,11 +400,27 @@ class PatientViewSet(viewsets.ModelViewSet):
             if booking_id:
                 from bookings.models import Booking
                 booking = Booking.objects.filter(pk=booking_id, patient=patient).first()
+            raw_is_event = request.data.get('is_event', False)
+            if isinstance(raw_is_event, str):
+                is_event_val = raw_is_event.lower() in ('true', '1', 'yes')
+            else:
+                is_event_val = bool(raw_is_event)
+
+            from patients.scoping import is_field_nurse_user
+            from staff_portal.models import NurseVisit
+            outside_visit = False
+            if staff and is_field_nurse_user(request.user):
+                outside_visit = not NurseVisit.objects.filter(
+                    nurse=staff, patient=patient, is_ended=False
+                ).exists()
             created_note = NurseNote.objects.create(
                 patient=patient,
                 recorded_by=staff,
                 booking=booking,
-                note=note_text or 'Nurse note recorded.'
+                note=note_text or 'Nurse note recorded.',
+                shift=request.data.get('shift', 'morning'),
+                is_event=is_event_val,
+                recorded_outside_visit=outside_visit,
             )
             return Response(NurseNoteSerializer(created_note).data, status=status.HTTP_201_CREATED)
         notes = patient.nurse_notes.select_related('recorded_by').order_by('-recorded_at')
@@ -1116,32 +1140,83 @@ class PatientViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        now = timezone.now()
+        # 5. Allergy Check
+        patient_allergies = getattr(patient, 'allergies', '') or ''
+        allergy_status = getattr(patient, 'allergy_status', 'not_recorded')
+        is_allergic = False
+        if allergy_status == 'has_allergies' and patient_allergies:
+            rx_med = (prescription.medication or '').lower()
+            for token in [x.strip().lower() for x in patient_allergies.split(',') if x.strip()]:
+                if token in rx_med or rx_med in token:
+                    is_allergic = True
+                    break
+        if is_allergic:
+            if not request.data.get('override_allergy', False):
+                return Response(
+                    {
+                        'error': 'allergy_conflict',
+                        'detail': f'Allergy Alert: Patient has recorded allergy to {prescription.medication}. Clinical override required.'
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
 
-        already_administered = MARAdministration.objects.filter(
-            prescription=prescription,
-            day_number=day_number,
-            administered_at__date=now.date(),
-        ).exists()
+        now = timezone.now()
+        slot_time = (request.data.get('slot_time') or '').strip()
+        admin_status = request.data.get('status', 'given')
+        reason = request.data.get('reason', '')
+        dose_given = request.data.get('dose_given', '') or prescription.dosage
+        route = request.data.get('route', '') or prescription.route or 'PO'
+        notes = request.data.get('notes', '')
+
+        if slot_time:
+            already_administered = MARAdministration.objects.filter(
+                prescription=prescription,
+                slot_time=slot_time,
+                administered_at__date=now.date(),
+                is_entered_in_error=False,
+            ).exists()
+        else:
+            already_administered = MARAdministration.objects.filter(
+                prescription=prescription,
+                day_number=day_number,
+                administered_at__date=now.date(),
+                is_entered_in_error=False,
+            ).exists()
 
         if already_administered:
+            slot_desc = f"slot {slot_time}" if slot_time else f"day_number={day_number}"
             return Response(
                 {
                     'error': 'already_administered',
                     'detail': (
                         f'{prescription.medication} has already been marked as administered '
-                        f'for day_number={day_number} today ({now.date()}). '
+                        f'for {slot_desc} today ({now.date()}). '
                         'Double-administration prevented.'
                     ),
                 },
                 status=status.HTTP_409_CONFLICT,
             )
 
+        from patients.scoping import is_field_nurse_user
+        from staff_portal.models import NurseVisit
+        outside_visit = False
+        if staff and is_field_nurse_user(request.user):
+            outside_visit = not NurseVisit.objects.filter(
+                nurse=staff, patient=patient, is_ended=False
+            ).exists()
+
         record = MARAdministration.objects.create(
             prescription=prescription,
             day_number=day_number,
+            slot_time=slot_time,
+            status=admin_status,
+            reason=reason,
+            dose_given=dose_given,
+            route=route,
+            notes=notes,
             administered_by=staff,
             administered_at=now,
+            recorded_outside_visit=outside_visit,
         )
 
         return Response(MARAdministrationSerializer(record).data, status=status.HTTP_201_CREATED)
@@ -1624,6 +1699,12 @@ class VitalSignViewSet(viewsets.ModelViewSet):
         staff_member = getattr(self.request.user, 'staffmember', None) or getattr(self.request.user, 'staff_profile', None)
         if staff_member:
             save_kwargs['recorded_by'] = staff_member
+            from patients.scoping import is_field_nurse_user
+            from staff_portal.models import NurseVisit
+            if patient and is_field_nurse_user(self.request.user):
+                save_kwargs['recorded_outside_visit'] = not NurseVisit.objects.filter(
+                    nurse=staff_member, patient=patient, is_ended=False
+                ).exists()
         serializer.save(**save_kwargs)
 
     def update(self, request, *args, **kwargs):
@@ -1695,7 +1776,15 @@ class NurseNoteViewSet(viewsets.ModelViewSet):
             check_nurse_patient_access(self.request.user, patient)
         enforce_clinical_write_permission(self.request.user, 'nurse_notes', patient=patient)
         staff_member = getattr(self.request.user, 'staffmember', None) or getattr(self.request.user, 'staff_profile', None)
-        serializer.save(recorded_by=staff_member)
+        outside_visit = False
+        if staff_member and patient:
+            from patients.scoping import is_field_nurse_user
+            from staff_portal.models import NurseVisit
+            if is_field_nurse_user(self.request.user):
+                outside_visit = not NurseVisit.objects.filter(
+                    nurse=staff_member, patient=patient, is_ended=False
+                ).exists()
+        serializer.save(recorded_by=staff_member, recorded_outside_visit=outside_visit)
 
     def update(self, request, *args, **kwargs):
         instance = self.get_object()

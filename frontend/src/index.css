@@ -2895,5 +2895,38 @@ input[type="radio"],
   }
 }
 
+/* ── 10. Staff Directory Table Responsive Behavior ────────────────────────── */
+@media (max-width: 768px) {
+  .staff-table-responsive {
+    display: block;
+    min-width: 100% !important;
+  }
+  .staff-table-responsive thead {
+    display: none;
+  }
+  .staff-table-responsive tbody {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .staff-table-responsive tr {
+    display: flex;
+    flex-direction: column;
+    background: #ffffff;
+    border: 1px solid var(--sage-200);
+    border-radius: 8px;
+    padding: 12px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  }
+  .staff-table-responsive td {
+    display: flex;
+    justifyContent: space-between;
+    align-items: center;
+    border: none;
+    padding: 4px 0;
+  }
+}
+
+
 
 

@@ -116,6 +116,12 @@ class Booking(models.Model):
         null=True, blank=True, related_name='shift_buddy_bookings',
         verbose_name='Shift Buddy Staff'
     )
+    driver = models.ForeignKey(
+        'staff.StaffMember', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='driver_duty_bookings',
+        verbose_name='Duty Driver Staff'
+    )
+    driver_pickup_time = models.TimeField(null=True, blank=True, verbose_name='Driver Pickup Time')
     driver_name = models.CharField(max_length=150, blank=True, default='')
     driver_phone = models.CharField(max_length=50, blank=True, default='')
     pickup_time = models.DateTimeField(null=True, blank=True)

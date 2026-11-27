@@ -576,17 +576,57 @@ const useStore = create((set, get) => ({
       const res = await apiFetch(`/staff/members/${staffId}/`, {
         method: 'DELETE',
       });
+      if (res.status === 409) {
+        const data = await res.json().catch(() => ({}));
+        return { success: false, conflict: true, error: data.detail || 'Cannot delete staff with records. Deactivate instead.' };
+      }
       if (res.ok || res.status === 204) {
         await get().fetchStaff();
+        set((s) => ({
+          staff: s.staff.filter((m) => m.id !== staffId),
+          selectedStaff: s.selectedStaff?.id === staffId ? null : s.selectedStaff,
+        }));
+        return { success: true };
       }
+      const data = await res.json().catch(() => ({}));
+      return { success: false, error: data.detail || 'Failed to delete staff member.' };
     } catch (err) {
-      console.warn('[Store] deleteStaffMember API error, applying local state delete:', err);
+      console.warn('[Store] deleteStaffMember API error:', err);
+      return { success: false, error: err.message };
     }
-    set((s) => ({
-      staff: s.staff.filter((m) => m.id !== staffId),
-      selectedStaff: s.selectedStaff?.id === staffId ? null : s.selectedStaff,
-    }));
-    return { success: true };
+  },
+
+  deactivateStaffMember: async (staffId, reason) => {
+    try {
+      const res = await apiFetch(`/staff/members/${staffId}/deactivate/`, {
+        method: 'POST',
+        body: JSON.stringify({ reason }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        await get().fetchStaff();
+        return { success: true, message: data.message };
+      }
+      return { success: false, error: data.detail || data.error || 'Failed to deactivate staff.' };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  },
+
+  reactivateStaffMember: async (staffId) => {
+    try {
+      const res = await apiFetch(`/staff/members/${staffId}/reactivate/`, {
+        method: 'POST',
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        await get().fetchStaff();
+        return { success: true, message: data.message };
+      }
+      return { success: false, error: data.detail || data.error || 'Failed to reactivate staff.' };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
   },
 
   /**

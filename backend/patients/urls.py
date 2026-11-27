@@ -17,6 +17,7 @@ from .patient_file_views import (
     PatientPhotoView,
     PatientRecordAddendumView,
     PatientScheduledItemMarkErrorView,
+    PatientMarSheetView,
 )
 
 router = DefaultRouter()
@@ -29,6 +30,7 @@ router.register(r'', PatientViewSet, basename='patient')
 urlpatterns = [
     # Patient File Hub & Timeline Endpoints
     path('<int:pk>/patient-file/', PatientFileView.as_view(), name='patient-file-hub'),
+    path('<int:pk>/mar-sheet/', PatientMarSheetView.as_view(), name='patient-mar-sheet'),
     path('<int:pk>/photo/', PatientPhotoView.as_view(), name='patient-photo'),
     path('<int:pk>/reveal-emergency-contact/', PatientEmergencyContactRevealView.as_view(), name='patient-emergency-contact-reveal'),
     path('<int:pk>/history-care-plan/', PatientHistoryCarePlanUpdateView.as_view(), name='patient-history-care-plan'),

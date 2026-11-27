@@ -254,3 +254,90 @@ class FamilyConcern(models.Model):
 
     def __str__(self):
         return f"Concern on {self.chart_type} for {self.patient.full_name} ({self.status})"
+
+# ── Nurse Visit (portal visit flow) ──────────────────────────────────────────
+import math as _math
+
+
+class NurseVisit(models.Model):
+    """
+    Portal-initiated visit record (Start Visit / End Visit flow).
+    One per nurse per patient per booking session.
+    Distinct from tracking.GeofenceEvent which is the mobile GPS-ping flow.
+    """
+
+    # Core FKs
+    booking = models.ForeignKey(
+        'bookings.Booking',
+        on_delete=models.PROTECT,
+        related_name='nurse_visits',
+    )
+    nurse = models.ForeignKey(
+        'staff.StaffMember',
+        on_delete=models.PROTECT,
+        related_name='nurse_visits',
+    )
+    patient = models.ForeignKey(
+        'patients.Patient',
+        on_delete=models.PROTECT,
+        related_name='nurse_visits',
+    )
+    roster_assignment = models.ForeignKey(
+        'staff.RosterAssignment',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name='nurse_visits',
+    )
+
+    # Check-in
+    checkin_time = models.DateTimeField()
+    checkin_lat = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    checkin_lng = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    checkin_accuracy = models.FloatField(null=True, blank=True)
+    checkin_distance_meters = models.FloatField(null=True, blank=True)
+    checkin_verified = models.BooleanField(default=False)
+    checkin_location_denied = models.BooleanField(default=False)
+    checkin_denial_reason = models.CharField(max_length=500, blank=True)
+    checkin_outside_area = models.BooleanField(default=False)
+    checkin_low_accuracy = models.BooleanField(default=False)
+
+    # Check-out
+    checkout_time = models.DateTimeField(null=True, blank=True)
+    checkout_lat = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    checkout_lng = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)
+    checkout_accuracy = models.FloatField(null=True, blank=True)
+    checkout_distance_meters = models.FloatField(null=True, blank=True)
+    checkout_verified = models.BooleanField(default=False)
+    checkout_location_denied = models.BooleanField(default=False)
+    checkout_denial_reason = models.CharField(max_length=500, blank=True)
+
+    # Outcome
+    is_ended = models.BooleanField(default=False)
+    visit_summary = models.TextField(blank=True)
+    no_care_actions_reason = models.CharField(max_length=500, blank=True)
+
+    # Counts snapshotted at checkout
+    vitals_count = models.IntegerField(default=0)
+    medications_count = models.IntegerField(default=0)
+    notes_count = models.IntegerField(default=0)
+
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-checkin_time']
+        verbose_name = 'Nurse Visit'
+        verbose_name_plural = 'Nurse Visits'
+
+    def __str__(self):
+        return (
+            f"NurseVisit #{self.pk} — {self.nurse} → {self.patient} "
+            f"({self.checkin_time:%Y-%m-%d %H:%M})"
+        )
+
+    @property
+    def duration_minutes(self):
+        if self.checkout_time and self.checkin_time:
+            return int((self.checkout_time - self.checkin_time).total_seconds() / 60)
+        return None

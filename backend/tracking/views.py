@@ -384,9 +384,24 @@ class GPSPingView(APIView):
                     notes='Auto check-in via GPS ping (geofence triggered)',
                 )
                 if booking.status in [BookingStatus.EN_ROUTE, BookingStatus.ASSIGNED]:
-                    booking.status = BookingStatus.IN_PROGRESS
-                    booking.actual_start_time = now
-                    booking.save(update_fields=['status', 'actual_start_time'])
+                    from bookings.services import transition_booking_to_in_progress
+                    transition_booking_to_in_progress(booking, now)
+                    from staff_portal.models import NurseVisit
+                    NurseVisit.objects.get_or_create(
+                        booking=booking,
+                        is_ended=False,
+                        defaults={
+                            'nurse': staff,
+                            'patient': booking.patient,
+                            'checkin_time': now,
+                            'checkin_lat': lat,
+                            'checkin_lng': lng,
+                            'checkin_accuracy': accuracy_meters,
+                            'checkin_verified': True,
+                            'checkin_outside_area': False,
+                            'checkin_location_denied': False,
+                        }
+                    )
                 auto_checked_in = True
 
                 # Broadcast geofence check_in to all clients
@@ -458,10 +473,14 @@ class CheckInView(APIView):
         existing = GeofenceEvent.objects.filter(
             booking=booking, event_type=GeofenceEvent.EventType.CHECK_IN
         ).first()
-        if existing:
+        from staff_portal.models import NurseVisit
+        existing_visit = NurseVisit.objects.filter(
+            booking=booking, is_ended=False
+        ).first()
+        if existing or existing_visit:
             return Response({
                 'detail': 'Already checked in.',
-                'event': GeofenceEventSerializer(existing).data,
+                'event': GeofenceEventSerializer(existing).data if existing else None,
                 'booking_status': booking.status,
             })
 
@@ -476,11 +495,26 @@ class CheckInView(APIView):
             notes=f'Check-in via {method}',
         )
 
-        # Transition booking status
-        if booking.status not in ['completed', 'cancelled']:
-            booking.status = BookingStatus.IN_PROGRESS
-            booking.actual_start_time = now
-            booking.save(update_fields=['status', 'actual_start_time'])
+        # Sync NurseVisit so visit appears in web visit log and web banner
+        NurseVisit.objects.get_or_create(
+            booking=booking,
+            is_ended=False,
+            defaults={
+                'nurse': staff,
+                'patient': booking.patient,
+                'checkin_time': now,
+                'checkin_lat': lat,
+                'checkin_lng': lng,
+                'checkin_accuracy': request.data.get('accuracy') or request.data.get('accuracy_meters'),
+                'checkin_verified': True,
+                'checkin_outside_area': False,
+                'checkin_location_denied': False,
+            }
+        )
+
+        # Transition booking status via shared function
+        from bookings.services import transition_booking_to_in_progress
+        transition_booking_to_in_progress(booking, now)
 
         # Broadcast to channel layer
         _broadcast_to_channel_layer({
@@ -554,18 +588,33 @@ class CheckOutView(APIView):
             delta = now - booking.actual_start_time
             visit_duration_minutes = int(delta.total_seconds() / 60)
 
-        # Transition to completed
-        booking.status = BookingStatus.COMPLETED
-        booking.actual_end_time = now
-        booking.save(update_fields=['status', 'actual_end_time'])
+        # Transition to completed via shared function
+        from bookings.services import transition_booking_to_completed
+        transition_booking_to_completed(booking, now)
 
-        # Auto-generate billing invoice for the completed booking
-        try:
-            from billing.services import generate_invoice_for_booking
-            generate_invoice_for_booking(booking)
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).warning(f"Could not auto-generate invoice for booking {booking.id}: {e}")
+        # Sync and close active NurseVisit if present
+        from staff_portal.models import NurseVisit
+        from patients.models import VitalSign, NurseNote, MARAdministration
+        active_visit = NurseVisit.objects.filter(booking=booking, is_ended=False).first()
+        if active_visit:
+            active_visit.checkout_time = now
+            active_visit.checkout_lat = lat
+            active_visit.checkout_lng = lng
+            active_visit.is_ended = True
+            active_visit.checkout_verified = True
+            active_visit.vitals_count = VitalSign.objects.filter(
+                patient=booking.patient, recorded_by=staff,
+                recorded_at__gte=active_visit.checkin_time, is_entered_in_error=False
+            ).count()
+            active_visit.notes_count = NurseNote.objects.filter(
+                patient=booking.patient, recorded_by=staff,
+                recorded_at__gte=active_visit.checkin_time, is_entered_in_error=False
+            ).count()
+            active_visit.medications_count = MARAdministration.objects.filter(
+                prescription__patient=booking.patient, administered_by=staff,
+                administered_at__gte=active_visit.checkin_time, is_entered_in_error=False
+            ).count()
+            active_visit.save()
 
         # Remove LiveVisit snapshot — visit is over
         LiveVisit.objects.filter(booking=booking).delete()

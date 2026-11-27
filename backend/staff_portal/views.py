@@ -29,7 +29,13 @@ from notifications.views import create_notification
 from patients.models import DoctorNote, Patient, PhysioNote, VitalSign, ShiftHandoverNote, Prescription, MARAdministration, PatientActiveComplaint
 from patients.serializers import ShiftHandoverNoteSerializer
 from patients.record_integrity import handle_mark_entered_in_error
-from patients.scoping import is_field_nurse_user, check_nurse_patient_access
+from patients.scoping import is_field_nurse_user, check_nurse_patient_access, get_assigned_patient_ids_for_user
+from staff_portal.duty_countdown import (
+    calculate_duty_countdown,
+    derive_shift_name,
+    format_12hr_time,
+    build_maps_link,
+)
 from quality.models import ManagerVisitChecklist
 from staff.models import AttendanceRecord, LeaveRequest, StaffMember, RosterAssignment, RosterWeek
 
@@ -724,7 +730,7 @@ class StaffPortalHomeView(APIView):
         handovers_data = ShiftHandoverNoteSerializer(handovers_qs, many=True, context={'request': request}).data
 
         # Shared Roster Summary & Employment Status
-        roster_summary = compute_roster_summary(staff, local_now, local_tz)
+        roster_summary = compute_roster_summary(staff, local_now, local_tz, user=request.user)
         emp_status_block = {
             'status': staff.employment_status,
             'status_display': staff.get_employment_status_display() if staff.employment_status else 'Not set',
@@ -816,7 +822,7 @@ def _calculate_shift_hours(assign):
     return round(sec_diff / 3600.0, 2)
 
 
-def compute_roster_summary(staff, local_now=None, local_tz=None):
+def compute_roster_summary(staff, local_now=None, local_tz=None, user=None):
     if local_tz is None:
         tz_name = getattr(settings, 'OFFICE_TIMEZONE', 'Asia/Karachi')
         try:
@@ -846,7 +852,7 @@ def compute_roster_summary(staff, local_now=None, local_tz=None):
                 staff=staff,
                 is_published=True,
                 date__range=[min_date, max_date],
-            ).select_related('shift_template').order_by('date')
+            ).select_related('shift_template', 'supervisor', 'buddy_staff', 'driver').prefetch_related('patients').order_by('date')
         )
 
     # 1. Today's duty status
@@ -867,7 +873,7 @@ def compute_roster_summary(staff, local_now=None, local_tz=None):
             if y_s_dt <= local_now <= y_e_dt:
                 in_overnight = True
                 duty_status = 'On duty'
-                current_shift_name = yesterday_assign.shift_name
+                current_shift_name = derive_shift_name(yesterday_assign.start_time, yesterday_assign.shift_name)
                 shift_window = f"{yesterday_assign.start_time.strftime('%H:%M')} - {yesterday_assign.end_time.strftime('%H:%M')}"
                 shift_location = yesterday_assign.location or 'Main Hospital / Clinic'
                 total_s = max(1, (y_e_dt - y_s_dt).total_seconds())
@@ -886,7 +892,7 @@ def compute_roster_summary(staff, local_now=None, local_tz=None):
                 current_shift_name = today_assign.shift_name
                 shift_window = 'Standby'
             else:
-                current_shift_name = today_assign.shift_name
+                current_shift_name = derive_shift_name(today_assign.start_time, today_assign.shift_name)
                 if today_assign.start_time and today_assign.end_time:
                     shift_window = f"{today_assign.start_time.strftime('%H:%M')} - {today_assign.end_time.strftime('%H:%M')}"
                     t_s_dt = timezone.make_aware(datetime.datetime.combine(today_date, today_assign.start_time), timezone=local_tz)
@@ -909,29 +915,47 @@ def compute_roster_summary(staff, local_now=None, local_tz=None):
             current_shift_name = 'No Shift Scheduled'
             shift_window = 'None'
 
-    # Next duty
+    # Compute target assignment for detailed today duty
+    target_assign = None
+    if in_overnight and yesterday_assign:
+        target_assign = yesterday_assign
+    elif today_assign and not today_assign.is_off and ('standby' not in today_assign.shift_name.strip().lower()):
+        target_assign = today_assign
+
+    # Next duty: find earliest published non-off upcoming duty after local_now (excluding active target_assign)
     next_duty = None
+    upcoming_candidates = []
     for a in assignments:
+        if target_assign and a.id == target_assign.id:
+            continue
         if a.is_off or a.shift_name.strip().lower() == 'off' or 'standby' in a.shift_name.strip().lower():
             continue
-        if a.date > today_date:
-            next_duty = {
-                'date': a.date.isoformat(),
-                'shift_name': a.shift_name,
-                'window': f"{a.start_time.strftime('%H:%M')} - {a.end_time.strftime('%H:%M')}" if (a.start_time and a.end_time) else '',
-                'location': a.location or 'Main Hospital / Clinic',
-            }
-            break
-        elif a.date == today_date and a.start_time:
-            t_s = timezone.make_aware(datetime.datetime.combine(today_date, a.start_time), timezone=local_tz)
-            if local_now < t_s:
-                next_duty = {
-                    'date': a.date.isoformat(),
-                    'shift_name': a.shift_name,
-                    'window': f"{a.start_time.strftime('%H:%M')} - {a.end_time.strftime('%H:%M')}",
-                    'location': a.location or 'Main Hospital / Clinic',
-                }
-                break
+        if not a.start_time:
+            continue
+        try:
+            a_start_dt = timezone.make_aware(datetime.datetime.combine(a.date, a.start_time), timezone=local_tz)
+        except Exception:
+            a_start_dt = datetime.datetime.combine(a.date, a.start_time)
+        if a_start_dt > local_now:
+            upcoming_candidates.append((a_start_dt, a))
+
+    if upcoming_candidates:
+        upcoming_candidates.sort(key=lambda x: x[0])
+        _, next_a = upcoming_candidates[0]
+        derived_next_name = derive_shift_name(next_a.start_time, next_a.shift_name)
+        st_12 = format_12hr_time(next_a.start_time)
+        en_12 = format_12hr_time(next_a.end_time) if next_a.end_time else ''
+        w_12 = f"{st_12} - {en_12}" if en_12 else st_12
+        next_duty = {
+            'id': next_a.id,
+            'date': next_a.date.isoformat(),
+            'date_formatted': next_a.date.strftime('%a, %d %b %Y'),
+            'shift_name': derived_next_name,
+            'window': w_12 or (f"{next_a.start_time.strftime('%H:%M')} - {next_a.end_time.strftime('%H:%M')}" if (next_a.start_time and next_a.end_time) else ''),
+            'start_time': st_12,
+            'end_time': en_12,
+            'location': next_a.location or 'Main Hospital / Clinic',
+        }
 
     # 2. 7-day strip (Mon-Sun)
     day_names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
@@ -954,15 +978,27 @@ def compute_roster_summary(staff, local_now=None, local_tz=None):
             else:
                 st = 'on'
 
+        shift_title = 'Off'
+        if assign:
+            if st == 'off':
+                shift_title = 'Off'
+            elif st == 'standby':
+                shift_title = 'Standby'
+            elif assign.start_time:
+                shift_title = derive_shift_name(assign.start_time, assign.shift_name)
+            else:
+                shift_title = assign.shift_name
+
         weekly_strip.append({
             'date': d_date.isoformat(),
             'day_name': day_names[i],
             'day_number': d_date.day,
             'is_today': (d_date == today_date),
             'status': st,
-            'shift_name': assign.shift_name if assign else 'Off',
-            'window': f"{assign.start_time.strftime('%H:%M')} - {assign.end_time.strftime('%H:%M')}" if (assign and assign.start_time and assign.end_time) else ('Off' if st == 'off' else ('Standby' if st == 'standby' else '')),
+            'shift_name': shift_title,
+            'window': f"{format_12hr_time(assign.start_time)} - {format_12hr_time(assign.end_time)}" if (assign and assign.start_time and assign.end_time) else ('Off' if st == 'off' else ('Standby' if st == 'standby' else '')),
             'hours': h,
+            'patients': [p.full_name for p in assign.patients.all()] if (assign and hasattr(assign, 'patients')) else [],
             'location': assign.location if assign else '',
             'color': assign.color if assign else '#9CA3AF',
         })
@@ -1007,14 +1043,143 @@ def compute_roster_summary(staff, local_now=None, local_tz=None):
                 st = 'standby'
             else:
                 st = 'on'
+
+        m_shift_title = 'Off'
+        if assign:
+            if st == 'off':
+                m_shift_title = 'Off'
+            elif st == 'standby':
+                m_shift_title = 'Standby'
+            elif assign.start_time:
+                m_shift_title = derive_shift_name(assign.start_time, assign.shift_name)
+            else:
+                m_shift_title = assign.shift_name
+
         month_days.append({
             'date': m_date.isoformat(),
             'day_number': d,
             'is_today': (m_date == today_date),
             'status': st,
-            'shift_name': assign.shift_name if assign else 'Off',
+            'shift_name': m_shift_title,
             'hours': h,
+            'patients': [p.full_name for p in assign.patients.all()] if (assign and hasattr(assign, 'patients')) else [],
         })
+
+    # Detailed duty object for today's active/scheduled shift
+    today_duty = None
+    if target_assign and target_assign.start_time and target_assign.end_time:
+        st_t = target_assign.start_time
+        en_t = target_assign.end_time
+        is_ov = (en_t <= st_t)
+        try:
+            s_dt = timezone.make_aware(datetime.datetime.combine(target_assign.date, st_t), timezone=local_tz)
+            e_dt = timezone.make_aware(
+                datetime.datetime.combine(target_assign.date + (datetime.timedelta(days=1) if is_ov else datetime.timedelta()), en_t),
+                timezone=local_tz
+            )
+        except Exception:
+            s_dt = datetime.datetime.combine(target_assign.date, st_t)
+            e_dt = datetime.datetime.combine(target_assign.date, en_t)
+
+        countdown_info = calculate_duty_countdown(s_dt, e_dt, local_now)
+
+        driver_st = getattr(target_assign, 'driver', None)
+        d_name = (driver_st.full_name if driver_st else None) or target_assign.transport_driver_name or None
+        d_phone = (driver_st.phone if driver_st else None) or target_assign.transport_driver_phone or None
+        raw_pt = (target_assign.driver_pickup_time.strftime('%I:%M %p') if getattr(target_assign, 'driver_pickup_time', None) else None) or target_assign.transport_pickup_time or None
+        p_time = raw_pt if (raw_pt and str(raw_pt).strip()) else None
+
+        sup_obj = getattr(target_assign, 'supervisor', None)
+        bud_obj = target_assign.buddy_staff
+
+        has_sup = bool(sup_obj)
+        has_trans = bool(d_name or p_time)
+        has_bud = bool(bud_obj)
+        is_ind = not (has_sup or has_trans or has_bud)
+
+        st_12 = format_12hr_time(st_t)
+        en_12 = format_12hr_time(en_t)
+        duty_time_label = f"{st_12} - {en_12}"
+        derived_shift_name = derive_shift_name(st_t, target_assign.shift_name)
+        shift_line_label = f"{derived_shift_name} {duty_time_label}"
+
+        # Privacy rules:
+        # A nurse sees patient contact number and location ONLY for patients on THAT nurse's own published duty
+        # and ONLY inside the existing access window.
+        # Nurses with no duty for that patient, trainees, and every other role (admin, super_admin, family, etc.) get none of it.
+        # Staff contact numbers (supervisor, driver, buddy) follow the same rule.
+        is_authorized_nurse = False
+        if user and user.is_authenticated and staff:
+            user_staff = getattr(user, 'staffmember', None)
+            if user_staff and user_staff.id == staff.id:
+                if is_field_nurse_user(user):
+                    if getattr(staff, 'lifecycle_stage', None) != 'trainee':
+                        is_authorized_nurse = True
+
+        assigned_pats = list(target_assign.patients.all()) if hasattr(target_assign, 'patients') else []
+        assigned_pids = (get_assigned_patient_ids_for_user(user, now=local_now) or set()) if user else set()
+        days_cutoff = getattr(settings, 'NURSE_PATIENT_ACCESS_DAYS_AFTER_VISIT', 7)
+        duty_in_window = (target_assign.date >= (today_date - datetime.timedelta(days=days_cutoff)))
+
+        pats_list = []
+        for p in assigned_pats:
+            is_patient_in_window = (
+                is_authorized_nurse and
+                target_assign.is_published and
+                (p.id in assigned_pids or (duty_in_window and target_assign.patients.filter(id=p.id).exists()))
+            )
+
+            p_addr = p.address or ''
+            if is_patient_in_window:
+                m_link = build_maps_link(patient=p, address=p_addr)
+                contact_num = p.phone or ''
+                loc_val = p_addr
+            else:
+                m_link = None
+                contact_num = None
+                loc_val = None
+
+            pats_list.append({
+                'id': p.id,
+                'name': p.full_name,
+                'age': p.age,
+                'mr_number': getattr(p, 'mr_number', '') or '',
+                'diagnosis': p.primary_diagnosis or 'Not recorded',
+                'location': loc_val,
+                'maps_link': m_link,
+                'contact_number': contact_num,
+            })
+
+        # Staff phone numbers follow the exact same privacy rule
+        can_view_staff_phones = is_authorized_nurse and target_assign.is_published
+
+        today_duty = {
+            'id': target_assign.id,
+            'shift_name': derived_shift_name,
+            'start_time': st_12,
+            'end_time': en_12,
+            'duty_time': duty_time_label,
+            'shift_line': shift_line_label,
+            'is_overnight': is_ov,
+            'countdown': countdown_info,
+            'patients': pats_list,
+            'supervisor': {
+                'name': sup_obj.full_name,
+                'phone': (sup_obj.phone if can_view_staff_phones else None),
+            } if has_sup else None,
+            'transport': {
+                'driver_name': d_name,
+                'driver_phone': (d_phone if can_view_staff_phones else None),
+                'pickup_time': p_time or '',
+            } if has_trans else None,
+            'buddy': {
+                'name': bud_obj.full_name,
+                'phone': (bud_obj.phone if can_view_staff_phones else None),
+            } if has_bud else None,
+            'is_independent': is_ind,
+            'duty_type': 'Independent duty' if is_ind else 'Supported duty',
+            'next_shift': next_duty,
+        }
 
     return {
         'duty_status': {
@@ -1042,6 +1207,7 @@ def compute_roster_summary(staff, local_now=None, local_tz=None):
         'weekly_strip': weekly_strip,
         'week_total_hours': week_hours,
         'month_days': month_days,
+        'today_duty': today_duty,
     }
 
 
@@ -1520,7 +1686,7 @@ class ClinicianPortalHomeView(APIView):
                 'probation_end_date': staff.probation_end_date.isoformat() if staff.probation_end_date else None,
             }
 
-        roster_summary_block = compute_roster_summary(staff, local_now, local_tz)
+        roster_summary_block = compute_roster_summary(staff, local_now, local_tz, user=request.user)
 
         resp_data = {
             'staff': digital_id,
@@ -2246,6 +2412,16 @@ class StaffPortalRosterView(APIView):
             start_date = base_date - datetime.timedelta(days=base_date.weekday())
             end_date = start_date + datetime.timedelta(days=6)
 
+        if getattr(staff, 'lifecycle_stage', None) == 'trainee':
+            return Response({
+                'view': view_mode,
+                'start_date': start_date.isoformat(),
+                'end_date': end_date.isoformat(),
+                'shifts': [],
+                'duties': [],
+                'count': 0,
+            })
+
         start_dt = timezone.make_aware(datetime.datetime.combine(start_date, datetime.time.min))
         end_dt = timezone.make_aware(datetime.datetime.combine(end_date, datetime.time.max))
 
@@ -2383,14 +2559,105 @@ class StaffPortalRosterView(APIView):
                 } if buddy_obj and buddy_obj.id != staff.id else None,
             })
 
-        # Sort shifts by start time
+        from urllib.parse import quote
+        from staff_portal.duty_countdown import calculate_duty_countdown
+        now_utc = timezone.now()
+        local_now = now_utc.astimezone(local_tz)
+
+        # Build duties list matching Part B2 (Nurse Sees "My Roster")
+        duties = []
+        for assign in published_roster:
+            if assign.is_off:
+                continue
+            st_time = assign.start_time or datetime.time(8, 0)
+            en_time = assign.end_time or datetime.time(16, 0)
+            is_overnight = (en_time <= st_time)
+            try:
+                shift_start = timezone.make_aware(datetime.datetime.combine(assign.date, st_time), timezone=local_tz)
+                shift_end = timezone.make_aware(
+                    datetime.datetime.combine(assign.date + (datetime.timedelta(days=1) if is_overnight else datetime.timedelta()), en_time),
+                    timezone=local_tz
+                )
+            except Exception:
+                shift_start = datetime.datetime.combine(assign.date, st_time)
+                shift_end = datetime.datetime.combine(assign.date, en_time)
+
+            driver_staff = getattr(assign, 'driver', None)
+            driver_name = (driver_staff.full_name if driver_staff else None) or assign.transport_driver_name or None
+            driver_phone = (driver_staff.phone if driver_staff else None) or assign.transport_driver_phone or None
+            raw_pt = (assign.driver_pickup_time.strftime('%I:%M %p') if getattr(assign, 'driver_pickup_time', None) else None) or assign.transport_pickup_time or None
+            pickup_time = raw_pt if (raw_pt and str(raw_pt).strip()) else None
+
+            supervisor_obj = getattr(assign, 'supervisor', None)
+            buddy_obj = assign.buddy_staff
+
+            has_supervisor = bool(supervisor_obj)
+            has_transport = bool(driver_name or pickup_time)
+            has_buddy = bool(buddy_obj)
+            is_independent = not (has_supervisor or has_transport or has_buddy)
+
+            duty_time_str = f"{st_time.strftime('%I:%M %p').lstrip('0')} - {en_time.strftime('%I:%M %p').lstrip('0')}"
+
+            # Assigned patients
+            assigned_patients = list(assign.patients.all())
+            if not assigned_patients:
+                b_pats = [b.patient for b in bookings if b.scheduled_time.date() == assign.date and b.patient]
+                assigned_patients = b_pats
+
+            patients_data = []
+            for p in assigned_patients:
+                p_loc = p.address or 'Not recorded'
+                maps_link = f"https://www.google.com/maps/search/?api=1&query={quote(p_loc)}" if p_loc and p_loc != 'Not recorded' else ''
+                patients_data.append({
+                    'id': p.id,
+                    'name': p.full_name,
+                    'age': p.age,
+                    'diagnosis': p.primary_diagnosis or 'Not recorded',
+                    'location': p_loc,
+                    'maps_link': maps_link,
+                })
+
+            countdown_info = calculate_duty_countdown(shift_start, shift_end, local_now)
+
+            duty_item = {
+                'id': f"duty_roster_{assign.id}",
+                'assignment_id': assign.id,
+                'date': assign.date.isoformat(),
+                'start': shift_start.isoformat(),
+                'end': shift_end.isoformat(),
+                'duty_time': duty_time_str,
+                'is_overnight': is_overnight,
+                'countdown': countdown_info,
+                'patients': patients_data,
+                'supervisor': {
+                    'name': supervisor_obj.full_name,
+                    'phone': supervisor_obj.phone,
+                } if supervisor_obj else None,
+                'transport': {
+                    'driver_name': driver_name,
+                    'driver_phone': driver_phone or '',
+                    'pickup_time': pickup_time or '',
+                } if has_transport else None,
+                'buddy': {
+                    'name': buddy_obj.full_name,
+                    'phone': buddy_obj.phone,
+                } if buddy_obj else None,
+                'is_independent': is_independent,
+                'duty_type': 'Independent duty' if is_independent else 'Supported duty',
+            }
+            duties.append(duty_item)
+
+        # Sort shifts and duties by start time
         shifts.sort(key=lambda s: s['start'])
+        duties.sort(key=lambda d: d['start'])
 
         return Response({
             'view': view_mode,
             'start_date': start_date.isoformat(),
             'end_date': end_date.isoformat(),
             'shifts': shifts,
+            'duties': duties,
+            'count': len(duties),
         })
 
 

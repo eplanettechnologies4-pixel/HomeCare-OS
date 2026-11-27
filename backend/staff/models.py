@@ -283,10 +283,22 @@ class RosterAssignment(models.Model):
     color = models.CharField(max_length=30, default='#6D28D9')
     is_off = models.BooleanField(default=False)
 
-    # Per-shift transport and buddy fields (reuse existing data models)
+    # Per-shift transport, buddy, supervisor, and patient fields (reuse existing data models)
+    supervisor = models.ForeignKey(
+        StaffMember, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='supervised_roster_assignments', verbose_name='Shift Supervisor'
+    )
     buddy_staff = models.ForeignKey(
         StaffMember, on_delete=models.SET_NULL, null=True, blank=True,
         related_name='buddy_roster_assignments', verbose_name='Shift Buddy Staff'
+    )
+    driver = models.ForeignKey(
+        StaffMember, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='driver_roster_assignments', verbose_name='Shift Driver Staff'
+    )
+    driver_pickup_time = models.TimeField(null=True, blank=True, verbose_name='Driver Pickup Time')
+    patients = models.ManyToManyField(
+        'patients.Patient', blank=True, related_name='roster_assignments'
     )
     transport_driver_name = models.CharField(max_length=150, blank=True, default='', verbose_name='Shift Transport Driver')
     transport_driver_phone = models.CharField(max_length=50, blank=True, default='', verbose_name='Shift Transport Phone')

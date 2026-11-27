@@ -7,7 +7,8 @@ from .roster_views import (
     ShiftTemplateListCreateView, ShiftTemplateDetailView,
     RosterGridView, RosterAssignCellView, RosterBulkActionView,
     RosterPublishWeekView, RosterHistoryView,
-    ShiftChangeRequestView, ShiftChangeRequestApprovalView
+    ShiftChangeRequestView, ShiftChangeRequestApprovalView,
+    ScheduleDutyView
 )
 from .lifecycle_views import (
     StaffOnboardingSummaryView, StaffRegenerateCodeView,
@@ -48,6 +49,7 @@ urlpatterns = [
     path('roster/bulk/', RosterBulkActionView.as_view(), name='staff-roster-bulk'),
     path('roster/publish/', RosterPublishWeekView.as_view(), name='staff-roster-publish'),
     path('roster/history/', RosterHistoryView.as_view(), name='staff-roster-history'),
+    path('roster/schedule-duty/', ScheduleDutyView.as_view(), name='staff-roster-schedule-duty'),
     path('roster/shift-change-request/', ShiftChangeRequestView.as_view(), name='staff-shift-change-request'),
     path('roster/shift-change-request/<int:pk>/<str:action>/', ShiftChangeRequestApprovalView.as_view(), name='staff-shift-change-approval'),
 

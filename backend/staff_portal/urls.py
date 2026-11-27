@@ -29,6 +29,12 @@ from .views import (
     StaffPortalCertificatesListView,
     StaffPortalCertificateDownloadView,
 )
+from .visit_views import (
+    NurseVisitStartView,
+    NurseVisitEndView,
+    NurseVisitActiveView,
+    NurseVisitLogView,
+)
 
 router = DefaultRouter()
 router.register(r'requests', StaffRequestViewSet, basename='staff-portal-requests')
@@ -59,5 +65,10 @@ urlpatterns = [
     path('trainings/<int:course_id>/lectures/<int:lecture_id>/progress/', StaffPortalLectureProgressView.as_view(), name='staff-portal-lecture-progress'),
     path('certificates/', StaffPortalCertificatesListView.as_view(), name='staff-portal-certificates-list'),
     path('certificates/<int:pk>/download/', StaffPortalCertificateDownloadView.as_view(), name='staff-portal-certificate-download'),
+    # Nurse Visit Flow
+    path('visit/start/', NurseVisitStartView.as_view(), name='staff-portal-visit-start'),
+    path('visit/end/', NurseVisitEndView.as_view(), name='staff-portal-visit-end'),
+    path('visit/active/', NurseVisitActiveView.as_view(), name='staff-portal-visit-active'),
+    path('visit/log/', NurseVisitLogView.as_view(), name='staff-portal-visit-log'),
     path('', include(router.urls)),
 ]

@@ -17,6 +17,9 @@ import VitalsRecordFormB from '../components/VitalsRecordFormB';
 import NursesNotesFormA from '../components/NursesNotesFormA';
 import MarSheetFormC from '../components/MarSheetFormC';
 import PrescriptionsTab from '../components/PrescriptionsTab';
+import PaperMedicationSheet from '../components/PaperMedicationSheet';
+import PaperNursesNotesSheet from '../components/PaperNursesNotesSheet';
+import NurseVisitBanner from '../components/NurseVisitBanner';
 import { normalizeRole, isClinicianRole, getClinicianConfig, canRoleWriteClinical, CLINICAL_WRITE_ROLES } from '../config/clinicianRoleConfig';
 import { getAllergyInfo } from '../utils/allergyHelpers';
 
@@ -114,6 +117,10 @@ export default function PatientFile() {
 
   // Classic Chart View Mode
   const [showClassicChart, setShowClassicChart] = useState(false);
+
+  // Paper vs Timeline View Modes for Medications & Nurses Notes
+  const [medViewMode, setMedViewMode] = useState('paper'); // 'paper' | 'timeline'
+  const [notesViewMode, setNotesViewMode] = useState('paper'); // 'paper' | 'timeline'
 
   // Clinical Write Modals & Forms
   const [showVitalsModal, setShowVitalsModal] = useState(false);
@@ -1131,6 +1138,18 @@ export default function PatientFile() {
         </div>
       </div>
 
+      {/* ── NURSE VISIT BANNER (Start / End Visit + Quick Care Actions) ─────── */}
+      {isNurse && (
+        <NurseVisitBanner
+          patientId={activePatientId}
+          patientName={pFullName}
+          onOpenVitals={() => setShowVitalsModal(true)}
+          onOpenMar={() => setShowMarModal(true)}
+          onOpenNotes={() => setShowNurseNotesModal(true)}
+          onVisitChanged={() => loadPatientFile(activePatientId)}
+        />
+      )}
+
       {/* ── A3. PATIENT HEADER ──────────────────────────────────────────────── */}
       <div
         style={{
@@ -1623,6 +1642,86 @@ export default function PatientFile() {
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              {/* Paper vs Timeline View Mode Toggle for Medications */}
+              {activeTile === 'medications' && (
+                <div style={{ display: 'inline-flex', background: '#F1F5F9', padding: '3px', borderRadius: '8px', gap: '3px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setMedViewMode('paper')}
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: '6px',
+                      fontSize: '11px',
+                      fontWeight: medViewMode === 'paper' ? 700 : 500,
+                      background: medViewMode === 'paper' ? '#FFFFFF' : 'transparent',
+                      color: medViewMode === 'paper' ? '#0284C7' : '#64748B',
+                      border: 'none',
+                      cursor: 'pointer',
+                      boxShadow: medViewMode === 'paper' ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
+                    }}
+                  >
+                    Paper MAR Sheet
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMedViewMode('timeline')}
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: '6px',
+                      fontSize: '11px',
+                      fontWeight: medViewMode === 'timeline' ? 700 : 500,
+                      background: medViewMode === 'timeline' ? '#FFFFFF' : 'transparent',
+                      color: medViewMode === 'timeline' ? '#0284C7' : '#64748B',
+                      border: 'none',
+                      cursor: 'pointer',
+                      boxShadow: medViewMode === 'timeline' ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
+                    }}
+                  >
+                    Timeline Records
+                  </button>
+                </div>
+              )}
+
+              {/* Paper vs Timeline View Mode Toggle for Nurses Notes */}
+              {activeTile === 'nursing_notes' && (
+                <div style={{ display: 'inline-flex', background: '#F1F5F9', padding: '3px', borderRadius: '8px', gap: '3px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setNotesViewMode('paper')}
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: '6px',
+                      fontSize: '11px',
+                      fontWeight: notesViewMode === 'paper' ? 700 : 500,
+                      background: notesViewMode === 'paper' ? '#FFFFFF' : 'transparent',
+                      color: notesViewMode === 'paper' ? '#EA580C' : '#64748B',
+                      border: 'none',
+                      cursor: 'pointer',
+                      boxShadow: notesViewMode === 'paper' ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
+                    }}
+                  >
+                    Paper Notes Sheet
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNotesViewMode('timeline')}
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: '6px',
+                      fontSize: '11px',
+                      fontWeight: notesViewMode === 'timeline' ? 700 : 500,
+                      background: notesViewMode === 'timeline' ? '#FFFFFF' : 'transparent',
+                      color: notesViewMode === 'timeline' ? '#EA580C' : '#64748B',
+                      border: 'none',
+                      cursor: 'pointer',
+                      boxShadow: notesViewMode === 'timeline' ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
+                    }}
+                  >
+                    Timeline Records
+                  </button>
+                </div>
+              )}
+
               {/* Contextual Clinical Write Action Buttons */}
               {(activeTile === 'monitoring' || activeTile === 'vitals' || activeTile === 'intake_output') && canRoleWriteClinical(currentRole, 'vitals') && (
                 <button
@@ -1821,7 +1920,14 @@ export default function PatientFile() {
             </div>
           </div>
 
-          {/* Custom Date Inputs */}
+          {/* Paper View Override for Medications and Nurses Notes */}
+          {activeTile === 'medications' && medViewMode === 'paper' ? (
+            <PaperMedicationSheet patientId={activePatientId} />
+          ) : activeTile === 'nursing_notes' && notesViewMode === 'paper' ? (
+            <PaperNursesNotesSheet patientId={activePatientId} />
+          ) : (
+            <>
+              {/* Custom Date Inputs */}
           {dateFilter === 'custom' && (
             <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '14px', background: '#F8FAFC', padding: '10px 14px', borderRadius: '10px', border: '1px solid #E2E8F0', fontSize: '12px' }}>
               <span>From:</span>
@@ -1929,6 +2035,8 @@ export default function PatientFile() {
               </p>
             </div>
           )}
+        </>
+      )}
 
         </div>
 
