@@ -162,7 +162,7 @@ class MedicineOrderViewSet(viewsets.ModelViewSet):
         order.total_amount = total_amount
         order.save(update_fields=['total_amount'])
 
-        serializer = MedicineOrderDetailSerializer(order)
+        serializer = MedicineOrderDetailSerializer(order, context={'request': request})
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['patch', 'post'], url_path='confirm')
@@ -209,7 +209,7 @@ class MedicineOrderViewSet(viewsets.ModelViewSet):
                 target_params={'order_id': order.id, 'service_type': 'medicine_delivery'}
             )
 
-        return Response(MedicineOrderDetailSerializer(order).data)
+        return Response(MedicineOrderDetailSerializer(order, context={'request': request}).data)
 
     @action(detail=True, methods=['post'], url_path='deliver')
     def deliver(self, request, pk=None):
@@ -253,5 +253,5 @@ class MedicineOrderViewSet(viewsets.ModelViewSet):
 
         return Response({
             'detail': 'Order marked as delivered with GPS verification.',
-            'order': MedicineOrderDetailSerializer(order).data
+            'order': MedicineOrderDetailSerializer(order, context={'request': request}).data
         })

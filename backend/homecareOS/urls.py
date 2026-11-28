@@ -24,6 +24,8 @@ from homecareOS.auth_views import (
 from homecareOS.location_resolver import ResolveLocationLinkView
 from lms.views import CertificateVerifyView
 from lms.media_views import ProtectedLMSMediaView
+from documents.media_views import ProtectedDocumentMediaView, ProtectedIdCardMediaView
+from documents.signed_media import ProtectedClinicalMediaView
 from patients.views import PrescriptionViewSet
 
 urlpatterns = [
@@ -81,8 +83,17 @@ urlpatterns = [
     path('api/schema/', SpectacularAPIView.as_view(),                       name='schema'),
     path('api/docs/',   SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
 
-    # ── Protected LMS Media Route ─────────────────────────────────────────────
+    # ── Protected Media Routes ────────────────────────────────────────────────
     path('media/lms/<path:filepath>', ProtectedLMSMediaView.as_view(), name='protected-lms-media'),
+    path('media/documents/<path:filepath>', ProtectedDocumentMediaView.as_view(), name='protected-document-media'),
+    path('media/staff_id_cards/<path:filepath>', ProtectedIdCardMediaView.as_view(subdir='staff_id_cards'), name='protected-staff-id-card-media'),
+    path('media/id_cards/<path:filepath>', ProtectedIdCardMediaView.as_view(subdir='id_cards'), name='protected-id-card-media'),
+    path('media/prescriptions/<path:filepath>', ProtectedClinicalMediaView.as_view(prefix='prescriptions'), name='protected-prescriptions-media'),
+    path('media/labs/<path:filepath>', ProtectedClinicalMediaView.as_view(prefix='labs'), name='protected-labs-media'),
+    path('media/lab_reports/<path:filepath>', ProtectedClinicalMediaView.as_view(prefix='lab_reports'), name='protected-lab-reports-media'),
+    path('media/report_photos/<path:filepath>', ProtectedClinicalMediaView.as_view(prefix='report_photos'), name='protected-report-photos-media'),
+    path('media/patient_photos/<path:filepath>', ProtectedClinicalMediaView.as_view(prefix='patient_photos'), name='protected-patient-photos-media'),
+    path('media/certifications/<path:filepath>', ProtectedClinicalMediaView.as_view(prefix='certifications'), name='protected-certifications-media'),
 
     # ── Media Serving Fallback (Serves user uploads in production behind ASGI) ──
     re_path(r'^media/(?P<path>.*)$', serve, {'document_root': settings.MEDIA_ROOT}),

@@ -439,9 +439,10 @@ class PatientViewSet(viewsets.ModelViewSet):
         patient = self.get_object()
         check_clinician_patient_access(request.user, patient)
         if request.method == 'GET':
-            data = list(LabResultSerializer(patient.lab_results.all(), many=True).data)
+            data = list(LabResultSerializer(patient.lab_results.all(), many=True, context={'request': request}).data)
             try:
                 from lab.models import LabReport
+                from documents.signed_media import build_signed_media_url
                 reports = LabReport.objects.filter(lab_order__patient=patient).select_related('lab_order')
                 for rep in reports:
                     for test in rep.lab_order.tests.all():
@@ -456,7 +457,7 @@ class PatientViewSet(viewsets.ModelViewSet):
                             'is_abnormal': rep.flagged_abnormal,
                             'collected_at': rep.lab_order.collected_at.isoformat() if rep.lab_order.collected_at else rep.uploaded_at.isoformat(),
                             'reported_at': rep.uploaded_at.isoformat(),
-                            'document': rep.result_file.url if rep.result_file else None,
+                            'document': build_signed_media_url(rep.result_file, request=request) if rep.result_file else None,
                         })
             except Exception:
                 pass
@@ -486,7 +487,7 @@ class PatientViewSet(viewsets.ModelViewSet):
             reported_at=now,
         )
         log_chart_audit(request, patient, 'Write Clinical Entry', 'Lab Orders', record_id=order.id)
-        return Response(LabResultSerializer(result).data, status=status.HTTP_201_CREATED)
+        return Response(LabResultSerializer(result, context={'request': request}).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['get', 'post'], url_path='doctor-notes')
     def doctor_notes(self, request, pk=None):
@@ -1241,7 +1242,7 @@ class PatientViewSet(viewsets.ModelViewSet):
             ).exists()
 
             result.append({
-                **PrescriptionSerializer(rx).data,
+                **PrescriptionSerializer(rx, context={'request': request}).data,
                 'administered': administered_today,
                 'day_number': today_day_number,
             })

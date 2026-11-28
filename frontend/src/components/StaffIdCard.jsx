@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Heart, Printer, ShieldCheck, Phone, Award, CheckCircle, FileText,
   CreditCard, ZoomIn, X, Camera, Image, ExternalLink
 } from 'lucide-react';
 import useStore from '../store/useStore';
+import apiFetch from '../services/api';
 import UniversalPrintButton from './UniversalPrintButton';
 import FullHdImageViewerModal from './FullHdImageViewerModal';
 import QRCodeDisplay from './QRCodeDisplay';
@@ -15,6 +16,36 @@ export default function StaffIdCard({ staffMember }) {
   const [cardMode, setCardMode] = useState('badge'); // 'badge' | 'cnic'
   const [side, setSide] = useState('front'); // 'front' | 'back'
   const [hdViewer, setHdViewer] = useState({ open: false, url: '', title: '', badge: '' });
+  const [cnicUrls, setCnicUrls] = useState({ front: '', back: '' });
+
+  useEffect(() => {
+    let active = true;
+    const objectUrls = [];
+    async function resolveProtectedUrl(rawUrl, key) {
+      if (!rawUrl || String(rawUrl).startsWith('data:') || String(rawUrl).startsWith('blob:')) {
+        if (active) setCnicUrls((prev) => ({ ...prev, [key]: rawUrl || '' }));
+        return;
+      }
+      try {
+        const res = await apiFetch(rawUrl);
+        if (res.ok) {
+          const blob = await res.blob();
+          const objUrl = URL.createObjectURL(blob);
+          objectUrls.push(objUrl);
+          if (active) setCnicUrls((prev) => ({ ...prev, [key]: objUrl }));
+        }
+      } catch {
+        // Fallback: leave empty when forbidden or unavailable
+      }
+    }
+    setCnicUrls({ front: '', back: '' });
+    if (targetStaff?.id_card_front) resolveProtectedUrl(targetStaff.id_card_front, 'front');
+    if (targetStaff?.id_card_back) resolveProtectedUrl(targetStaff.id_card_back, 'back');
+    return () => {
+      active = false;
+      objectUrls.forEach((u) => URL.revokeObjectURL(u));
+    };
+  }, [targetStaff?.id, targetStaff?.id_card_front, targetStaff?.id_card_back]);
 
   if (!targetStaff) {
     return (
@@ -387,12 +418,12 @@ export default function StaffIdCard({ staffMember }) {
                     position: 'relative',
                     cursor: targetStaff.id_card_front ? 'pointer' : 'default',
                   }}
-                  onClick={() => targetStaff.id_card_front && setHdViewer({ open: true, url: targetStaff.id_card_front, title: `${targetStaff.full_name} — ID Card Front`, badge: 'Full HD 1080p' })}
+                  onClick={() => (cnicUrls.front || targetStaff.id_card_front) && setHdViewer({ open: true, url: cnicUrls.front || targetStaff.id_card_front, title: `${targetStaff.full_name} — ID Card Front`, badge: 'Full HD 1080p' })}
                 >
-                  {targetStaff.id_card_front ? (
+                  {(cnicUrls.front || targetStaff.id_card_front) ? (
                     <>
                       <img
-                        src={targetStaff.id_card_front}
+                        src={cnicUrls.front || ''}
                         alt="ID Card Front"
                         style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                       />
@@ -442,12 +473,12 @@ export default function StaffIdCard({ staffMember }) {
                     position: 'relative',
                     cursor: targetStaff.id_card_back ? 'pointer' : 'default',
                   }}
-                  onClick={() => targetStaff.id_card_back && setHdViewer({ open: true, url: targetStaff.id_card_back, title: `${targetStaff.full_name} — ID Card Back`, badge: 'Full HD 1080p' })}
+                  onClick={() => (cnicUrls.back || targetStaff.id_card_back) && setHdViewer({ open: true, url: cnicUrls.back || targetStaff.id_card_back, title: `${targetStaff.full_name} — ID Card Back`, badge: 'Full HD 1080p' })}
                 >
-                  {targetStaff.id_card_back ? (
+                  {(cnicUrls.back || targetStaff.id_card_back) ? (
                     <>
                       <img
-                        src={targetStaff.id_card_back}
+                        src={cnicUrls.back || ''}
                         alt="ID Card Back"
                         style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                       />

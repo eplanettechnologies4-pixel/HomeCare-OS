@@ -4,6 +4,7 @@ import useStore from '../store/useStore';
 import { ANNOUNCEMENTS, SALARY_DATA } from '../data/mockData';
 import { format, formatDistanceToNow } from 'date-fns';
 import { apiFetch, getAuthToken, API_BASE } from '../services/api';
+import { requestSignedDocumentDownloadUrl } from '../utils/documentHelpers';
 import ManagerStaffInbox from '../components/ManagerStaffInbox';
 
 const PRIORITY_BADGE = { high: 'badge-red', normal: 'badge-teal' };
@@ -14,14 +15,12 @@ const TRAINING = [
   { name: 'Patient Communication Skills',          assigned: 6, completed: 3, due: '2026-09-30', mandatory: false },
 ];
 
-const ALLOWED_EXTENSIONS = ['pdf', 'jpg', 'jpeg', 'png', 'docx', 'mp4'];
+const ALLOWED_EXTENSIONS = ['pdf', 'jpg', 'jpeg', 'png'];
 const MAX_SIZES_MB = {
-  pdf: 50,
-  docx: 50,
-  jpg: 20,
-  jpeg: 20,
-  png: 20,
-  mp4: 200,
+  pdf: 10,
+  jpg: 10,
+  jpeg: 10,
+  png: 10,
 };
 
 export default function AdminHR() {
@@ -180,35 +179,37 @@ export default function AdminHR() {
 
   const handleDownload = async (doc) => {
     try {
-      const res = await apiFetch(`/documents/${doc.id}/download/`);
-      if (res.ok) {
-        const blob = await res.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = doc.title || 'document';
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
-      } else {
-        alert('Failed to download document. Please check permissions.');
-      }
+      const signedUrl = await requestSignedDocumentDownloadUrl(apiFetch, doc.id);
+      const a = document.createElement('a');
+      a.href = signedUrl;
+      a.download = doc.title || 'document';
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
     } catch (e) {
-      alert('Error downloading document.');
+      alert(e.message || 'Failed to download document. Please check permissions.');
     }
   };
 
   const handleDeleteDoc = async (docId) => {
-    if (!window.confirm('Are you sure you want to delete this document?')) return;
+    const reason = window.prompt('Enter reason to archive this document:');
+    if (!reason || !reason.trim()) return;
     try {
-      const res = await apiFetch(`/documents/${docId}/`, { method: 'DELETE' });
-      if (res.ok || res.status === 204) {
-        showToast('Document deleted.');
+      const res = await apiFetch(`/documents/${docId}/archive/`, {
+        method: 'POST',
+        body: JSON.stringify({ reason: reason.trim() }),
+      });
+      if (res.ok) {
+        showToast('Document archived.');
         fetchDocuments();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(err.detail || 'Failed to archive document.');
       }
     } catch {
-      alert('Failed to delete document.');
+      alert('Failed to archive document.');
     }
   };
 

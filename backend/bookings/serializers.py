@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from .models import Booking, ServiceCatalogItem
 from patients.serializers import PatientSummarySerializer
+from documents.signed_media import SignedMediaFileField
 from staff.serializers import StaffSummarySerializer
 
 CATEGORY_DISPLAY_MAP = {
@@ -121,6 +122,7 @@ class BookingDetailSerializer(serializers.ModelSerializer):
     backup_staff = StaffSummarySerializer(read_only=True)
     supervisor = StaffSummarySerializer(read_only=True)
     buddy_staff = StaffSummarySerializer(read_only=True)
+    prescription_attachment = SignedMediaFileField(required=False, allow_null=True)
     patient_id = serializers.PrimaryKeyRelatedField(
         queryset=__import__('patients').models.Patient.objects.all(),
         source='patient', write_only=True

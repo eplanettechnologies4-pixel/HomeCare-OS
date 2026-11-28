@@ -2,6 +2,7 @@ from rest_framework import serializers
 from .models import LabTest, LabOrder, LabReport
 from patients.serializers import PatientSummarySerializer
 from staff.serializers import StaffSummarySerializer
+from documents.signed_media import SignedMediaFileField
 
 
 class LabTestSerializer(serializers.ModelSerializer):
@@ -17,6 +18,7 @@ class LabTestSerializer(serializers.ModelSerializer):
 class LabReportSerializer(serializers.ModelSerializer):
     uploaded_by_name = serializers.CharField(source='uploaded_by.get_full_name', read_only=True)
     entered_in_error_by_name = serializers.CharField(source='entered_in_error_by.get_full_name', read_only=True, default='')
+    result_file = SignedMediaFileField(required=False, allow_null=True)
 
     class Meta:
         model = LabReport

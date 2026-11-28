@@ -86,14 +86,14 @@ class FamilyPortalViewSet(viewsets.ViewSet):
         patient, err = self._get_patient(request)
         if err:
             return err
-        return Response(PatientDetailSerializer(patient).data)
+        return Response(PatientDetailSerializer(patient, context={'request': request}).data)
 
     @action(detail=False, methods=['get'])
     def patient_profile(self, request):
         patient, err = self._get_patient(request)
         if err:
             return err
-        return Response(PatientDetailSerializer(patient).data)
+        return Response(PatientDetailSerializer(patient, context={'request': request}).data)
 
     @action(detail=False, methods=['get'])
     def visits(self, request):
@@ -101,7 +101,7 @@ class FamilyPortalViewSet(viewsets.ViewSet):
         if err:
             return err
         qs = Booking.objects.filter(patient=patient).order_by('-scheduled_time')
-        return Response(BookingListSerializer(qs, many=True).data)
+        return Response(BookingListSerializer(qs, many=True, context={'request': request}).data)
 
     @action(detail=False, methods=['get'], url_path='vitals')
     def vitals(self, request):

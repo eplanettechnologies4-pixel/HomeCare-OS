@@ -7,6 +7,7 @@ from django.utils import timezone
 from rest_framework import serializers
 from rest_framework.exceptions import PermissionDenied
 from homecareOS.permissions import get_user_role
+from documents.signed_media import SignedMediaFileField
 import datetime
 import re
 import secrets
@@ -223,7 +224,7 @@ class StaffDetailSerializer(serializers.ModelSerializer):
         return ret
 
     def get_certifications(self, obj):
-        return CertificationSerializer(obj.certifications.all(), many=True).data
+        return CertificationSerializer(obj.certifications.all(), many=True, context=self.context).data
 
     def get_recent_feedback(self, obj):
         return FeedbackRatingSerializer(obj.feedback_ratings.all()[:10], many=True).data
@@ -608,6 +609,8 @@ class LeaveRequestSerializer(serializers.ModelSerializer):
 
 
 class CertificationSerializer(serializers.ModelSerializer):
+    document = SignedMediaFileField(required=False, allow_null=True)
+
     class Meta:
         model = Certification
         fields = '__all__'

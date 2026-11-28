@@ -458,6 +458,8 @@ PIN_VALID_BEFORE_MINUTES = 30    # PROVISIONAL - travel time before duty start
 PATIENT_FILE_GRACE_MINUTES = 30  # PROVISIONAL - grace period after duty end
 PIN_MAX_ATTEMPTS = 5             # PROVISIONAL - wrong attempts before lockout
 PIN_LOCKOUT_MINUTES = 15         # PROVISIONAL - lockout duration in minutes
+DOCUMENT_LEGACY_QUERY_TOKEN = config('DOCUMENT_LEGACY_QUERY_TOKEN', default=True, cast=bool)
+MEDIA_SIGNED_URL_SECONDS = config('MEDIA_SIGNED_URL_SECONDS', default=600, cast=int)  # PROVISIONAL
 
 # ── Staff Lifecycle Configuration ───────────────────────────────────────────
 # Thresholds and defaults (PROVISIONAL - needs HR sign-off)

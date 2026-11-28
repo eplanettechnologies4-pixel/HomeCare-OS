@@ -95,6 +95,7 @@ CLINICAL_WRITE_ROLES = {
     'intake_output': ('nurse',),       # Nurse only (doctor may read)
     'nurse_notes': ('nurse',),         # Nurse only
     'mar_administer': ('nurse',),      # Nurse only
+    'patient_documents': ('doctor', 'nurse', 'physiotherapist', 'speech_therapist', 'psychotherapist', 'dietician'),
     # Management actions (unchanged):
     'active_complaint': ('doctor', 'care_manager', 'admin', 'super_admin'),
     'history_care_plan': ('doctor', 'care_manager', 'admin', 'super_admin'),

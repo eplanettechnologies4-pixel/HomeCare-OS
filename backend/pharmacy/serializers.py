@@ -2,6 +2,7 @@ from rest_framework import serializers
 from .models import Medicine, MedicineOrder, MedicineOrderItem
 from patients.serializers import PatientSummarySerializer
 from staff.serializers import StaffSummarySerializer
+from documents.signed_media import SignedMediaFileField
 
 
 class MedicineSerializer(serializers.ModelSerializer):
@@ -46,6 +47,7 @@ class MedicineOrderListSerializer(serializers.ModelSerializer):
     payment_status_display = serializers.CharField(source='get_payment_status_display', read_only=True)
     items_count = serializers.IntegerField(source='items.count', read_only=True)
     requires_prescription = serializers.SerializerMethodField()
+    prescription_file = SignedMediaFileField(required=False, allow_null=True)
 
     class Meta:
         model = MedicineOrder
@@ -70,6 +72,7 @@ class MedicineOrderDetailSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     payment_status_display = serializers.CharField(source='get_payment_status_display', read_only=True)
     has_rx_items = serializers.SerializerMethodField()
+    prescription_file = SignedMediaFileField(required=False, allow_null=True)
 
     class Meta:
         model = MedicineOrder

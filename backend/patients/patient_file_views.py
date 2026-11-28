@@ -30,6 +30,7 @@ from .models import (
 from .serializers import (
     PatientActiveComplaintSerializer, ScheduledItemSerializer,
 )
+from documents.signed_media import build_signed_media_url
 from .scoping import (
     check_clinician_patient_access,
     is_treating_doctor_for_patient,
@@ -371,7 +372,7 @@ class PatientFileView(APIView):
                 'allergy_status_display': patient.get_allergy_status_display() if hasattr(patient, 'get_allergy_status_display') else 'Allergies not recorded',
                 'allergies': patient.allergies or '',
                 'blood_type': patient.blood_type or '-',
-                'photo': f"/api/patients/{patient.id}/photo/" if patient.photo else None,
+                'photo': build_signed_media_url(patient.photo, request=request) if patient.photo else None,
                 'is_active': patient.is_active,
             },
             'guardian': guardian_data,
@@ -848,7 +849,7 @@ class PatientRecordsTimelineView(APIView):
                         'route': p.route,
                         'duration_days': p.duration_days,
                         'notes': p.notes,
-                        'document_url': p.document.url if p.document else None,
+                        'document_url': build_signed_media_url(p.document, request=request) if p.document else None,
                         'entry_mode': p.entry_mode,
                         'ordering_doctor_name': p.ordering_doctor_name,
                         'order_source': p.order_source,
@@ -1120,7 +1121,7 @@ class PatientRecordsTimelineView(APIView):
                         'unit': lr.unit,
                         'reference_range': lr.reference_range,
                         'is_abnormal': lr.is_abnormal,
-                        'document_url': lr.document.url if lr.document else None,
+                        'document_url': build_signed_media_url(lr.document, request=request) if lr.document else None,
                     }
                 })
 
@@ -1146,7 +1147,7 @@ class PatientRecordsTimelineView(APIView):
                     'details': {
                         'result_data': rep.result_data,
                         'clinical_remarks': rep.clinical_remarks,
-                        'result_file_url': rep.result_file.url if rep.result_file else None,
+                        'result_file_url': build_signed_media_url(rep.result_file, request=request) if rep.result_file else None,
                     }
                 })
 

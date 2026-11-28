@@ -221,7 +221,7 @@ class LabOrderViewSet(viewsets.ModelViewSet):
                 target_params={'order_id': order.id, 'service_type': 'lab_collection'}
             )
 
-        return Response(LabOrderDetailSerializer(order).data)
+        return Response(LabOrderDetailSerializer(order, context={'request': request}).data)
 
     @action(detail=True, methods=['post'], url_path='collect-sample')
     def collect_sample(self, request, pk=None):
@@ -265,7 +265,7 @@ class LabOrderViewSet(viewsets.ModelViewSet):
 
         return Response({
             'detail': 'Sample marked as collected with GPS proof and verified server timestamp.',
-            'order': LabOrderDetailSerializer(order).data
+            'order': LabOrderDetailSerializer(order, context={'request': request}).data
         })
 
     @action(detail=True, methods=['post'], url_path='upload-report')
@@ -347,8 +347,8 @@ class LabOrderViewSet(viewsets.ModelViewSet):
 
         return Response({
             'detail': 'Lab report uploaded successfully and notifications dispatched.',
-            'report': LabReportSerializer(report).data,
-            'order': LabOrderDetailSerializer(order).data
+            'report': LabReportSerializer(report, context={'request': request}).data,
+            'order': LabOrderDetailSerializer(order, context={'request': request}).data
         }, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['get'], url_path='report')
@@ -362,7 +362,7 @@ class LabOrderViewSet(viewsets.ModelViewSet):
         if not report:
             return Response({'error': 'Report not yet available for this order.'}, status=status.HTTP_404_NOT_FOUND)
 
-        return Response(LabReportSerializer(report).data)
+        return Response(LabReportSerializer(report, context={'request': request}).data)
 
     def destroy(self, request, *args, **kwargs):
         order = self.get_object()

@@ -1,17 +1,10 @@
 import os
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
+from .access import validate_uploaded_document_file
 from .models import Document
 
-ALLOWED_EXTENSIONS = {'pdf', 'jpg', 'jpeg', 'png', 'docx', 'mp4'}
-
-MAX_SIZES_BYTES = {
-    'pdf': 50 * 1024 * 1024,      # 50 MB
-    'docx': 50 * 1024 * 1024,     # 50 MB
-    'jpg': 25 * 1024 * 1024,      # 25 MB
-    'jpeg': 25 * 1024 * 1024,     # 25 MB
-    'png': 25 * 1024 * 1024,      # 25 MB
-    'mp4': 2048 * 1024 * 1024,    # 2 GB
-}
+ALLOWED_EXTENSIONS = {'pdf', 'jpg', 'jpeg', 'png'}
 
 
 class DocumentSerializer(serializers.ModelSerializer):
@@ -19,6 +12,7 @@ class DocumentSerializer(serializers.ModelSerializer):
     staff_name = serializers.CharField(source='staff.full_name', read_only=True)
     patient_name = serializers.CharField(source='patient.full_name', read_only=True)
     course_title = serializers.CharField(source='course.title', read_only=True)
+    archived_by_name = serializers.CharField(source='archived_by.get_full_name', read_only=True)
     file_size_display = serializers.ReadOnlyField()
     download_url = serializers.SerializerMethodField()
 
@@ -29,9 +23,13 @@ class DocumentSerializer(serializers.ModelSerializer):
             'category', 'owner_type', 'staff', 'patient', 'course',
             'staff_name', 'patient_name', 'course_title',
             'uploaded_by', 'uploaded_by_name', 'uploaded_at', 'expiry_date',
-            'download_url'
+            'is_archived', 'archived_by', 'archived_by_name', 'archived_at', 'archive_reason',
+            'download_url',
         ]
-        read_only_fields = ['id', 'file_type', 'file_size', 'uploaded_at', 'uploaded_by']
+        read_only_fields = [
+            'id', 'file_type', 'file_size', 'uploaded_at', 'uploaded_by',
+            'is_archived', 'archived_by', 'archived_at', 'archive_reason',
+        ]
 
     def get_download_url(self, obj):
         request = self.context.get('request')
@@ -61,23 +59,21 @@ class DocumentSerializer(serializers.ModelSerializer):
     def validate_file(self, value):
         if not value:
             raise serializers.ValidationError("Please select a file to upload.")
-
-        ext = os.path.splitext(value.name)[1].lower().lstrip('.')
-        if ext not in ALLOWED_EXTENSIONS:
-            allowed = ", ".join(sorted(list(ALLOWED_EXTENSIONS)))
-            raise serializers.ValidationError(
-                f"Unsupported file format '.{ext}'. Allowed types are: {allowed}."
-            )
-
-        max_size = MAX_SIZES_BYTES.get(ext, 50 * 1024 * 1024)
-        if value.size > max_size:
-            max_mb = max_size // (1024 * 1024)
-            actual_mb = value.size / (1024 * 1024)
-            raise serializers.ValidationError(
-                f"File size exceeds the limit for {ext.upper()} files ({actual_mb:.1f} MB uploaded, maximum allowed is {max_mb} MB)."
-            )
-
+        try:
+            validate_uploaded_document_file(value)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(exc.messages if hasattr(exc, 'messages') else str(exc))
         return value
+
+    def validate(self, attrs):
+        owner_type = attrs.get('owner_type', getattr(self.instance, 'owner_type', 'general'))
+        if owner_type == 'patient' and not attrs.get('patient', getattr(self.instance, 'patient', None)):
+            raise serializers.ValidationError({'patient': 'Patient is required when owner_type is patient.'})
+        if owner_type == 'staff' and not attrs.get('staff', getattr(self.instance, 'staff', None)):
+            raise serializers.ValidationError({'staff': 'Staff member is required when owner_type is staff.'})
+        if owner_type == 'course' and not attrs.get('course', getattr(self.instance, 'course', None)):
+            raise serializers.ValidationError({'course': 'Course is required when owner_type is course.'})
+        return attrs
 
     def create(self, validated_data):
         file_obj = validated_data.get('file')

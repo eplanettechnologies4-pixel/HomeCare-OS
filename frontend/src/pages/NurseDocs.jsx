@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { FileText, Download, ShieldCheck, CheckCircle2, AlertCircle } from 'lucide-react';
 import apiFetch from '../services/api';
 import useStore from '../store/useStore';
+import { requestSignedDocumentDownloadUrl } from '../utils/documentHelpers';
 
 export default function NurseDocs() {
   const [docs, setDocs] = useState([]);
@@ -113,10 +114,21 @@ export default function NurseDocs() {
                     </div>
                   </div>
                 </div>
-                {doc.file && (
-                  <a href={doc.file} target="_blank" rel="noopener noreferrer" className="btn btn-outline btn-sm">
+                {(doc.file || doc.download_url) && (
+                  <button
+                    type="button"
+                    className="btn btn-outline btn-sm"
+                    onClick={async () => {
+                      try {
+                        const signedUrl = await requestSignedDocumentDownloadUrl(apiFetch, doc.id);
+                        window.open(signedUrl, '_blank', 'noopener,noreferrer');
+                      } catch (err) {
+                        alert(err.message || 'Failed to download document.');
+                      }
+                    }}
+                  >
                     <Download size={13} /> Download
-                  </a>
+                  </button>
                 )}
               </div>
             ))}

@@ -297,7 +297,7 @@ class BookingViewSet(viewsets.ModelViewSet):
                     actor=request.user,
                     reason='Booking cancelled',
                 )
-        return Response(BookingDetailSerializer(booking).data)
+        return Response(BookingDetailSerializer(booking, context={'request': request}).data)
 
     @action(detail=False, methods=['get'])
     def today(self, request):
@@ -317,7 +317,7 @@ class BookingViewSet(viewsets.ModelViewSet):
             target_staff_id = request.user.staffmember.id
             qs = qs.filter(assigned_staff_id=target_staff_id)
 
-        items = list(BookingListSerializer(qs, many=True).data)
+        items = list(BookingListSerializer(qs, many=True, context={'request': request}).data)
 
         # Include Short Services (Medicine Delivery, Equipment Rental Delivery/Pickup, Lab Sample Collection)
         from pharmacy.models import MedicineOrder
@@ -425,7 +425,7 @@ class BookingViewSet(viewsets.ModelViewSet):
     def active(self, request):
         """Return bookings currently in progress."""
         qs = self.get_queryset().filter(status__in=['en_route', 'in_progress'])
-        serializer = BookingListSerializer(qs, many=True)
+        serializer = BookingListSerializer(qs, many=True, context={'request': request})
         return Response(serializer.data)
 
     @action(detail=True, methods=['post'])
@@ -492,7 +492,7 @@ class BookingViewSet(viewsets.ModelViewSet):
                 return Response(detail, status=status.HTTP_400_BAD_REQUEST)
 
             booking.refresh_from_db()
-            return Response(BookingDetailSerializer(booking).data)
+            return Response(BookingDetailSerializer(booking, context={'request': request}).data)
 
         booking.assigned_staff = staff
         booking.status = request.data.get('status', 'assigned')
@@ -595,7 +595,7 @@ class BookingViewSet(viewsets.ModelViewSet):
                 target_params={'booking_id': booking.pk},
             )
 
-        return Response(BookingDetailSerializer(booking).data)
+        return Response(BookingDetailSerializer(booking, context={'request': request}).data)
 
     @action(detail=True, methods=['post'])
     def generate_recurring(self, request, pk=None):
@@ -622,7 +622,7 @@ class BookingViewSet(viewsets.ModelViewSet):
             'success': True,
             'parent_booking_id': booking.pk,
             'generated_count': len(created),
-            'bookings': BookingListSerializer(created, many=True).data
+            'bookings': BookingListSerializer(created, many=True, context={'request': request}).data
         }, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['post'])

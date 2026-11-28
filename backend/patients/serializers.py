@@ -1,5 +1,6 @@
 from django.utils import timezone
 from rest_framework import serializers
+from documents.signed_media import SignedMediaFileField, build_signed_media_url
 from .models import (
     Patient, Prescription, VitalSign, NurseNote, LabResult,
     DailyReport, ReportPhoto, MARAdministration,
@@ -113,9 +114,9 @@ class PatientListSerializer(serializers.ModelSerializer):
         return not unlocked
 
     def get_photo(self, obj):
-        if obj.photo:
-            return f"/api/patients/{obj.id}/photo/"
-        return None
+        if not obj.photo or self.get_is_file_locked(obj):
+            return None
+        return build_signed_media_url(obj.photo, request=self.context.get('request'))
 
     def get_has_portal_account(self, obj):
         return obj.portal_user_id is not None
@@ -238,12 +239,12 @@ class PatientDetailSerializer(serializers.ModelSerializer):
         return super().update(instance, validated_data)
 
     def get_photo(self, obj):
-        if obj.photo:
-            return f"/api/patients/{obj.id}/photo/"
-        return None
+        if not obj.photo:
+            return None
+        return build_signed_media_url(obj.photo, request=self.context.get('request'))
 
     def get_active_prescriptions(self, obj):
-        return PrescriptionSerializer(obj.prescriptions.all()[:5], many=True).data
+        return PrescriptionSerializer(obj.prescriptions.all()[:5], many=True, context=self.context).data
 
     def get_recent_vitals(self, obj):
         return VitalSignSerializer(obj.vitals.all()[:5], many=True).data
@@ -319,7 +320,8 @@ class PrescriptionSerializer(serializers.ModelSerializer):
     start_date = serializers.DateField(source='date', required=False)
     days_prescribed = serializers.IntegerField(source='duration_days', required=False, allow_null=True)
     duration = serializers.IntegerField(source='duration_days', required=False, allow_null=True, write_only=True)
-    prescription_file = serializers.FileField(source='document', required=False, allow_null=True)
+    document = SignedMediaFileField(required=False, allow_null=True)
+    prescription_file = SignedMediaFileField(source='document', required=False, allow_null=True)
 
     # Extra metadata
     uploaded_by_name = serializers.CharField(source='uploaded_by.full_name', read_only=True)
@@ -401,10 +403,7 @@ class PrescriptionSerializer(serializers.ModelSerializer):
 
     def get_file_url(self, obj):
         if obj.document:
-            request = self.context.get('request')
-            if request:
-                return request.build_absolute_uri(obj.document.url)
-            return obj.document.url
+            return build_signed_media_url(obj.document, request=self.context.get('request'))
         return None
 
     def get_is_active(self, obj):
@@ -483,6 +482,7 @@ class NurseNoteSerializer(serializers.ModelSerializer):
 
 class LabResultSerializer(serializers.ModelSerializer):
     entered_in_error_by_name = serializers.CharField(source='entered_in_error_by.get_full_name', read_only=True, default='')
+    document = SignedMediaFileField(required=False, allow_null=True)
 
     class Meta:
         model = LabResult
@@ -493,6 +493,8 @@ class LabResultSerializer(serializers.ModelSerializer):
 # ── Mobile serializers ────────────────────────────────────────────────────────
 
 class ReportPhotoSerializer(serializers.ModelSerializer):
+    image = SignedMediaFileField()
+
     class Meta:
         model = ReportPhoto
         fields = ['id', 'image', 'uploaded_at']
